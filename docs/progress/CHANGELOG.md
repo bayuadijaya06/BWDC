@@ -1,0 +1,842 @@
+# CHANGELOG — Perubahan File
+
+**Sifat:** append-only. Format mengikuti semangat Keep a Changelog: tambahan per tanggal, kategori `Added`, `Changed`, `Fixed`, `Removed`.
+**Aturan:** setiap file yang dibuat, diubah, atau dihapus WAJIB tercatat di sini pada tanggal kejadian, dengan alasan singkat dan ID prompt penyebabnya.
+**Protokol:** `docs/design/02-AGENT-PROGRESS-PROTOCOL.md`
+
+---
+
+## 2026-09-19 (sesi P-025)
+
+Mengerjakan **`T-038`**: modul **Task** — lima endpoint `42-API.md` §6 dengan **cakupan baris kedua**
+`44-SECURITY.md` §3.1.3 (baca mengikuti keanggotaan project untuk Contributor/Viewer, seluruh organisasi
+untuk Manager/Administrator; tulis hanya task milik Contributor), penanda overdue tetap turunan
+(ADR-0012) tetapi kini juga **penyaring `?overdue=` tri-state** di `WHERE`, dan `?priority=` mengikuti
+`50-FSD.md` §6.1. Kontrak §6 ditulis ulang dari tiga baris menjadi kontrak penuh; TRACEABILITY
+FR-TASK-01..07 diisi. Dua temuan baru dicatat (**C-045**, **C-046**) bersama sebelas keputusan modul di
+**Q-017**. Bukti: `make test` delapan paket `ok` (3 + 12 + 10 test task, 0 FAIL/SKIP) dan dua rangkaian
+probe HTTP pada server nyata (201/403/401/404/409/422 + tujuh entri audit task).
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/internal/model/task.go` | Kosakata tertutup status/prioritas, normalisasi nilai klien, `CanTransitionTaskStatus` (tiga aksi `50-FSD.md` §6.3), dan `IsTaskOverdue` sebagai **satu tempat** rumus FR-TASK-06 | P-025 |
+| `backend/internal/model/task_test.go` | Tiga test: himpunan tertutup, transisi status, overdue turunan (`due_date` kosong/`completed` tidak pernah overdue) | P-025 |
+| `backend/internal/repository/task_repository.go` | `TaskScope` + `taskReadPredicate`/`taskWritePredicate` (**parameterized**, perbedaan role dikirim sebagai parameter), daftar ber-penyaring, `FindByIDForUpdate` untuk cakupan tulis, `DocumentInProject` (FR-TASK-05) | P-025 |
+| `backend/internal/service/task_service.go` | Aturan domain task + audit dalam transaksi pemanggil (ADR-0011); penolakan pindah project dan transisi status terlarang | P-025 |
+| `backend/internal/service/task_service_test.go` | Dua belas test: cakupan baca per role (FR-TASK-07), cakupan tulis contributor, field+audit, transisi, penjaga `PATCH`, penyaring daftar, dan `TestTaskListOverdueFilterMatchesDerivedFlag` yang mengikat penyaring SQL dengan penanda kode | P-025 |
+| `backend/internal/dto/task_dto.go` | Bentuk request/response task + kolom turunan (`project_code`, `assignee_username`, `document_number`, `is_overdue`, `project_archived`) | P-025 |
+| `backend/internal/handler/task_handler.go` | Lima handler, validasi `422` ber-`details.field`, pemetaan error domain ke `404`/`403`/`409`/`422`, dan pemeriksaan `task:assign` **hanya bila** body memuat `assignee_id` | P-025 |
+| `backend/internal/handler/task_handler_test.go` | Sepuluh test HTTP dengan token hasil login nyata | P-025 |
+| `docs/progress/prompts/P-025-2026-09-19-modul-task-dan-cakupan-baris-kedua.md` | Log sesi: interpretasi, aksi, bukti, dan sisa pekerjaan | P-025 |
+
+### Changed
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/internal/service/scope.go` | Menambah `taskScope`: modul pertama dengan cakupan **baca ≠ tulis** (`systemScope` tidak cukup), tetap satu tempat agar aturan role tidak disalin per modul | P-025 |
+| `backend/internal/handler/router.go`, `backend/cmd/server/main.go` | Group `/tasks` dengan `RequirePermission` dari matriks `44-SECURITY.md` §3.1.2 + wiring service/handler | P-025 |
+| `backend/internal/handler/main_test.go` | Fixture test ikut membersihkan `tasks` dan `project_members` supaya suite tetap terisolasi (C-036/C-038) | P-025 |
+| `backend/internal/handler/project_handler.go`, `backend/internal/handler/document_handler.go` | Helper `actorFrom` dipakai bersama oleh tiga handler (tanpa perubahan perilaku) | P-025 |
+| `docs/design/42-API.md` §6 | Dari tiga baris menjadi kontrak penuh: izin per endpoint, aturan tiap field, tabel transisi status → endpoint+izin, penyaring (`?priority=`, `?overdue=` tri-state), kode error, dan contoh response dengan kolom turunan | P-025 |
+| `docs/design/40-TSD.md` §2.3/§2.4/§2.5/§6 | Catatan model task (kosakata + turunan + transisi), `TaskService`, `TaskScope`/`TaskRepository`, route `tasks`, dan aturan 3 (izin bergantung isi body) kini menyebut **dua** route: aksi workflow dan `PATCH /tasks/:id` | P-025 |
+| `docs/design/44-SECURITY.md` §3.1.3 | Rujukan implementasi **ketiga**: dua predikat task dan catatan bahwa penyaring daftar tidak menambah izin | P-025 |
+| `docs/design/50-FSD.md` §6.1/§6.3 | Penyaring dan sub-halaman dipetakan ke parameter API yang benar-benar ada; rentang tanggal dinyatakan **belum** ada (Q-017); tiga aksi dipetakan ke endpoint/izin yang berbeda | P-025 |
+| `docs/design/70-TESTING.md` §3.10 (baru) + §4.1 | Inventaris test modul task, bukti server nyata, dan aturan hasil temuan: **bangun ulang binari sebelum membuktikan perubahan kode** | P-025 |
+| `docs/progress/TRACEABILITY.md` | Tujuh baris `FR-TASK-01..07` diisi (dua di antaranya sebelumnya `TODO`), `FR-AUDIT-01` diperbarui untuk empat aksi task, catatan sesi ditambahkan | P-025 |
+| `docs/progress/audits/AUDIT-001-...md`, `docs/progress/audits/README.md` | **C-045** (pesan `422` menyesatkan untuk UUID tidak sah di body) dan **C-046** (penyaring "Due date range" tanpa kontrak) ditambahkan sebagai `OPEN`; ringkasan menjadi **46 temuan / 35 FIXED / 11 OPEN** | P-025 |
+| `docs/progress/OPEN-QUESTIONS.md` | **Q-017**: sembilan kontrak modul task yang diputuskan agen + dua keputusan yang menunggu user (rentang tanggal, atribusi error body) dengan rekomendasi | P-025 |
+| `docs/progress/TASKS.md` | `T-038` → DONE dengan bukti; `T-017` 9 → **11** temuan OPEN; `T-024` 35 → **40/51** endpoint beranotasi | P-025 |
+| `docs/progress/STATE.md`, `CONTINUE.md`, `AGENTS.md` | Ledger diselaraskan: 20 endpoint hidup, aturan modul task yang mengikat, hitungan audit, next action (Comment), dan catatan operasional cara membuktikan di server dev | P-025 |
+| `.freebuff/run.md` | Cara menjalankan server untuk bukti (binari, port 8081, cara melepas) | P-025 |
+
+---
+
+## 2026-09-19 (sesi P-024)
+
+Mengerjakan **`T-036`** dengan izin user: menyiapkan **database test terpisah `bwdcs_test`** dan mengarahkan
+`TEST_DATABASE_URL` ke sana, sehingga suite tidak lagi bergantung pada keadaan database dev yang kosong —
+menutup temuan **C-038**. Sekalian menutup dua temuan baru yang muncul saat kerja: **C-043**
+(`60-DEPLOYMENT.md` §3.1 menyalin `Makefile` yang sudah menyimpang) dan **C-044** (hitungan audit menulis
+31 FIXED padahal tabelnya memuat 32). Bukti utama: dengan project nyata hidup di database dev, `make test`
+hijau dua kali berturut-turut sementara perintah lama yang menunjuk database dev gagal `SQLSTATE 23503`.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/Makefile` target `test-dsn` | Melihat database mana yang akan dipakai test **tanpa** mencetak sandi (penting agar verifikasi tidak membocorkan kredensial ke log) | P-024 |
+| Database `bwdcs_test` (bukan berkas) | Database test terpisah (owner role `bwdcs`, dibuat lewat peran superuser lokal karena role aplikasi tidak diberi `CREATEDB`); skema dimigrasikan otomatis `TestMain` (ADR-0018) | P-024 |
+
+### Changed
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/Makefile` target `test` | Dulu `go test ./... -cover -p 1` telanjang: tanpa `TEST_DATABASE_URL` test integrasi `t.Skip` sementara paket tetap `ok` (hijau palsu), dan bila variabelnya diisi ke database dev, suite merusak/menabrak data dev (C-038). Kini memuat `.env`, **menurunkan** DSN ke `bwdcs_test` (`TEST_DB_NAME`), memakai `-count=1`, mencetak nama database yang dipakai (sandi disamarkan), dan **berhenti dengan pesan** bila DSN menunjuk database dev | P-024 |
+| `backend/internal/bootstrap/bootstrap_test.go` | Pesan kegagalan `DELETE FROM users` dulu hanya menyebut akibatnya ("database test harus bersih dari modul lain"); kini menyebut penyebab dan jalan keluarnya (`TEST_DATABASE_URL` harus menunjuk database test terpisah) | P-024 |
+| `docs/design/70-TESTING.md` §8/§8.1 | Database test terpisah berubah dari rekomendasi menjadi **praktik wajib** + prosedur pembuatan `bwdcs_test`; ditambah peringatan bahwa `go test` tanpa `TEST_DATABASE_URL` bukan bukti apa pun; catatan C-038 ditutup | P-024 |
+| `docs/design/60-DEPLOYMENT.md` §3.1 | Cuplikan `Makefile` yang sudah menyimpang (tanpa `-p 1`, tanpa pemuatan `.env`, DSN migrasi tanpa variabel) **dihapus** dan diganti tabel target + penunjuk ke `backend/Makefile` sebagai sumber tunggal (temuan **C-043**, kelas C-014) | P-024 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` §8, `docs/design/90-AGENT-GUIDE.md` §7 | Perintah verifikasi standar memakai `make test` (yang menyiapkan database test), bukan `go test ./... -count=1` telanjang | P-024 |
+| `docs/progress/audits/AUDIT-001-...md` + `audits/README.md` | **C-038** OPEN → FIXED; **C-043** dan **C-044** ditambahkan (FIXED di sesi yang sama); hitungan diambil ulang dari tabel: **44 temuan / 35 FIXED / 9 OPEN** (35 + 9 = 44) | P-024 |
+| `docs/progress/TASKS.md` | `T-036` pindah ke DONE dengan bukti; `T-017` 10 → **9** temuan OPEN dan tanpa lagi menyebut C-038 sebagai butuh izin | P-024 |
+| `docs/progress/STATE.md`, `CONTINUE.md`, `AGENTS.md` | Ledger diselaraskan: hitungan audit, perintah test kanonik (`make test`), baris environment database test, dan catatan bahwa `go test` telanjang bukan bukti | P-024 |
+
+---
+
+## 2026-09-19 (sesi P-023)
+
+Mengerjakan **`T-037`**: modul **Document** — metadata dokumen (`POST /documents`), unggah versi
+berkas (`POST /documents/:id/upload`), riwayat versi, unduhan ber-audit, dan hapus berkaskade, dengan
+generator `document_number` `{PROJECT_CODE}-{NNN}` **di dalam transaksi yang sama** (ADR-0017) dan
+cakupan data yang **sama** dengan project (`44-SECURITY.md` §3.1.3). Bukti utamanya dijalankan pada
+server nyata: nomor `DOC-UJI-001`/`DOC-UJI-002`, versi `1.0` → `1.1`, unduhan yang isinya identik
+dengan berkas asli, dan cakupan yang menyembunyikan dokumen dari non-anggota (`404`, bukan `403`).
+Empat temuan baru (**C-039**–**C-042**) muncul dari **menjalankan** test dan dari memeriksa sumber
+sebelum menerapkan aturan; semuanya ditutup di sesi yang sama. Delapan kontrak yang diputuskan agen
+dicatat di `OPEN-QUESTIONS.md` **Q-016**.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/internal/model/document.go` | `Document`/`DocumentVersion`/`DocumentCategory`, status kanonik (FR-DOC-03), dan aturan versi `ParseVersion`/`FormatVersion`/`NextVersion` (FR-VER-02) | P-023 |
+| `backend/internal/repository/document_repository.go` | Dokumen bercakupan: `List`/`FindByID` memakai `projectScopePredicate` di `WHERE`, `NextNumber` (`INSERT … ON CONFLICT … RETURNING`), `CategoryExists`, `AddVersion`/`SetCurrentVersion`/`Versions`/`LatestVersion`/`FindVersion`, `VersionKeys`, `Delete` berkaskade, `HasRunningWorkflow` | P-023 |
+| `backend/internal/service/document_service.go` | `Create` (nomor + INSERT + audit dalam satu transaksi), `List`, `Get`, `Delete` (penjaga workflow + kaskade berkas), `Scope` | P-023 |
+| `backend/internal/service/document_service_upload.go` | `UploadVersion` (checksum SHA-256, versi berikutnya, pembersihan berkas bila transaksi gagal), `Versions`, `Download` (audit transaksi tersendiri), validasi tipe/ukuran, `limitedReader` | P-023 |
+| `backend/internal/service/scope.go` | `Actor` + `systemScope` diekstrak dari `ProjectService` supaya project dan document memakai **satu** aturan cakupan | P-023 |
+| `backend/internal/dto/document_dto.go` | Bentuk request/response `42-API.md` §4 (termasuk `current_version` null-able) | P-023 |
+| `backend/internal/handler/document_handler.go` | Tujuh handler: daftar berfilter, detail, buat, unggah multipart (magic bytes + `Seek(0,0)`), versi, unduh streaming ber-`Content-Disposition`, hapus; pemetaan error terpusat | P-023 |
+| `backend/internal/service/document_service_test.go` | 9 test integrasi: metadata + audit, kategori asing, checksum/`file_key`, versi minor → major, penolakan tipe/ukuran, unduh + audit, hapus berkaskade, penjaga workflow, cakupan | P-023 |
+| `backend/internal/service/document_number_test.go` | 5 test penomoran ADR-0017: tiga test `70-TESTING.md` §3.5 (berurutan, rollback tidak menghabiskan nomor, konkurensi) + nomor per project + project di luar cakupan tidak membangkitkan nomor (test keempat §3.5 — tolak nomor dari klien — ada di lapisan HTTP karena `422` hanya ada di sana) | P-023 |
+| `backend/internal/service/document_upload_limit_internal_test.go` | Unit `limitedReader`: berhenti tepat di batas dan menolak byte kelebihan | P-023 |
+| `backend/internal/handler/document_handler_test.go` | 11 test HTTP: 401 ketujuh endpoint, matriks izin, 201 + nomor, nomor dari klien → `422`, unggah `1.0`/`1.1`, unduh + `Content-Disposition` + isi identik (termasuk berkas besar), 422 field `file`, cakupan 404, hapus 200 → 404, `entity_id` audit = nomor dokumen | P-023 |
+
+### Changed
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/internal/service/project_service.go` | `normalizeProjectCode` dijalankan juga di service: kode huruf kecil dapat membuat nomor dokumen `webdocs-001` (temuan **C-041**) | P-023 |
+| `backend/internal/model/project.go` | Komentar `IsArchived()` menjanjikan aturan "project arsip tidak menerima dokumen baru" yang tidak ada di dokumen desain (temuan **C-042**) | P-023 |
+| `backend/internal/pkg/jwt/jwt_test.go` | `tamperSignature` mengubah byte tanda tangan, bukan karakter terakhir base64url — test tidak lagi gagal acak (temuan **C-039**) | P-023 |
+| `backend/internal/handler/router.go` | Tujuh route `/documents` dengan `RequirePermission` dari matriks ADR-0014; daftar versi memakai `document:read` (matriks tidak memuat `document_version:read`) | P-023 |
+| `backend/cmd/server/main.go` | Wiring `DocumentService` beserta `FileStorage` yang sama dengan health check | P-023 |
+| `backend/internal/handler/main_test.go` | Harness dipecah: `newEngineParts` mengembalikan engine + storage + service, supaya test dokumen mengunggah berkas sungguhan | P-023 |
+| `docs/design/42-API.md` §4 | Ditulis ulang: tabel izin 7 endpoint, aturan query, bentuk `current_version`, tabel versi berikutnya, validasi berkas, semantik unduhan, syarat hapus; contoh `checksum` diselaraskan ke 64 heksadesimal (C-040) | P-023 |
+| `docs/design/40-TSD.md` §2.3-§2.6/§6 | Model/document service/repository diselaraskan dengan implementasi; pola handler multipart + streaming; tujuh route dokumen | P-023 |
+| `docs/design/44-SECURITY.md` §3.1.3/§4.2 | Rujukan implementasi kedua (cakupan satu fungsi); daftar kebijakan unggahan menjadi bentuk yang berjalan (`limitedReader`, `422` bukan `413`) | P-023 |
+| `docs/design/50-FSD.md` §4.2/§4.3 | Tabel versi minor/major, owner = pembuat, syarat "no workflow running" ditegakkan `409` | P-023 |
+| `docs/design/41-DATABASE.md` §2.3 | Komentar kolom `checksum`: heksadesimal 64 karakter tanpa prefiks | P-023 |
+| `docs/design/70-TESTING.md` §3.5/§3.8/§3.9 | Status §3.5 (dijalankan) + letak test penolakan nomor; §3.8 daftar test modul dokumen; §3.9 aturan test deterministik (C-039) | P-023 |
+| `docs/progress/TRACEABILITY.md` | FR-DOC-01..07 → DONE (FR-DOC-07 PARTIAL), enam baris FR-VER-01..06 ditambahkan, FR-AUDIT-01 diperluas | P-023 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-016 baru (delapan kontrak modul document) | P-023 |
+| `docs/progress/audits/AUDIT-001-...md` + `audits/README.md` | C-039..C-042 (FIXED) dan hitungan 42 temuan / 31 FIXED / 10 OPEN | P-023 |
+| `docs/progress/TASKS.md` | `T-037` DONE; `T-024` 28/51 → **35/51** | P-023 |
+| `docs/progress/STATE.md`, `SESSION-LOG.md`, `CHANGELOG.md`, `CONTINUE.md`, `AGENTS.md` | Ledger diselaraskan dengan modul document + aturan yang kini mengikat | P-023 |
+| Database dev `bwdcs` (bukan berkas) | Data uji (project `DOC-UJI`, dua dokumen, dua versi, satu user `scopedoc-uji`) dihapus sesudah dipakai supaya suite tetap hijau (C-038); entri `audit_logs` milik **admin** tetap ada (append-only), sedangkan entri milik user uji dihapus lewat jalur pemeliharaan `bwdcs.audit_maintenance` seperti teardown test | P-023 |
+
+#### Penutup P-023 (lanjutan turn setelah restart Freebuff)
+
+Turn P-023 terputus dua kali, sehingga kode dan dokumen sudah ada di disk tetapi **log promptnya belum
+terbentuk** padahal `TASKS.md`, `STATE.md`, `CONTINUE.md`, `70-TESTING.md`, dan footer `AUDIT-001` sudah
+merujuk namanya. Penutup ini **tidak mengubah kode**; yang dilakukan adalah memverifikasi ulang apa yang
+tertulis dan merapikan ledger yang belum sinkron.
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/progress/prompts/P-023-2026-09-19-modul-document-unggah-versi-dan-penomoran.md` | **Dibuat**: log prompt yang dirujuk lima dokumen tetapi tidak ada berkasnya. Memuat ringkasan aksi, daftar berkas, dan §6.1 verifikasi ulang pada penutup sesi (bukan klaim ulang) | P-023 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | Footer "Riwayat" menyebut nama berkas log P-023 yang **berbeda** dari empat dokumen lain (`…-modul-document-dan-penomoran.md`) — dijadikan satu nama kanonik | P-023 |
+| `docs/progress/SESSION-LOG.md` | Entri P-023 memuat klaim `is_current=true`/`false` pada `document_versions`; **klaim itu salah** — kolom itu tidak ada di skema, kode, maupun dokumen mana pun (versi "terkini" turunan `documents.current_version`). Dikoreksi lewat entri baru (log ini append-only), bukan dengan menulis ulang entri lama | P-023 |
+
+**Verifikasi ulang penutup (semua dijalankan pada kondisi repo apa adanya):** `gofmt -l .` bersih, `go vet ./...`
+bisu, `go build ./...` sukses, `find internal cmd -name '*.go' -newer bin/bwdcs` kosong (server hidup memuat
+kode ini), `GET /health` → `200 healthy`. Suite dijalankan **dengan `TEST_DATABASE_URL`** — `go test ./... -p 1 -count=1`
+seluruh paket `ok`, dan tanpa variabel itu test integrasi `SKIP` sehingga hijau sebelumnya bukan bukti: 14 test
+dokumen di `internal/service` dan 11 di `internal/handler` PASS (0 SKIP). Alur HTTP ulang penuh pada server nyata
+(`DOC-UJI-001`/`DOC-UJI-002`, versi `1.0` → `1.1`, unduhan `cmp` identik, non-anggota `404` pada detail/versi/unduh,
+`viewer` unggah `403`, `DELETE` `200` + kaskade) memberi hasil yang sama, lalu data uji dibersihkan
+(`projects=0 documents=0 versions=0 seq=0 users=1`, storage kosong). Catatan operasional baru: user uji **tidak
+dapat** dihapus selama ada entri `audit_logs` miliknya (`actor_id` → `ON DELETE RESTRICT`), jadi pembersihannya
+memakai jalur pemeliharaan `SET LOCAL bwdcs.audit_maintenance = 'on'` — sama seperti teardown test.
+
+---
+
+## 2026-09-19 (sesi P-022)
+
+Mengerjakan **`T-035`**: modul **Project** — `POST`/`GET`/`PATCH`/`archive` project, anggota project, dan
+**cakupan data anggota diterapkan di dalam kueri** (`44-SECURITY.md` §3.1.3). Delapan endpoint `42-API.md` §3
+kini hidup; bukti utamanya dijalankan pada server nyata: user ber-izin `project:read` yang **bukan anggota**
+melihat daftar kosong dan detail **404**, lalu melihat project itu begitu dijadikan anggota; Administrator
+organisasi lain tetap **404**. Keputusan agen yang perlu konfirmasi Anda dicatat di `OPEN-QUESTIONS.md` **Q-015**.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/internal/model/project.go` | Model `Project`/`ProjectMember` + konstanta status (`active`/`archived`, ADR-0012) dan role project (`owner`/`manager`/`contributor`/`viewer`, FR-PROJ-05) | P-022 |
+| `backend/internal/repository/project_repository.go` | Repository project: `ProjectScope` diterapkan **di dalam `WHERE`** (`projectScopePredicate`), daftar berfilter, `FindByID` dalam cakupan, `Create`/`Update` (whitelist kolom)/`Archive`, keanggotaan (`Members`/`AddMember`/`UpsertMember`/`RemoveMember`/`MemberRole`) | P-022 |
+| `backend/internal/service/project_service.go` | `Scope` (role sistem → cakupan), `Create`/`Update`/`Archive`/`AddMember`/`RemoveMember` dalam satu transaksi bersama audit (ADR-0011); invariant "owner selalu anggota"; kode permanen (ADR-0017) | P-022 |
+| `backend/internal/dto/project_dto.go` | Bentuk request/response `42-API.md` §3 + tipe `Date` (`YYYY-MM-DD`) + normalisasi/pola `code` (ADR-0017) | P-022 |
+| `backend/internal/handler/project_handler.go` | Delapan handler + validasi 422 berstruktur + pemetaan error domain → status HTTP di satu fungsi | P-022 |
+| `backend/internal/service/project_service_test.go` | 14 test integrasi: cakupan anggota vs Administrator vs tenant lain, konflik kode, kode permanen, urutan tanggal, arsip idempotent, siklus anggota, pemindahan owner, audit per aksi | P-022 |
+| `backend/internal/handler/project_handler_test.go` | 10 test end-to-end HTTP: 401 untuk kedelapan endpoint tanpa token, 403 viewer/contributor, 201 + normalisasi kode, 7 kasus 422, 409 (kode & anggota & owner), cakupan (0/404/200), validasi query | P-022 |
+
+### Changed
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/internal/repository/db.go` | Tambah `ErrDuplicate` (pelanggaran constraint unik → 409) dan `ErrNoUpdateFields` (PATCH tanpa field → 422) sebagai error domain repository | P-022 |
+| `backend/internal/pkg/response/response.go` | Tambah `OKWithMeta` supaya endpoint daftar tidak menyusun blok `meta` sendiri (`42-API.md` §1) | P-022 |
+| `backend/internal/handler/router.go` | Daftarkan 8 route `/projects` dengan `RequirePermission` dari matriks ADR-0014; `RouterDeps.Project` (boleh nil untuk engine tanpa modul itu) | P-022 |
+| `backend/internal/handler/main_test.go` | Rakit `ProjectService` di engine test supaya test auth lama tetap memakai jalan yang sama dengan produksi | P-022 |
+| `backend/cmd/server/main.go` | Rakit `repository.NewProjectRepository` + `service.NewProjectService` dan serahkan ke `handler.Setup` | P-022 |
+| `docs/design/42-API.md` | §1: `limit` 1–100 → 422 (tidak dipotong diam-diam). §3 ditulis ulang: bentuk kanonik project, aturan query, `Izin:` per endpoint (8/8), cakupan data, aturan `code`/owner/tanggal, 404 vs 403, 409 (kode, anggota duplikat, owner). §12: sebab `404` diperluas ke "di luar cakupan" dan daftar `409` menyebut kasus project | P-022 |
+| `docs/design/40-TSD.md` | §2.3 catatan bahwa tag `validate:` di sketsa tidak dipakai implementasi + kolom turunan; §2.4 `ProjectService`; §2.5 `ProjectScope` + `ProjectRepository`; §2.6 pola handler (pemetaan error terpusat, cakupan di service); §6 route project lengkap 8 endpoint | P-022 |
+| `docs/design/44-SECURITY.md` | §3.1.3: cakupan diterapkan di kueri, pelanggaran cakupan → `404` (bukan `403`), rujukan implementasi pertama (`ProjectScope`) — tetap tanpa bypass izin | P-022 |
+| `docs/design/50-FSD.md` | §3.1: arsip = status (bukan hapus) + cakupan daftar; §3.2: aturan server (normalisasi `Code`, owner langsung menjadi anggota); §3.3: role anggota, duplikat & owner tidak dapat dihapus | P-022 |
+| `docs/design/70-TESTING.md` | §3.7 baru: daftar test modul project (service + handler) beserta catatan urutan pembersihan fixture (FK `RESTRICT` + audit append-only); §4.1 menunjuk test cakupan project yang sudah ada | P-022 |
+| `docs/progress/TRACEABILITY.md` | FR-PROJ-01..07 diisi (DONE) dan FR-AUDIT-01 naik dari TODO → PARTIAL dengan bukti per aksi | P-022 |
+| `docs/progress/TASKS.md` | `T-035` masuk DONE dengan bukti; `T-024` diperbarui 20/51 → **28/51** (bab projects beranotasi) | P-022 |
+| `docs/progress/OPEN-QUESTIONS.md` | **Q-015** baru: tiga kontrak yang diputuskan agen (owner selalu anggota, 404 untuk pelanggaran cakupan, batas `limit`) — NON-BLOCKING, minta konfirmasi | P-022 |
+| `docs/progress/STATE.md`, `docs/progress/SESSION-LOG.md`, `CONTINUE.md`, `AGENTS.md` | Ledger diselaraskan dengan kondisi sesudah modul project | P-022 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` + `audits/README.md` | Temuan baru **C-038** (OPEN): `TEST_DATABASE_URL` menunjuk database dev yang sama dengan server, sehingga project nyata membuat lima test `internal/bootstrap` gagal `23503`; hitungan diperbarui 37→38 temuan, 28 FIXED, 9→10 OPEN | P-022 |
+| `docs/design/70-TESTING.md` §8.1 (catatan) | Menyebut C-038 di samping aturan `TEST_DATABASE_URL` supaya agen berikutnya tidak mengejar gejala yang sama | P-022 |
+| Database dev `bwdcs` (bukan berkas) | Dua project demo hasil verifikasi (`DEMO-PRJ`, `DEMO-2`) dihapus sesudah dipakai, karena keberadaannya membuat suite gagal (C-038); entri `audit_logs` miliknya tetap ada (append-only, memang tidak dapat dihapus) | P-022 |
+| `.freebuff/run.md`, `.freebuff/preview.html` | Daftar endpoint yang hidup ditambah bab Projects; prosedur menjalankan server tetap sama | P-022 |
+
+### Removed
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/tmp-probe/main.go` | Alat diagnosis sementara (menirukan urutan startup server untuk mencari penyebab preview tidak ter-spawn di bawah launchd) — dibuat dan dihapus dalam sesi yang sama; tidak ada artefak yang tersisa | sesi preview (thread yang sama, sebelum P-022) |
+
+#### Penutup P-022 (lanjutan turn setelah restart Freebuff)
+
+Sesi P-022 dilanjutkan untuk memastikan kode di disk benar-benar sesuai ledger dan tidak ada hitungan yang usang. Tidak ada berkas kode yang diubah; yang berubah hanya ledger.
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `AGENTS.md` | Hitungan audit masih lama (37 temuan, 9 OPEN) padahal `AUDIT-001` sudah 38 temuan / 10 OPEN; ditambah aturan modul yang kini mengikat: cakupan data di `WHERE` (bukan middleware), pelanggaran cakupan → `404`, owner selalu anggota, `code` permanen → `409` | P-022 |
+| `docs/progress/STATE.md` | Menghapus baris `Project` ganda di §3 (satu baris "Selesai", satu sisa "Belum"); Q-006/Q-007 ditandai `RESOLVED` seperti di `OPEN-QUESTIONS.md`; Q-010 9 → **10** temuan (C-038 butuh izin, bukan keputusan); **Q-015** ditambahkan ke tabel keputusan pending | P-022 |
+| `docs/progress/TASKS.md` | `T-017` diperbarui dari 9 → **10** temuan OPEN (menyertakan C-038 → `T-036`) supaya tidak tampak lebih sempit dari kenyataan | P-022 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | Footer "Riwayat" belum menyebut `P-022` (sesi yang menambahkan C-038) | P-022 |
+| `docs/progress/SESSION-LOG.md` | Entri P-022 ditambah penutup: verifikasi ulang persis seperti §6 (build/vet/test + bukti HTTP `SMOKE-01`) dan daftar koreksi ledger di atas | P-022 |
+
+---
+
+## 2026-09-18 (sesi P-021)
+
+Mengerjakan **`T-005`**: modul auth lengkap — login (`FR-AUTH-01/02`), JWT ber-`jti` (`FR-AUTH-03`), middleware RBAC dari matriks ADR-0014 (`FR-ROLE-03`), rate limit `FR-AUTH-06`, dan logout + daftar revokasi `token_revocations` (ADR-0009, `FR-AUTH-04`). Bukti utamanya bukan test unit: **admin pertama login lewat HTTP** (`POST /api/v1/auth/login` → 200 + token), memakai token di `/api/v1/auth/me` (200, 44 izin), logout, lalu token yang sama ditolak `401 TOKEN_REVOKED`. Lima temuan audit baru (**C-033**–**C-037**) muncul karena modul ini benar-benar **ditulis dan dijalankan**; dua di antaranya menandai janji kontrak yang tidak dapat dijalankan tanpa keputusan Anda, bukan salah tulis. Sekaligus menutup utang **`T-033`** (test config hermetis).
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/internal/pkg/jwt/jwt.go` + `jwt_test.go` | Penerbit/validator token HS256 dengan `jti` wajib (ADR-0009); 9 test termasuk alg none, issuer lain, tanpa `exp`, tanpa `jti`, kedaluwarsa | P-021 |
+| `backend/internal/pkg/response/response.go` | Amplop response + kode error kanonik `42-API.md` §12 supaya handler tidak menulis JSON sendiri | P-021 |
+| `backend/internal/model/user.go` | Model `User` + `Permission` (`40-TSD.md` §2.3) | P-021 |
+| `backend/internal/repository/db.go` | `DBTX` (pool **atau** transaksi) sesuai ADR-0011 butir 3 + `ErrNotFound` | P-021 |
+| `backend/internal/repository/user_repository.go` | Baca user/role/permission, `HasPermission` langsung dari `role_permissions`, `UpdatePasswordHash`, `WithTx` | P-021 |
+| `backend/internal/repository/token_revocation_repository.go` | `Revoke`/`IsRevoked` (cache TTL 30 detik, invalidasi seketika saat logout)/`CleanupExpired` (ADR-0009) | P-021 |
+| `backend/internal/repository/setting_repository.go` | Kebijakan login dari `system_settings` (`auth.max_login_attempts`, `auth.lockout_duration_minutes`) — tanpa menambah environment variable | P-021 |
+| `backend/internal/service/{auth_service,login_guard,permission_checker,audit_service}.go` + test | Login/logout/profil, batas percobaan gagal per username (FR-AUTH-06), pemeriksa izin tanpa bypass Administrator, penulisan audit di transaksi pemanggil (ADR-0011) | P-021 |
+| `backend/internal/middleware/{context,auth,permission,rate_limit,correlation,logger,cors}.go` + `auth_test.go` | Enam middleware `40-TSD.md` §2.2; interface kecil untuk dependensinya sehingga dapat diuji tanpa database (10 test) | P-021 |
+| `backend/internal/dto/auth_dto.go`, `backend/internal/handler/{auth_handler,router}.go` + `main_test.go`, `auth_handler_test.go` | Endpoint `42-API.md` §2 + pemasangan route; 9 test end-to-end lewat engine nyata | P-021 |
+| `docs/progress/prompts/P-021-2026-09-18-auth-login-jwt-rbac-dan-revokasi-token.md` | Log prompt sesi T-005 | P-021 |
+
+### Changed
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/cmd/server/main.go` | Merakit modul auth (JWT, repository, service, middleware, route) + pembersihan `token_revocations` saat startup dan setiap 1 jam (ADR-0009 butir 5) | P-021 |
+| `backend/go.mod`, `go.sum` | Tambah `golang-jwt/jwt/v5` v5.3.1 dan `google/uuid` v1.6.0 (tidak menaikkan direktif `go`) | P-021 |
+| `backend/Makefile` | `test` memakai `-p 1`: paket test integrasi berbagi satu database ( **C-036** ) | P-021 |
+| `backend/internal/bootstrap/bootstrap_test.go` | `newCleanTx` membersihkan lewat jalur pemeliharaan `SET LOCAL bwdcs.audit_maintenance = 'on'` di dalam transaksi yang digulung balik — tanpa itu `DELETE FROM users` ditolak `audit_logs_actor_id_fkey` begitu ada entri audit nyata (login admin `T-005`), dan seluruh paket test gagal ( **C-036** ) | P-021 |
+| `backend/internal/config/{config_test,envfile_test}.go` | Helper `clearEnv(t)` membuat test hermetis terhadap environment pemanggil (viper `AutomaticEnv` selalu menang atas `.env`) — menutup `T-033` | P-021 |
+| `docs/design/42-API.md` | §2: anotasi `Izin:` kelima endpoint auth (T-024: 15/51 → 20/51), perilaku `logout_all` (`501`), dan penanda `refresh`/`change-password` belum dijalankan; §12: kode `401`/`403`/`429`/`501` diberi tabel kode eksplisit | P-021 |
+| `docs/design/40-TSD.md` | §2.2: interface middleware nyata (package `auth` hantu dihapus — **C-034**) + pembagian rate limit; §2.4: `AuditService.Log(ctx, tx pgx.Tx, …)`; §5.2.2 baru: batas percobaan login + batas auto-lock (C-009); §6: lokasi `Setup` | P-021 |
+| `docs/design/44-SECURITY.md` | §2.3: batas auto-lock dan audit login gagal dinyatakan eksplisit; §3.2: butir "admin bypass" diganti larangan tegas (**C-037**) | P-021 |
+| `docs/design/70-TESTING.md` | §8: peringatan bahwa test integrasi berbagi satu database → jalankan serial, plus catatan pembersihan data yang sudah commit (`-p 1`, **C-036**) | P-021 |
+| `docs/progress/audits/AUDIT-001-...md`, `docs/progress/audits/README.md` | Tambah C-033..C-037 dan perbarui hitungan: 37 temuan, 28 FIXED, 9 OPEN | P-021 |
+| `docs/progress/OPEN-QUESTIONS.md` | Tambah **Q-013** (mekanisme pencabutan sesi) dan **Q-014** (audit login gagal) | P-021 |
+| `docs/progress/TASKS.md` | `T-005` dan `T-033` pindah ke DONE dengan bukti; `T-034` baru (refresh + change-password, menunggu Q-013); `T-024` diperbarui ke 20/51 | P-021 |
+| `docs/progress/TRACEABILITY.md` | `FR-AUTH-01`..`FR-AUTH-06` dan `FR-ROLE-03` → DONE; baris `FR-AUTH-03`, `FR-AUTH-04`, `FR-AUTH-07` ditambahkan; `FR-AUTH-07` PARTIAL | P-021 |
+| `docs/progress/STATE.md`, `CONTINUE.md`, `AGENTS.md`, `docs/progress/SESSION-LOG.md` | Ledger diselaraskan: Phase 0 selesai, audit 37/28/9, aturan auth yang mengikat, next action Phase 1 | P-021 |
+
+---
+
+## 2026-09-18 (sesi P-020)
+
+Mengerjakan **`T-004`**: sembilan migrasi `001`-`009` (skema `41-DATABASE.md` §2 + trigger append-only `007` + seed permission `008`), runner migrasi yang di-embed (ADR-0018), dan **bootstrap organisasi + admin pertama** (ADR-0010) yang kini berjalan dalam urutan startup. Empat temuan audit baru (**C-029**–**C-032**) muncul karena migrasi benar-benar **dijalankan** — bukan dibaca — dan semuanya ditutup di sesi yang sama.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/adr/0018-migrasi-di-embed-dan-dijalankan-saat-startup.md` | ADR baru (ACCEPTED): migrasi di-embed & dijalankan saat startup, `internal/migration` menjadi package (memperbarui ADR-0013 butir 1), goose dipin v3.24.1 library+CLI | P-020 |
+| `backend/internal/migration/001_create_organizations.sql` … `009_create_token_revocations.sql` | Sembilan migrasi skema + seed; sumber DDL `41-DATABASE.md` §2/§4 | P-020 |
+| `backend/internal/migration/migration.go` | Embed (`//go:embed *.sql`) + runner goose; mencatat versi skema ke log (ADR-0018) | P-020 |
+| `backend/internal/migration/main_test.go`, `migration_test.go`, `audit_append_only_test.go` | 13 test: kelengkapan 21 tabel, FK tertunda C-029, seed 44/30/18/12, kosakata tertutup, spot check matriks, tanpa duplikat, `system_settings`, dan enam test append-only `70-TESTING.md` §4.3 | P-020 |
+| `backend/internal/bootstrap/bootstrap.go` | `EnsureAdminFirstRun` (satu transaksi, idempotent, validasi sebelum menulis), `ValidatePassword`, `Querier` (agar test dapat memakai transaksi yang digulung balik) | P-020 |
+| `backend/internal/bootstrap/bootstrap_test.go` | 10 test: password lemah/contoh ditolak, org+admin+role dibuat, bcrypt cost 12 dan hash ≠ password, idempotent, pesan bila seed `008` hilang, dilewati saat database sudah berisi user | P-020 |
+| `docs/progress/prompts/P-020-2026-09-18-migrasi-001-009-dan-bootstrap-admin.md` | Log prompt sesi T-004 | P-020 |
+
+### Changed
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `backend/cmd/server/main.go` | Urutan startup diisi sesuai ADR-0010 butir 1: migrasi (embed) → bootstrap → HTTP; komentar TODO `T-004` dihapus | P-020 |
+| `backend/go.mod`, `backend/go.sum` | `pressly/goose/v3` v3.24.1 + `golang.org/x/crypto` v0.31.0 sebagai dependensi langsung (bcrypt); pin karena toolchain Go 1.22.5 | P-020 |
+| `docs/design/41-DATABASE.md` | §2.3 komentar FK tertunda; §2.6 penunjuk rumah migrasi; §4 tabel pemetaan isi sembilan berkas + catatan urutan FK (C-029), penempatan `system_settings` (C-030), dan pembungkus anotasi goose (C-031) | P-020 |
+| `docs/design/44-SECURITY.md` | §6: butir baru — badan fungsi wajib dibungkus `StatementBegin`/`StatementEnd`, dan larangan menulis penanda anotasi goose di komentar biasa (C-031) | P-020 |
+| `docs/design/40-TSD.md` | §2.0: `migration/` kini memuat package kecil (ADR-0018) + catatan pin `pgx` **dan** `goose` v3.24.1 | P-020 |
+| `docs/design/60-DEPLOYMENT.md` | §4.2: berkas migrasi tidak perlu ikut di-deploy karena di-embed (ADR-0018) | P-020 |
+| `docs/design/70-TESTING.md` | §4.3: path test menjadi `internal/migration/audit_append_only_test.go` (yang diuji objek skema) + catatan SAVEPOINT wajib saat menguji penolakan; §4.1: penunjuk implementasi `TestSeedRolePermissions_RowCounts` | P-020 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | §3 catatan status langkah 4 (bukti "admin pertama dapat login" menunggu `T-005`, sisanya terbukti pada P-020); §3.1 pre-flight item 2, 3, dan 6a dari "sebagian/menunggu izin/belum dibuat" menjadi selesai | P-020 |
+| `docs/adr/README.md` | Baris ADR-0018 ditambahkan; ADR-0013 ditandai "butir 1 diperbarui ADR-0018" | P-020 |
+| `docs/progress/audits/AUDIT-001-...md`, `docs/progress/audits/README.md` | C-029–C-032 ditambahkan dan `FIXED`; ringkasan 32 temuan / 25 FIXED / 7 OPEN | P-020 |
+| `docs/progress/TASKS.md` | `T-004` pindah ke DONE; `T-017` diperbarui; `T-012` diberi catatan pin CLI; **`T-033` baru** (test config hermetis) | P-020 |
+| `docs/progress/TRACEABILITY.md` | `FR-AUTH-05`, `FR-ROLE-01`/`FR-ROLE-02`/`FR-ROLE-03`, `FR-DOC-02` → `PARTIAL` dengan implementasi + test; **baris baru `FR-ORG-02`** (sebelumnya tidak ada) | P-020 |
+| `docs/progress/STATE.md`, `CONTINUE.md`, `AGENTS.md`, `OPEN-QUESTIONS.md`, `SESSION-LOG.md` | Ledger sesi P-020: skema terpasang, pin goose, audit 32/25/7, next action `T-005` | P-020 |
+
+---
+
+## 2026-09-18 (sesi P-019)
+
+Memperbaiki temuan **C-020**: cuplikan trigger "audit log immutable" di `44-SECURITY.md` §6 memanggil `raise_exception()` yang tidak ada di PostgreSQL **dan** tidak pernah dipasang migrasi mana pun — jadi janji FR-AUDIT-03 tidak dapat dijalankan apa adanya. Diganti pola PL/pgSQL yang sudah diuji pada PostgreSQL 16.10 dan diikat ke migrasi `007`, dengan test baru di `70-TESTING.md` §4.3. Satu temuan baru dicatat (**C-028**).
+
+### Changed
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/design/44-SECURITY.md` | §6: fungsi `prevent_audit_modification()` + dua trigger (row-level `UPDATE`/`DELETE`, statement-level `TRUNCATE`) yang menolak `23001`; jalur pemeliharaan `bwdcs.audit_maintenance`; alasan `REVOKE` tidak dipakai; alasan `document_versions` tidak diberi trigger; down migration. §8: checklist test append-only | P-019 |
+| `docs/design/41-DATABASE.md` | §2.5: penunjuk penegakan append-only ke `44-SECURITY.md` §6; §4: isi migrasi `007` kini memuat kedua trigger (sebelumnya tidak ada migrasi yang memasangnya) | P-019 |
+| `docs/design/70-TESTING.md` | §4.3 baru: enam test append-only (UPDATE/DELETE/TRUNCATE ditolak, INSERT lolos, dua trigger terpasang, GUC harus opt-in); §8: catatan `teardownTestDB` memakai GUC pemeliharaan | P-019 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | C-020 → `FIXED`; C-028 (baru) → `OPEN`; ringkasan menjadi 28 temuan / 21 FIXED / 7 OPEN | P-019 |
+| `docs/progress/audits/README.md` | Baris AUDIT-001: 28 (14 S1, 10 S2, 4 S3), 21 FIXED, 7 OPEN; catatan temuan yang ditambahkan menyusul diperluas ke C-024..C-028 | P-019 |
+| `docs/progress/TASKS.md` | `T-032` ditambahkan di tabel DONE; `T-017` diperbarui (C-020 selesai, sisa OPEN kini C-028) | P-019 |
+| `docs/progress/TRACEABILITY.md` | Baris `FR-AUDIT-03`: kolom Desain (trigger + migrasi `007`) dan Test (`70-TESTING.md` §4.3) diisi; catatan P-019 | P-019 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-010: hasil P-019 + sisa OPEN diperbarui; **Q-012** baru (retensi audit log, opsi A/B) | P-019 |
+| `docs/progress/STATE.md` | Audit (28/21/7), konvensi append-only pada baris konvensi, task aktif, next action, tabel file penting | P-019 |
+| `docs/progress/SESSION-LOG.md` | Entri P-019 | P-019 |
+| `CONTINUE.md` | Header (prompt terakhir P-019, berikutnya P-020) + blok §0 diselaraskan | P-019 |
+| `AGENTS.md` | Status audit 28/21/7 + larangan membuat trigger append-only kedua sendiri (trigger resmi dipasang migrasi `007`) | P-019 |
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/progress/prompts/P-019-2026-09-18-trigger-append-only-audit-log.md` | Log prompt sesi perbaikan C-020 | P-019 |
+
+---
+
+## 2026-09-18 (sesi P-018)
+
+Menjalankan urutan **Phase 0** setelah user memberi izin (Q-004 `git init`, Q-009 toolchain): PATH toolchain (`T-011`), role + database `bwdcs` di PostgreSQL 16.10 yang sudah berjalan (`T-013`), `goose` (`T-012`), repo git + struktur folder (`T-002`/`T-002a`), dan backend skeleton yang benar-benar dibangun, diuji, serta menjawab `GET /health` 200 (`T-003`). Satu temuan audit baru yang muncul saat menulis kode — **package** `filestorage` tidak bisa dipakai sebagaimana didokumentasikan — dicatat sebagai C-026/C-027 dan diperbaiki di sesi yang sama.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `.gitignore` | Melindungi `.env` (T-002a), `storage/`, `bin/`, `node_modules/`, `.freebuff/` | P-018 |
+| `.editorconfig` | Konvensi editor: tab untuk Go, 2 spasi untuk TS/JS/JSON, LF, final newline | P-018 |
+| `backend/go.mod`, `backend/go.sum` | Module `bwdcs/backend`, `go 1.22.5`; gin v1.10.0, pgx v5.7.4, viper v1.19.0 | P-018 |
+| `backend/cmd/server/main.go` | Entry point sesuai urutan `60-DEPLOYMENT.md` §4.2: config, storage, pool pgx (lazy), HTTP server, shutdown rapi, TODO `T-004`/`T-005` | P-018 |
+| `backend/internal/config/config.go` | Loader viper: `.env` opsional, environment menang, validasi env wajib yang melaporkan semua masalah sekaligus | P-018 |
+| `backend/internal/config/config_test.go` | Test env wajib hilang/pendek, durasi & storage type tidak valid, default non-rahasia | P-018 |
+| `backend/internal/config/envfile_test.go` | Test pembacaan `.env`, kutipan nilai berspasi, prioritas environment | P-018 |
+| `backend/internal/pkg/filestorage/filestorage.go` | Kontrak `FileStorage` (ADR-0013/ADR-0005) + `Prober` untuk `GET /health` | P-018 |
+| `backend/internal/pkg/filestorage/local.go` | Implementasi lokal: skema key `orgs/{org}/projects/{proj}/docs/{doc}/{version}/{nama}`, sanitasi nama, tolak path traversal, tolak penimpaan versi | P-018 |
+| `backend/internal/pkg/filestorage/local_test.go` | 9 test: bentuk key, anti-traversal, imutabilitas versi, `Delete` idempotent, `Ping` | P-018 |
+| `backend/internal/handler/health_handler.go` | `GET /health` dengan pemeriksaan database + storage | P-018 |
+| `backend/Makefile` | Target `60-DEPLOYMENT.md` §3.1 + `vet`/`fmt`/`migrate-status`; memuat `../.env` bila ada | P-018 |
+| `frontend/README.md` | Penanda blokir Phase 4 (`DESIGN.md`), bukan skeleton aplikasi | P-018 |
+| `docs/progress/prompts/P-018-2026-09-18-phase-0-toolchain-dan-skeleton-backend.md` | Log prompt sesi ini | P-018 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `.env` (lokal, tidak di-commit) | Nilai berspasi dikutip; kredensial DB `bwdcs`, `JWT_SECRET` acak, `APP_PORT=8081`, nilai `ADMIN_*` | Tanpa kutip, `set -a; . .env` memotong nilai pada spasi dan menjalankan sisa baris sebagai perintah | P-018 |
+| `.env.example` | Kutipan `ADMIN_ORG_NAME` + catatan aturan kutipan; penanda `.gitignore` sudah ada (bukan "belum dibuat") | Cermin yang aman disalin dan di-source | P-018 |
+| `docs/design/40-TSD.md` | §2.0 nama module `bwdcs/backend` + catatan toolchain (pgx v5.7.4, batas Go 1.22.5); §2.1 field `Bootstrap` + perilaku loader; §2.4 `Save(..., originalName string, ...)` + skema key + imutabilitas | Tiga kontrak yang dibutuhkan kode belum ada/kurang (C-026) | P-018 |
+| `docs/design/60-DEPLOYMENT.md` | §5: cuplikan health check memakai `storage.Ping` dan dapat dikompilasi | Cuplikan lama tidak dapat dibangun dan membaca kesehatan storage secara terbalik (C-027) | P-018 |
+| `docs/progress/audits/AUDIT-001-...md`, `audits/README.md` | Temuan C-026/C-027 ditambahkan dan ditutup; hitungan 27 temuan / 20 FIXED / 7 OPEN | Disiplin jejak keputusan | P-018 |
+| `docs/progress/TASKS.md` | `T-002`, `T-002a`, `T-003`, `T-011`, `T-012`, `T-013`, `T-031` → DONE; catatan blocker diperbarui; **`T-024` dipindahkan dari DONE ke TODO** (15/51 endpoint beranotasi `Izin:`) | Papan status harus mencerminkan kenyataan; baris itu sebelumnya terbaca selesai padahal 36 endpoint belum | P-018 |
+| `docs/progress/TRACEABILITY.md` | NFR-MAIN-01/02/03 → PARTIAL dengan bukti; NFR-PORT-01 diperbarui (jalur tanpa Docker terbukti, Dockerfile belum ada) | Requirement yang mulai dikerjakan wajib punya baris | P-018 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-004 dan Q-009 dijawab user dengan izin → `RESOLVED` | Izin harus tercatat sebelum bekerja | P-018 |
+| `docs/progress/STATE.md`, `CONTINUE.md`, `AGENTS.md` | Posisi Phase 0, tabel toolchain, status audit, dan next action `T-004` | Snapshot harus selaras | P-018 |
+| `~/.zshrc` (di luar repo) | Blok `BWDCS toolchain` idempoten | `go`, `goose`, dan `psql` 16 harus tersedia di shell baru | P-018 |
+
+---
+
+## 2026-09-18 (sesi P-017)
+
+Menyelesaikan task **`T-028`**: kontrak endpoint re-submit setelah revisi ditetapkan di `42-API.md` §5 sebagai `POST /workflows/instances/:id/resubmit` — melanjutkan **instance yang sama** dengan izin `workflow_instance:submit` (matriks ADR-0014), tanpa instance baru dan tanpa perubahan skema. Sesi ini juga menutup temuan baru **C-025**: aturan "satu aksi per step" di `43-WORKFLOW.md` §4.2 membuat alur revisi ADR-0016 mustahil dijalankan.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/progress/prompts/P-017-2026-09-18-kontrak-endpoint-resubmit.md` | Log prompt sesi ini | P-017 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/design/42-API.md` | §5: endpoint `POST /workflows/instances/:id/resubmit` (5 prasyarat, dua guard, efek, izin, daftar "yang tidak terjadi"); jeda revisi pada `/actions`; `document_status` pada endpoint daftar; rujukan `T-028` yang menggantung dihapus | Tanpa kontrak, agen akan menebak cara melanjutkan review setelah revisi | P-017 |
+| `docs/design/43-WORKFLOW.md` | §4.6 baru (perilaku engine re-submit: instance sama, deadline dihitung ulang, tanpa `workflow_actions`, jeda, siklus); §4.2 langkah 4 jadi "per siklus"; §4.5 butir 3 (rujukan `T-027` → kontrak `42-API.md` §5) | Aturan lama memblokir reviewer pada step hasil rollback (C-025) | P-017 |
+| `docs/design/40-TSD.md` | §2.4 `WorkflowService.Resubmit`; §6 route resubmit dengan `RequirePermission("workflow_instance", "submit")` | Antarmuka dan wiring harus ikut kontrak | P-017 |
+| `docs/design/50-FSD.md` | §4.3 aksi "Resubmit for Review"; §5.2 tombol berubah setelah revisi + Approval Panel nonaktif saat jeda; §5.4 tab Pending menyaring `document_status=revision_required` | UI tidak boleh menawarkan aksi yang ditolak API | P-017 |
+| `docs/design/70-TESTING.md` | §3.6 tujuh test re-submit (instance sama, deadline, wajib versi baru, status salah, stale version, jeda, siklus) | Janji perilaku harus punya test | P-017 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | C-025 ditambahkan (S1) dan `FIXED`; S1 11 → 12; ringkasan 25 temuan / 18 FIXED / 7 OPEN | Mengikuti aturan audit §2.2/§2.4 | P-017 |
+| `docs/progress/audits/README.md` | Status AUDIT-001: 25 temuan (12 S1, 9 S2, 4 S3), 18 FIXED, 7 OPEN | Audit harus mencerminkan cakupan sebenarnya | P-017 |
+| `docs/progress/TASKS.md` | `T-028` dipindah dari TODO ke DONE; `T-017` diperbarui | Protokol progress | P-017 |
+| `docs/progress/TRACEABILITY.md` | `FR-WF-09` kolom Desain + §4.6; catatan P-017 | Requirement harus menunjuk desainnya | P-017 |
+| `docs/progress/OPEN-QUESTIONS.md` | **Q-011 baru** (notifikasi overdue saat jeda; unggahan saat `in_review`); Q-010 hasil P-017 | Ambiguitas dicatat, tidak ditebak | P-017 |
+| `docs/progress/STATE.md`, `CONTINUE.md`, `AGENTS.md`, `SESSION-LOG.md` | Snapshot, status audit 25/18/7, 51 endpoint, file sesi terakhir | Protokol progress wajib | P-017 |
+
+---
+
+## 2026-09-18 (sesi P-016)
+
+Perbaikan temuan **C-016**: format dan pemberian nomor dokumen ditetapkan lewat **ADR-0017** — `{PROJECT_CODE}-{NNN}` selalu dibangkitkan server (atomik di `document_sequences`), immutable, tanpa penomoran manual, dan `projects.code` menjadi permanen karena dipakai sebagai prefiks. Tujuannya agar migrasi `004` dan validasinya di `T-004` tidak lagi dikarang per agen. Sekaligus ditutup **C-024** (requirement ID hantu `FR-DOC-08`) yang ditemukan di modul yang sama.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/adr/0017-format-nomor-dokumen.md` | Keputusan arsitektur penomoran dokumen: format, pembangkit atomik, imutabilitas, 6 alternatif ditolak. Diwajibkan karena temuan ini mengubah perilaku yang terlihat user dan menentukan validasi migrasi | P-016 |
+| `docs/progress/prompts/P-016-2026-09-18-format-nomor-dokumen.md` | Log prompt sesi ini | P-016 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/adr/README.md` | Index: baris ADR-0017 | Setiap ADR wajib muncul di index | P-016 |
+| `docs/design/41-DATABASE.md` | §2.2 komentar `projects.code` (UPPERCASE, pola, permanen); §2.3 tabel `document_sequences` + komentar `document_number`; §3 dua baris index; §4 prosedur isi migrasi `004` + kueri pembangkit | Skema dan migrasi tidak boleh ditafsirkan berbeda antar agen | P-016 |
+| `docs/design/42-API.md` | §3 `code` project (normalisasi, pola, unik, tidak dapat diubah; `PATCH` menolak `code`); §4 `POST /documents` tidak lagi menerima `document_number` + aturan nomor; §9 contoh `WEB-001`; §12 paragraf `409` digabung dan contohnya diganti | Kontrak klien harus eksplisit; konflik nomor dokumen tidak lagi dapat dipicu klien | P-016 |
+| `docs/design/50-FSD.md` | §3.2 validasi `Code` (UPPERCASE, pola, permanen); §4.2 Document Number menjadi read-only hasil server | Form tidak boleh menawarkan input yang akan ditolak API | P-016 |
+| `docs/design/51-UX.md` | Contoh nomor `DOC-2026-001`/`DOC-2026-005` → `WEB-001`/`API-001`; kode project `PROJ-001`/`PROJ-002` → `WEB`/`API` | Mockup tidak boleh mengajarkan format yang tidak sah | P-016 |
+| `docs/design/20-SRS.md` | FR-DOC-02 menunjuk ADR-0017 | Requirement High kini punya definisi mengikat | P-016 |
+| `docs/design/40-TSD.md` | §2.1 `Project.Code` + `Document.DocumentNumber` diberi komentar ADR-0017; §5.4 `CreateDocumentInput` tanpa `document_number` + aturan pembangkitan di transaksi | DTO dan model tidak boleh membawa field yang bukan input | P-016 |
+| `docs/design/44-SECURITY.md` | §4.1 `CreateDocumentInput` tanpa `document_number`; catatan bahwa `alphanum` salah dan pola project code diperiksa regex di handler | Validasi yang tertulis harus dapat dijalankan | P-016 |
+| `docs/design/90-AGENT-GUIDE.md` | §3.1 contoh `DocumentService.Create` membangkitkan nomor di dalam transaksi lewat `repo.NextDocumentNumber` | Contoh yang dijiplak agen tidak boleh menyuntikkan nomor dari input | P-016 |
+| `docs/design/70-TESTING.md` | §3.1 assert `TEST-001`; §3.5 test penomoran (berurutan, rollback, konkurensi, tolak nomor klien); §5.1 E2E tidak mengisi nomor + assert hasil | Janji perilaku harus punya test, termasuk jalur konkurensi | P-016 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | Contoh commit: `[FR-DOC-01, FR-DOC-08]` → `[FR-VER-01, FR-VER-04]` | `FR-DOC-08` tidak ada di SRS (temuan C-024) | P-016 |
+| `IDEA.md` | Contoh `Entity ID: DOC-001` → `WEB-001` | Menyelaraskan contoh dengan format yang ditetapkan | P-016 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | C-016 → `FIXED` (detail + tabel status); C-024 ditambahkan; S3 3 → 4; ringkasan 24 temuan / 17 FIXED / 7 OPEN; §6 menyebut ADR-0017 | Mengikuti aturan audit §2.2/§2.4 | P-016 |
+| `docs/progress/audits/README.md` | Status AUDIT-001: 24 temuan (11 S1, 9 S2, 4 S3), 17 FIXED, 7 OPEN | Audit harus mencerminkan cakupan sebenarnya | P-016 |
+| `docs/progress/STATE.md`, `TASKS.md` (T-030 DONE, T-004 diperjelas, T-017 diperbarui), `TRACEABILITY.md` (FR-DOC-02), `OPEN-QUESTIONS.md` (Q-010), `CONTINUE.md`, `AGENTS.md` | Ledger sesi P-016 | Protokol progress wajib | P-016 |
+
+---
+
+## 2026-09-18 (sesi P-015)
+
+Perbaikan temuan **C-018**: tiga halaman yang ada di navigasi `51-UX.md` §2.1 tetapi belum punya spec kini dispesifikasikan di `50-FSD.md` — Approvals (§5.4, sebagai **view** workflow instance sesuai usul resolusi audit), Reports (§10.6), Administration > Workflows (§10.7). Endpoint daftar `GET /workflows/instances` ditambahkan ke `42-API.md` §5 sebagai prasyarat halaman antrean. Tanpa ADR baru (tidak ada keputusan arsitektur; halaman mengikuti keputusan yang sudah terkunci).
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/progress/prompts/P-015-2026-09-18-spec-fsd-halaman-tanpa-spec.md` | Log prompt sesi ini | P-015 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/design/50-FSD.md` | §5.4 Halaman Approvals, §10.6 Reports, §10.7 Workflow Definition Management (baru); §5.1 diberi penunjuk ke §10.7 | Menutup C-018: halaman nav tanpa spec tidak dapat diimplementasikan frontend | P-015 |
+| `docs/design/42-API.md` | §5: endpoint daftar `GET /workflows/instances` (`?status=&scope=assigned_to_me`); 2 rujukan `T-027` → `T-028`; §11 catatan menunjuk `50-FSD.md` §10.7 | Halaman antrean butuh endpoint daftar; nomor task usang dari renumbering P-014 | P-015 |
+| `docs/design/51-UX.md` | §2.1 catatan penunjuk ke tiga spec FSD baru | Nav tidak boleh jadi satu-satunya spec halaman | P-015 |
+| `AGENTS.md` | Baris routing "Halaman Approvals"; status audit 15 FIXED / 8 OPEN | Usul resolusi C-018 menyuruh menambah baris routing | P-015 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | C-018 → `FIXED`; ringkasan 23 temuan / 15 FIXED / 8 OPEN | Mengikuti aturan audit §2.2/§2.4 | P-015 |
+| `docs/progress/audits/README.md` | Status AUDIT-001: 15 FIXED, 8 OPEN | Audit harus mencerminkan cakupan sebenarnya | P-015 |
+| `docs/progress/STATE.md`, `TASKS.md`, `TRACEABILITY.md`, `OPEN-QUESTIONS.md`, `CONTINUE.md` | Ledger sesi P-015 (T-029 DONE, T-017 diperbarui, Q-010, snapshot §0) | Protokol progress wajib | P-015 |
+
+---
+
+## 2026-09-18 (sesi P-014)
+
+Perbaikan temuan **C-022**: arah rollback aksi `request_revision` diputuskan lewat **ADR-0016** mengikuti FR-WF-09 — kembali ke **step sebelumnya** (`current_step - 1`, batas bawah step 1), bukan reset ke step 1. Satu keputusan menutup kontradiksi antara `20-SRS.md` FR-WF-09 dan `43-WORKFLOW.md` §4.5; kasus tepi step 1 dan jalur re-submit kini eksplisit. Instance tetap `running`, guard ADR-0015 tidak berubah, tanpa perubahan skema.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/adr/0016-request-revision-rollback-step-sebelumnya.md` | Keputusan arsitektur: rollback satu langkah sesuai FR-WF-09, kasus tepi step 1, re-submit lanjut instance yang sama, 4 alternatif ditolak. Diwajibkan karena temuan ber-ADR dan perilakunya terlihat user | P-014 |
+| `docs/progress/prompts/P-014-2026-09-18-request-revision-rollback-step-sebelumnya.md` | Log prompt sesi ini | P-014 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/design/43-WORKFLOW.md` | §4.5 ditulis ulang (satu perilaku rollback + batas bawah step 1 + instance tetap `running` + re-submit lanjut instance yang sama); catatan §7 yang salah rujuk C-021 diperbaiki | Bentuk lama menetapkan default "reset ke step 1" + opsi konfigurable yang menentang FR-WF-09 | P-014 |
+| `docs/design/20-SRS.md` | FR-WF-09 diberi penunjuk ADR-0016 | Requirement High kini punya definisi mengikat | P-014 |
+| `docs/design/42-API.md` | §5: `POST /workflows/submit` hanya untuk dokumen `draft` yang belum punya instance; perilaku aksi `request_revision`; re-submit setelah revisi melanjutkan instance yang sama | Kontrak klien tidak boleh ditebak; dua jalur re-entry tidak boleh hidup bersamaan | P-014 |
+| `docs/design/41-DATABASE.md` | §2.4 catatan transisi rollback (guard ADR-0015 tetap berlaku, tanpa perubahan skema) | Skema dan perilaku harus konsisten | P-014 |
+| `docs/design/50-FSD.md` | §8.1 menyebut perilaku rollback satu langkah | Dokumen fitur tidak boleh membawa perilaku lama | P-014 |
+| `docs/design/70-TESTING.md` | §3.4 test kasus tepi step 1 + rollback satu langkah | Janji perilaku harus punya test, termasuk tepi step 1 | P-014 |
+| `docs/adr/README.md` | Index: baris ADR-0016 | Setiap ADR wajib muncul di index | P-014 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | C-022 → `FIXED`; ringkasan 23 temuan / 14 FIXED / 9 OPEN; catatan P-014 | Mengikuti aturan audit §2.2/§2.4 | P-014 |
+| `docs/progress/audits/README.md` | Status AUDIT-001: 14 FIXED, 9 OPEN | Audit harus mencerminkan cakupan sebenarnya | P-014 |
+| `docs/progress/TASKS.md` | `T-027` DONE; `T-028` TODO baru (kontrak endpoint re-submit); `T-017` dipersempit ke 9 temuan sisa | Perbaikan harus punya task; utang yang ditemukan tidak boleh hilang | P-014 |
+| `docs/progress/TRACEABILITY.md` | Baris `FR-WF-09` diperbarui (Desain = ADR-0016) | Requirement yang keputusannya baru ditetapkan harus terlacak | P-014 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-010: hasil P-014; C-022 keluar dari daftar OPEN; rekomendasi berikutnya C-018/C-016 | Keputusan tercatat di tempatnya | P-014 |
+| `docs/progress/STATE.md`, `SESSION-LOG.md`, `CONTINUE.md`, `AGENTS.md` | Ledger dan snapshot §0 sesi P-014 | Protokol progress | P-014 |
+
+---
+
+## 2026-09-18 (sesi P-013)
+
+Perbaikan temuan **C-005**: optimistic locking transisi workflow instance ditetapkan lewat ADR-0015, bukan diserahkan ke masing-masing agen. Dua kolom yang dipakai dokumen tetapi tidak ada di skema ditambahkan sekaligus (`version`, `current_step_deadline`), dan pola guard-nya ditulis di satu tempat yang ditunjuk semua dokumen. Dua temuan baru yang muncul saat mengerjakan (`C-021`, `C-023`) ikut ditutup; satu temuan butuh keputusan user (`C-022`).
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/adr/0015-optimistic-locking-workflow-instance.md` | Keputusan arsitektur: guard `version` di database, tanpa retry otomatis, plus `current_step_deadline`. Diwajibkan karena temuan ber-ADR dan polanya menyentuh seluruh modul workflow | P-013 |
+| `docs/progress/prompts/P-013-2026-09-18-optimistic-locking-workflow-instance.md` | Log prompt sesi ini | P-013 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/design/41-DATABASE.md` | §2.4: `workflow_instances.version` + `current_step_deadline` + indeks parsial `(current_step_deadline) WHERE status = 'running'` + blok "Aturan transisi (ADR-0015)"; §3 baris indeks; §4 catatan isi migrasi `005` | Dua kolom dipakai dokumen tetapi tidak ada di skema; guard harus terlihat dari skema, bukan hanya dari dokumen workflow | P-013 |
+| `docs/design/43-WORKFLOW.md` | §4.1: `current_step_deadline` + `version = 0` saat submit; §4.2: urutan transaksi eksplisit (guard gagal → rollback); catatan setelah §4.5 bahwa `handle*` hanya menghitung state; §6 ditulis ulang (SQL 4 kondisi + 6 aturan); §7 sumber deadline | Solusi lama memakai `WHERE id AND version` tanpa status/step dan tanpa aturan rollback — tidak dapat dijalankan apa adanya | P-013 |
+| `docs/design/42-API.md` | §5: `version` + `current_step_deadline` pada response, `version` opsional pada request aksi, izin `workflow_instance:submit`/`:read`, kontrak `409 WORKFLOW_CONFLICT` dengan `details`; §12: penjelasan beda `CONFLICT` vs `WORKFLOW_CONFLICT` | Perilaku klien saat konflik tidak boleh ditebak; matriks memisahkan approve/reject/request_revision | P-013 |
+| `docs/design/40-TSD.md` | §2.3: `WorkflowInstance.Version` + `CurrentStepDeadline`; §2.4: kontrak `ExecuteAction` (satu transaksi, error khusus saat rowsAffected = 0); §6: empat aturan pemetaan izin + route aksi memakai `workflow_instance:read` | Model harus memuat kolom; route tidak boleh memasang izin aksi tunggal untuk endpoint yang aksinya ada di body (C-023) | P-013 |
+| `docs/design/70-TESTING.md` | §3.3 test konkurensi baru (dua goroutine, tepat satu menang, rollback terbukti); §5.1 test E2E konflik dua konteks; §8.1 tabel env test (`E2E_*`, `TEST_DATABASE_URL`) | Janji "approve ganda dicegah" harus punya test yang membuktikannya, termasuk bukti transaksi batal | P-013 |
+| `docs/adr/README.md` | Index: baris ADR-0015 | Setiap ADR wajib muncul di index | P-013 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | C-005 → `FIXED`; temuan baru C-021 (FIXED), C-022 (OPEN), C-023 (FIXED); ringkasan 23 temuan / 13 FIXED; catatan temuan tambahan P-013; §6 daftar temuan ber-ADR diperbarui | Temuan di berkas dan transisi yang sama tidak boleh ditinggalkan separuh; nomor temuan naik, tidak dipakai ulang | P-013 |
+| `docs/progress/audits/README.md` | Status AUDIT-001: 23 temuan (11 S1, 9 S2, 3 S3), 13 FIXED, 10 OPEN + catatan asal C-021..C-023 | Audit harus mencerminkan cakupan sebenarnya | P-013 |
+| `docs/progress/TASKS.md` | `T-026` DONE; `T-017` dipersempit ke 9 temuan yang masih OPEN (C-005 keluar dari daftar) | Perbaikan harus punya task dan bukti | P-013 |
+| `docs/progress/TRACEABILITY.md` | Baris `FR-WF-06`, `FR-WF-07`, `FR-WF-08` | Requirement yang kontraknya baru ditetapkan harus terlacak | P-013 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-010: hasil P-013; **C-022 (perilaku request revision)** ditambahkan sebagai pilihan berikutnya | Keputusan lanjutan | P-013 |
+| `docs/progress/STATE.md`, `SESSION-LOG.md`, `CONTINUE.md` | Ledger dan snapshot §0 sesi P-013 | Protokol progress | P-013 |
+
+---
+
+## 2026-09-18 (sesi P-012)
+
+Perbaikan temuan **C-012**: enam requirement yang belum punya kontrak endpoint dilengkapi di `42-API.md` (satu High FR-ROLE-04, lima Medium), masing-masing dengan izin dari matriks ADR-0014. Satu endpoint dipersempit dan satu bab baru ditambahkan (Reports), sehingga nomor bab 42-API bergeser dan rujukannya diperbarui.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/progress/prompts/P-012-2026-09-18-kontrak-endpoint-requirement-tanpa-endpoint.md` | Log prompt sesi ini | P-012 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/design/42-API.md` | §2: `POST /auth/change-password` (FR-AUTH-09, + kode `INVALID_CURRENT_PASSWORD`, pencabutan token lain); §9: filter `GET /audit` dilengkapi + izin `audit:read` (FR-AUDIT-04); **§10 baru: Reports** — `GET /reports/export` (FR-REP-01, izin `report:export`); §11: `POST /admin/users/:id/reset-password` (FR-AUTH-08), `PUT /admin/users/:id/roles` (FR-ROLE-04, izin `user_role:manage`), `POST` + `PATCH /admin/organizations` (FR-ORG-03), dan `PATCH /admin/users/:id` dipersempit ke status/profil; Error Responses -> §12, Swagger -> §13 | Enam requirement tidak punya kontrak meski halamannya sudah ada di FSD; `PATCH /admin/users/:id` mencampur perubahan permission dengan data profil sehingga tidak dapat diaudit sebagai aksi tersendiri | P-012 |
+| `docs/design/50-FSD.md` | §2.2, §10.1, §10.3: setiap aksi sekarang menyebut endpoint-nya (`42-API.md`) | FSD dan kontrak API harus saling menunjuk; sebelumnya tidak ada halaman pun yang tertaut ke endpoint | P-012 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | DoD: rujukan format error `42-API.md` §11 -> §12 | Nomor bab bergeser karena penyisipan §10 Reports | P-012 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | C-012 -> `FIXED`; baris C-018 diberi catatan perluasan cakupan (halaman Reports dan Administration > Workflows juga belum ada di FSD); ringkasan 10 FIXED / 10 OPEN | Audit harus mencerminkan tindak lanjut; gap baru tidak diberi ID karangan | P-012 |
+| `docs/progress/audits/README.md` | Status AUDIT-001: 10 dari 20 FIXED | Sama | P-012 |
+| `docs/progress/TASKS.md` | `T-025` (C-012) DONE; T-024 dirapikan (`§2-§11`); T-017 dipersempit ke 10 temuan | Perbaikan harus punya task dan bukti | P-012 |
+| `docs/progress/TRACEABILITY.md` | Baris `FR-AUTH-08`, `FR-AUTH-09`, `FR-ORG-03`, `FR-REP-01`, `FR-AUDIT-04`; kolom Desain `FR-ROLE-04` dilengkapi | Requirement tanpa baris traceability tidak dapat diaudit | P-012 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-010: sisa 10 temuan; C-005 disarankan berikutnya | Keputusan lanjutan | P-012 |
+| `docs/progress/STATE.md`, `SESSION-LOG.md`, `CONTINUE.md` | Ledger dan snapshot §0 sesi P-012 | Protokol progress | P-012 |
+
+---
+
+## 2026-09-18 (sesi P-011)
+
+Perbaikan temuan **C-011** (dua endpoint untuk definisi workflow) dan **C-013** (endpoint yang diregistrasi tetapi tidak ada di spesifikasi API). Akarnya dibereskan: **`42-API.md` ditetapkan sebagai sumber tunggal daftar endpoint**, dan `40-TSD.md` §6 dipersempit menjadi contoh pemasangan route. Dua belas fence markdown liar di empat dokumen desain juga dibersihkan karena membuat bab endpoint dirender sebagai blok kode.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/progress/prompts/P-011-2026-09-18-rekonsiliasi-daftar-endpoint.md` | Log prompt sesi ini | P-011 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/design/42-API.md` | Header: blok "Sumber tunggal endpoint" + aturan "bila berbeda, dokumen ini yang berlaku"; §5: `GET /workflows/definitions/:id` dan `POST /workflows/definitions/:id/steps` ditambahkan lengkap dengan contoh request dan izinnya; §10: `POST /admin/workflow-definitions` dihapus + penjelasan jalur tunggal; 9 fence markdown liar dihapus | **Sumber tunggal endpoint**; C-011 dan C-013 | P-011 |
+| `docs/design/40-TSD.md` | §6: daftar ~45 route diganti contoh wiring (auth, projects, documents, workflows, admin) + 3 aturan (daftar lengkap di `42-API.md`, setiap route wajib `RequirePermission`, route tanpa middleware izin hanya butuh autentikasi) + catatan bahwa definisi workflow hanya di `/workflows/definitions` | Dua daftar hampir lengkap terus berbeda (C-013); yang kedua bahkan tidak memuat `PATCH /admin/settings/:key` | P-011 |
+| `docs/design/44-SECURITY.md` | §3.3: penunjuk "pemetaan route ada di `40-TSD` §5.3/§6" diperbaiki menjadi "endpoint di `42-API.md`, pemasangan izin di `40-TSD` §5.3/§6" | Penunjuk lama menunjuk daftar yang kini sengaja tidak lengkap | P-011 |
+| `docs/design/43-WORKFLOW.md`, `docs/design/60-DEPLOYMENT.md`, `docs/design/70-TESTING.md` | Masing-masing satu fence markdown liar di akhir berkas dihapus | Fence tidak seimbang menelan bab berikutnya sebagai blok kode | P-011 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | C-011 dan C-013 → `FIXED`; baris C-009..C-013 dipecah; ringkasan 9 FIXED / 11 OPEN | Audit mencerminkan tindak lanjut nyata | P-011 |
+| `docs/progress/audits/README.md` | Status AUDIT-001: 9 dari 20 FIXED | Sama | P-011 |
+| `docs/progress/TASKS.md` | `T-023` (C-011 + C-013) DONE; `T-024` TODO baru (anotasi `Izin:` per endpoint di `42-API.md`); `T-017` dipersempit ke 11 temuan | Perbaikan harus punya task; pekerjaan yang ditunda harus tercatat | P-011 |
+| `docs/progress/TRACEABILITY.md` | Baris `FR-WF-01` dan `FR-WF-02` | Dua endpoint yang ditambahkan menyentuh requirement ini | P-011 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-010: sisa 11 temuan; C-012 disarankan berikutnya | Keputusan lanjutan | P-011 |
+| `docs/progress/STATE.md`, `SESSION-LOG.md`, `CONTINUE.md` | Ledger dan snapshot §0 sesi P-011 | Protokol progress | P-011 |
+
+---
+
+## 2026-09-18 (sesi P-010)
+
+Perbaikan temuan **C-014**: ringkasan environment variable yang usang di `90-AGENT-GUIDE.md` §7 dihapus dan diganti penunjuk ke sumber tunggalnya. Dua duplikasi konfigurasi runtime sekelas ikut dibersihkan karena keduanya salinan dari kontrak yang sama (blok YAML compose di `30-ARCHITECTURE.md` §5.1 dengan port host salah, dan kredensial `admin123` pada test E2E). Tidak ada ADR baru — ini konsolidasi dokumen, bukan keputusan arsitektur.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/progress/prompts/P-010-2026-09-18-sumber-tunggal-konfigurasi-runtime.md` | Log prompt sesi ini | P-010 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/design/90-AGENT-GUIDE.md` | §7: blok 6 variabel (termasuk `ADMIN_PASSWORD=admin123`) dihapus, diganti tabel penunjuk ke `60-DEPLOYMENT.md` §2.1 + `.env.example`, perintah `cp .env.example .env`, dan 2 aturan mengikat (jangan menyalin daftar; nilai contoh terlarang) | Ringkasan itu tidak lengkap (6 dari 20 variabel) dan memuat nilai yang justru membuat aplikasi gagal start menurut ADR-0010 | P-010 |
+| `docs/design/30-ARCHITECTURE.md` | §5.1: blok YAML compose (±30 baris, memuat `ports: ["8080:8080"]`) diganti penunjuk ke `docker-compose.yml` + `60-DEPLOYMENT.md` §2, dengan perintah validasi | Port host salah (`8081` di mesin development ini) dan menjadi sumber drift ketiga untuk konfigurasi yang sama | P-010 |
+| `docs/design/70-TESTING.md` | §5.1: kredensial login E2E dibaca dari environment (`E2E_ADMIN_USERNAME`/`E2E_ADMIN_PASSWORD`), bukan `admin`/`admin123` | Test yang memakai nilai terlarang ADR-0010 tidak akan pernah lolos terhadap deployment nyata | P-010 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | §7: butir "90-AGENT-GUIDE §7 hanyalah ringkasan" diganti menunjuk ke keadaan baru (keduanya hanya menunjuk) + larangan salinan daftar/YAML | Aturan lama mengandaikan salinan masih ada | P-010 |
+| `docs/progress/OPEN-QUESTIONS.md` | §2 item 4 (daftar env tersebar) → RESOLVED | Sumber tunggal kini benar-benar tunggal | P-010 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | Baris C-009..C-016 dipecah; C-014 → FIXED; ringkasan 7 FIXED / 13 OPEN | Audit mencerminkan tindak lanjut nyata | P-010 |
+| `docs/progress/audits/README.md` | Status AUDIT-001: 7 dari 20 FIXED | Sama | P-010 |
+| `docs/progress/TASKS.md` | `T-022` (perbaikan C-014) DONE; `T-017` dipersempit ke 13 temuan | Perbaikan harus punya task dan bukti | P-010 |
+| `docs/progress/TRACEABILITY.md` | Baris `NFR-PORT-01` ditambahkan dengan artefak `docker-compose.yml`/`.env.example` | Konfigurasi runtime kini punya bukti yang dapat dijalankan | P-010 |
+| `docs/progress/STATE.md`, `SESSION-LOG.md`, `CONTINUE.md` | Ledger dan snapshot §0 sesi P-010 | Protokol progress | P-010 |
+
+---
+
+## 2026-09-18 (sesi P-009)
+
+Perbaikan temuan audit **C-017** (matriks permission tidak ada sehingga isi migrasi `008_seed_default_roles.sql` harus dikarang) sekaligus **C-008** (hak akses audit log) yang tidak dapat dibiarkan ambigu saat matriks ditulis. Keputusan dicatat sebagai ADR-0014.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/adr/0014-matriks-permission-rbac.md` | Matriks permission = sumber tunggal migrasi `008`; kosakata tertutup 17 resource × 15 action; jumlah baris 44/30/18/12 | P-009 |
+| `docs/progress/prompts/P-009-2026-09-18-matriks-permission-rbac.md` | Log prompt sesi ini | P-009 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/design/44-SECURITY.md` | §3.1 menjadi sumber tunggal: model + §3.1.1 kosakata tertutup + §3.1.2 matriks 44 baris × 4 role + §3.1.3 aturan scoping; §3.3 hierarki dipisah menjadi role sistem dan role project + catatan C-007 | Matriks lama hanya ada di TSD dengan nama aksi yang tidak dapat dipetakan ke `role_permissions` | P-009 |
+| `docs/design/40-TSD.md` | §5.3 diganti penunjuk + contoh `RequirePermission(resource, action)`; §2.2/§6 memakai `RequirePermission`, izin admin dicek per route | Menghapus matriks kedua dan bentuk `RBACMiddleware("admin")` yang tidak dapat dipetakan ke tabel | P-009 |
+| `docs/design/41-DATABASE.md` | §2.1 komentar `resource`/`action` dan `roles.name` diarahkan ke `44-SECURITY` §3.1; §4 memuat prosedur isi migrasi `008` (4 role, 104 baris `role_permissions`, idempotent, kerangka SQL, kueri verifikasi); §4.1 langkah 3 bootstrap menetapkan role `administrator` | Isi migrasi `008` sebelumnya tidak ada di dokumen; admin pertama sebelumnya tanpa role | P-009 |
+| `docs/design/70-TESTING.md` | §4.1: test matriks memakai pasangan (resource, action) dari basis data, tambah test jumlah baris seed dan test scoping; typo `Test RBAC_Permisisons` diperbaiki | Test lama memakai `"create_project"` yang tidak ada di kosakata, dan tidak menguji isi seed | P-009 |
+| `docs/design/51-UX.md` | §2.1: baris Reports dipisah, Audit = Admin; catatan bahwa "Reviewer+" menunggu C-006 | Menutup C-008 tanpa meninggalkan label menu yang bertentangan dengan matriks | P-009 |
+| `docs/design/50-FSD.md` | §10.2 "View permission matrix" diarahkan ke sumber datanya | Role Management membaca `role_permissions`, bukan menyalin matriks | P-009 |
+| `docs/design/20-SRS.md` | FR-ROLE-03 menunjuk sumber matriks dan migrasi `008` | Requirement harus dapat diverifikasi | P-009 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | §3 langkah 4: seed `008` dari `44-SECURITY` §3.1, kriteria selesai memuat 104 baris `role_permissions` | Bootstrap Phase 0 punya target terukur | P-009 |
+| `AGENTS.md` | Baris routing "Role & permission (RBAC)" | Menemukan matriks tanpa menebak dokumen | P-009 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | C-017 dan C-008 → `FIXED` | Audit mencerminkan tindak lanjut nyata | P-009 |
+| `docs/progress/audits/README.md` | Status AUDIT-001: 6 dari 20 FIXED | Sama | P-009 |
+| `docs/adr/README.md` | Index ADR-0014 | Setiap ADR wajib terdaftar | P-009 |
+| `docs/progress/TASKS.md`, `TRACEABILITY.md`, `OPEN-QUESTIONS.md`, `STATE.md`, `SESSION-LOG.md`, `CONTINUE.md` | Ledger sesi P-009: `T-021` DONE, baris FR-ROLE-01..04, Q-010 diperbarui, snapshot §0 | Protokol progress | P-009 |
+
+---
+
+## 2026-09-18 (sesi P-008)
+
+Perbaikan tiga temuan S1 dari `AUDIT-001`: C-001 (lapisan audit log), C-002 (struktur folder backend), C-003 (status kanonik vs label & overdue turunan). Setiap keputusan dicatat sebagai ADR `ACCEPTED`, bukan diselipkan diam-diam ke dokumen. C-019 ikut tertutup sebagai efek samping C-003.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/adr/0011-audit-log-layer.md` | Mengunci C-001: audit ditulis di service, di dalam transaksi yang sama; handler tidak pernah memanggil audit | P-008 |
+| `docs/adr/0012-status-kanonik-dan-overdue-turunan.md` | Mengunci C-003: nilai kanonik vs label, dan "overdue" sebagai turunan yang tidak pernah disimpan | P-008 |
+| `docs/adr/0013-struktur-paket-backend.md` | Mengunci C-002: satu folder = satu package, tanpa subfolder per modul; `40-TSD.md` §2.0 sebagai sumber tunggal | P-008 |
+| `docs/progress/prompts/P-008-2026-09-18-perbaikan-audit-c001-c003.md` | Log prompt sesi ini | P-008 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/design/40-TSD.md` | §2.0 baru: pohon struktur folder kanonik + 5 aturan; §2.4: 5 aturan transaksi & audit; §2.6: contoh handler tanpa `AuditService`/`audit.Log` | Menjadi sumber tunggal struktur (C-002) dan lapisan audit (C-001) | P-008 |
+| `docs/design/30-ARCHITECTURE.md` | §3.2: pohon struktur (versi subfolder per modul) diganti ringkasan + tautan; §3.3: penunjuk ADR-0011 | Menghapus versi struktur kedua | P-008 |
+| `docs/design/01-AGENT-WORKFRAME.md` | §6: pohon backend diselaraskan (ada `bootstrap` dan `pkg`) + tautan ke `40-TSD.md` §2.0 | Menghapus versi struktur ketiga | P-008 |
+| `docs/design/90-AGENT-GUIDE.md` | §2.1: pohon backend diganti ringkasan + tautan; §3.1: contoh service memakai `package service`, `withTx`, dan `audit.Log(ctx, tx, ...)` | Menghapus versi struktur keempat dan contoh audit yang tidak bertransaksi | P-008 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | §3 langkah 1 diarahkan ke `40-TSD.md` §2.0; §5 butir DoD audit diperjelas (di service, satu transaksi) | DoD adalah gerbang `DONE` | P-008 |
+| `docs/design/70-TESTING.md` | §2.1/§3.1: path berkas test disesuaikan struktur flat; 3 test baru (audit satu transaksi, `is_overdue` turunan, `'overdue'` ditolak constraint) | Mitigasi yang dijanjikan ADR-0011 & ADR-0012 | P-008 |
+| `docs/design/02-AGENT-PROGRESS-PROTOCOL.md` | §9: nama berkas contoh `auth.go` → `auth_handler.go`/`auth_service.go` | Konsistensi dengan struktur flat | P-008 |
+| `docs/design/50-FSD.md` | §11 baru: tabel status kanonik vs label (documents, tasks, project/instance) + tabel nilai turunan; §6.1: "Overdue" dinyatakan turunan | Satu sumber pemetaan status (C-003) | P-008 |
+| `docs/design/51-UX.md` | §2.1: sub-menu "Pending"/"Revision" → "Pending Review"/"Revision Required" + catatan ADR-0012 | Menu tidak lagi berbeda dari label status (menutup C-019) | P-008 |
+| `docs/design/43-WORKFLOW.md` | §7: catatan bahwa keterlambatan step adalah turunan; cron hanya mengirim notifikasi | Mencegah `'overdue'` masuk kolom status | P-008 |
+| `docs/design/20-SRS.md` | FR-TASK-06: klausa "penanda turunan, bukan nilai status baru" | Requirement tidak lagi bisa ditafsirkan menambah nilai status | P-008 |
+| `docs/design/41-DATABASE.md` | §2.3/§2.5: komentar kanonik pada `documents.status` dan `tasks.status` + rujukan `50-FSD.md` §11 | DDL adalah sumber nilai; komentar mencegah nilai turunan ditambahkan | P-008 |
+| `docs/design/80-ROADMAP.md` | Phase 3: "Overdue detection" dinyatakan turunan, cron hanya notifikasi; exit criteria disesuaikan | Menghindari job yang mengubah status | P-008 |
+| `IDEA.md` | Bagian 2.G: catatan ADR-0012 bahwa "Task = Overdue" adalah penanda turunan | Dokumen sumber tetap akurat tanpa mengubah isi kebutuhan | P-008 |
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | Tabel status tindak lanjut diisi: C-001/C-002/C-003/C-019 `FIXED`, sisanya `OPEN` | Audit harus mencerminkan tindak lanjut nyata | P-008 |
+| `docs/progress/audits/README.md` | Status AUDIT-001: `3+1 dari 20 FIXED`, sisanya OPEN | Sama | P-008 |
+| `docs/progress/TASKS.md` | `T-018`/`T-019`/`T-020` (C-001/C-002/C-003) DONE; `T-017` dipersempit ke 17 temuan sisanya | Perbaikan harus punya task dan bukti | P-008 |
+| `docs/progress/TRACEABILITY.md` | Baris FR-AUDIT-01/03, FR-TASK-03/06 ditambahkan dengan dokumen desain baru | Tiga temuan menyentuh requirement | P-008 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-010 RESOLVED: user memilih C-001..C-003 lebih dulu | Keputusan sudah diambil | P-008 |
+| `docs/progress/STATE.md` | Audit terbuka: 17 temuan; posisi, next action, daftar file terakhir | Kondisi setelah perubahan | P-008 |
+| `docs/progress/SESSION-LOG.md` | Entri P-008 | Riwayat sesi | P-008 |
+| `CONTINUE.md` | §0 snapshot: prompt terakhir P-008, audit 17 temuan OPEN; §2.3a diperbarui | Titik masuk resume harus benar | P-008 |
+| `docs/adr/README.md` | Index ADR 0011-0013 | Setiap ADR wajib terdaftar | P-008 |
+
+---
+
+## 2026-09-17 (sesi P-007)
+
+Audit kontradiksi dokumen. **Tidak ada dokumen desain yang diubah pada sesi ini**, sesuai instruksi agar laporan datang lebih dulu.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` | 20 temuan kontradiksi (10 S1, 7 S2, 3 S3) dengan bukti `file:line`, dampak, dan usul resolusi | P-007 |
+| `docs/progress/audits/README.md` | Aturan direktori audit: ID temuan tetap, status tindak lanjut, larangan mengubah dokumen lain dari dalam audit | P-007 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/progress/TASKS.md` | `T-016` (audit) DONE; `T-017` (perbaikan temuan) baru | Perbaikan harus dipilih dulu | P-007 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-010 (temuan mana yang diperbaiki) ditambahkan; Q-004 ditandai BLOCKING dengan cakupan `.gitignore` | Keputusan user diperlukan sebelum memperbaiki | P-007 |
+
+---
+
+## 2026-09-17 (sesi P-006)
+
+Berkas konfigurasi runtime yang dapat dieksekusi dan tervalidasi, plus penghapusan duplikasi YAML di dokumen deployment.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `.env.example` | Cermin daftar environment variable `60-DEPLOYMENT.md` §2.1; mencatat tiga mode `DB_HOST` | P-006 |
+| `docker-compose.yml` | Compose referensi (app + postgres 16-alpine, volume, health check); port host 8081/5433 agar tidak menabrak `wms-backend` dan PostgreSQL host | P-006 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/design/60-DEPLOYMENT.md` | §2: blok YAML 60 baris diganti tabel kontrak + cara validasi; §2.1: diganti tabel variabel lengkap (17 variabel); §4.1: "Tidak Ada `init.sql`" beserta alasan; §4.2: daftar migrasi dihapus, diarahkan ke `41-DATABASE.md` §4 | Duplikasi YAML menjadi sumber drift, dan ditemukan **daftar migrasi kedua** yang berbeda dari `41-DATABASE.md` §4 | P-006 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | Endpoint health diseragamkan menjadi `GET /health`; checklist §3.1 item 2 & 6 diperbarui | `60-DEPLOYMENT.md` §5 memakai `/health`, sedangkan dokumen lain menulis `/healthz` | P-006 |
+| `docs/design/01-AGENT-WORKFRAME.md` | Pohon struktur §6 memuat `.env.example` dan `docker-compose.yml`; gap item 5 selesai | Struktur proyek harus mencerminkan berkas nyata | P-006 |
+| `docs/progress/TASKS.md` | `T-015` DONE, `T-002a` baru (`.gitignore` wajib memuat `.env`), `T-003` memakai `/health` | `.env` belum terlindungi karena `.gitignore` belum ada | P-006 |
+
+---
+
+## 2026-09-17 (sesi P-005)
+
+Pemeriksaan PostgreSQL 16 dan rencana toolchain backend. **Koreksi penting:** yang berjalan di port 5432 adalah PostgreSQL 16.10 (Postgres.app), bukan Homebrew 14.6; tidak perlu memasang PostgreSQL.
+
+### Fixed
+
+| File | Perbaikan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/progress/STATE.md` | Tabel environment & port: server 16.10 terpisah dari client 14.6; port 5432/5433; Docker tidak diperlukan | `psql --version` menampilkan versi *client*, bukan *server*, sehingga kesimpulan P-004 keliru | P-005 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | §2: PATH tiga direktori termasuk biner Postgres.app 16; §7.1: PostgreSQL tetap di 5432; §3.1 item 2 & 6a | Menghindari remapping port yang tidak perlu | P-005 |
+| `docs/progress/TASKS.md` | `T-011` mencakup biner Postgres.app; `T-013` diubah menjadi "buat role + database `bwdcs`" (tanpa instalasi); `T-014` jadi opsional | Rencana harus mencerminkan kondisi nyata | P-005 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-009 ditulis ulang: sisa kebutuhan hanya PATH, `goose`, dan pembuatan database | Sebelumnya meminta instalasi PostgreSQL yang tidak dibutuhkan | P-005 |
+| `docs/progress/prompts/P-004-...md`, `docs/progress/SESSION-LOG.md` | Catatan koreksi ditambahkan (riwayat lama tidak dihapus) | Aturan ledger append-only | P-005 |
+
+---
+
+## 2026-09-17 (sesi P-004)
+
+Keputusan auth (Q-006, Q-007) dengan opsi paling aman, penyelarasan dokumen desain, dan verifikasi tooling (T-001).
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/adr/0010-first-run-bootstrap.md` | Bootstrap organisasi & admin pertama: hanya bila tabel `users` kosong, satu transaksi, `ADMIN_PASSWORD` minimal 12 karakter dan bukan nilai contoh | P-004 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/adr/0009-logout-token-invalidation.md` | `PROPOSED` -> `ACCEPTED`; keputusan: daftar revokasi `jti` di PostgreSQL, cache 30 detik, revokasi menyeluruh saat password berubah/reset & akun dinonaktifkan | Pilihan paling aman tanpa menambah dependensi runtime (Redis ditolak) | P-004 |
+| `docs/adr/README.md` | Index: 0009 `ACCEPTED`, 0010 ditambahkan | Index harus lengkap | P-004 |
+| `docs/design/41-DATABASE.md` | DDL `token_revocations` + indeks, migrasi `009_create_token_revocations.sql`, §4.1 urutan startup (migrasi -> bootstrap -> server) | Kontrak tabel & urutan startup sebelum kode | P-004 |
+| `docs/design/44-SECURITY.md` | §2.2: klaim `jti`, tabel peristiwa revokasi, catatan jendela cache 30 detik; §2.3 session management | Perilaku logout harus eksplisit, bukan tafsiran | P-004 |
+| `docs/design/42-API.md` | §2: semantik `POST /auth/logout` (idempotent, `logout_all`, 401 untuk token dicabut) dan catatan refresh | Handler harus punya kontrak tetap | P-004 |
+| `docs/design/40-TSD.md` | `JWTClaims` memuat `JTI`; `AuthService.Logout(token, logoutAll)`, `Refresh`, `RevokeAllForUser`; §5.2.1 `RevocationStore`; §2.7 `internal/bootstrap` | Bentuk kode sebelum menulis kode | P-004 |
+| `docs/design/60-DEPLOYMENT.md` | Env `ADMIN_ORG_NAME`/`ADMIN_ORG_CODE` + catatan hanya dipakai saat tabel kosong; §4.2 urutan startup | Env yang dibutuhkan bootstrap belum terdaftar | P-004 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | §2 catatan PATH (Go ada di `/usr/local/go/bin`); §3 bootstrap termasuk migrasi 009; §3.1 checklist item 4/5/9 selesai; §7.1 port nyata 8081 & 5433 | Temuan mesin harus tercatat supaya agen berikutnya tidak salah simpulkan | P-004 |
+| `docs/design/01-AGENT-WORKFRAME.md` | Index ADR-0008/0009/0010; gap item 6 & temuan baru | Konsistensi | P-004 |
+| `docs/progress/STATE.md` | Tabel environment hasil T-001 + tabel port yang terpakai | Ledger mencerminkan kondisi nyata | P-004 |
+| `docs/progress/TASKS.md` | `T-001` DONE dengan bukti; `T-011`-`T-014` baru; `T-004`/`T-005` keluar dari BLOCKED | Papan kerja akurat | P-004 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-006 & Q-007 RESOLVED dengan bukti; Q-009 baru (izin tooling) | Keputusan tidak boleh hilang | P-004 |
+
+---
+
+## 2026-09-17 (sesi P-003)
+
+Pre-flight sebelum Phase 0: pemeriksaan kesiapan dokumen, penguncian pilihan library, dan pencatatan keputusan yang belum ada.
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `docs/adr/0008-backend-library-lockin.md` | `01-AGENT-WORKFRAME` §2.3 dan `30-ARCHITECTURE` §6 menulis "Chi/Gin" dan "SQLX/pgx" (pilihan ganda = belum diputuskan bagi agen baru), sedangkan `40-TSD` §1 sudah spesifik | P-003 |
+| `docs/adr/0009-logout-token-invalidation.md` | `44-SECURITY` §2 mewajibkan invalidasi token saat logout, mekanismenya belum ada, Redis opsional (status PROPOSED) | P-003 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `docs/adr/README.md` | Index ditambah ADR-0008 dan ADR-0009 | Index harus lengkap | P-003 |
+| `docs/design/01-AGENT-WORKFRAME.md` | §2.3 backend dikunci ke `gin` + `pgx/v5` (lihat ADR-0008) | Menghapus ambiguitas yang menghalangi penulisan `go.mod` | P-003 |
+| `docs/design/30-ARCHITECTURE.md` | §6 baris Web Framework & Backend framework dikunci ke Gin | Konsisten dengan ADR-0008 | P-003 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | §3.1 pre-flight checklist (9 item) + §7.1 port dev (8080/5432/5173) dan proxy Vite | Prasyarat kerja dan port harus ditentukan sebelum server dijalankan | P-003 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-006 (invalidasi token), Q-007 (bootstrap org & admin), Q-008 (whitelist dokumen kantor) + temuan inkonsistensi #6-#9 | Keputusan yang belum ada tidak boleh ditebak | P-003 |
+| `docs/progress/TASKS.md` | `T-004` dan `T-005` ditandai BLOCKED dengan blocker spesifik | Papan harus mencerminkan kenyataan | P-003 |
+
+---
+
+## 2026-09-17 (sesi P-002)
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `CONTINUE.md` | Titik masuk resume lintas agen/model: urutan baca dokumen, rekonstruksi posisi, urutan pekerjaan, checklist penutup, blok snapshot §0 | P-002 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `AGENTS.md` | Peringatan + baris tabel `CONTINUE.md`, langkah resume jadi langkah 1, kewajiban update snapshot, routing | Titik masuk harus terlihat sebelum agen memilih modul | P-002 |
+| `docs/design/01-AGENT-WORKFRAME.md` | `CONTINUE.md` di tabel sumber §2.1, langkah §4.1, pohon struktur §6, langkah HANDOFF | Konsistensi alur kerja | P-002 |
+| `docs/design/02-AGENT-PROGRESS-PROTOCOL.md` | `CONTINUE.md` sebagai artefak resmi + langkah RESUME/CATAT + checklist §8 | Snapshot menjadi kewajiban penutup sesi | P-002 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | §9 Resume & Handoff mengarah ke `CONTINUE.md` | Satu titik masuk untuk semua jalur resume | P-002 |
+| `docs/design/90-AGENT-GUIDE.md` | Urutan baca resume dimulai dari `CONTINUE.md` | Agen baru tidak mulai dari menebak | P-002 |
+| `docs/design/00-README.md` | Indeks dokumen luar `docs/design` ditambah `CONTINUE.md` + jalur baca | Navigasi | P-002 |
+| `docs/progress/README.md` | Inventaris + bagian resume | Ledger dan titik masuk saling merujuk | P-002 |
+| `docs/progress/TASKS.md` | `T-008` (handoff lintas agen + jaga snapshot) | Snapshot bisa mati tanpa task pengikat | P-002 |
+
+---
+
+## 2026-09-17 (sesi P-001)
+
+### Added
+
+| File | Alasan | Prompt |
+|---|---|---|
+| `DESIGN.md` | Placeholder jujur arah desain. Belum diisi, sehingga semua UI berstatus "draft without direction" (antislop R-37) | P-001 |
+| `docs/design/02-AGENT-PROGRESS-PROTOCOL.md` | Protokol wajib pencatatan progress untuk setiap prompt & perubahan file | P-001 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | Bootstrap repo kosong, konvensi git, definition of done, traceability requirement | P-001 |
+| `docs/progress/README.md` | Aturan & inventaris ledger progress | P-001 |
+| `docs/progress/STATE.md` | Snapshot kondisi proyek untuk resume agen | P-001 |
+| `docs/progress/SESSION-LOG.md` | Riwayat sesi/prompt (append-only) | P-001 |
+| `docs/progress/CHANGELOG.md` | File ini | P-001 |
+| `docs/progress/TASKS.md` | Backlog & papan task dengan ID `T-###` | P-001 |
+| `docs/progress/TRACEABILITY.md` | Matriks requirement → dokumen → file → test | P-001 |
+| `docs/progress/OPEN-QUESTIONS.md` | Pertanyaan pending yang butuh keputusan user | P-001 |
+| `docs/progress/prompts/TEMPLATE.md` | Template log per prompt | P-001 |
+| `docs/progress/prompts/P-001-2026-09-17-agent-documentation-foundation.md` | Log prompt pertama | P-001 |
+| `docs/adr/README.md` | Index & aturan ADR, sumber tunggal keputusan arsitektur | P-001 |
+| `docs/adr/0001-backend-go-sqlx.md` .. `docs/adr/0005-local-file-storage-first.md` | Migrasi keputusan yang sebelumnya tersebar di dua decision log | P-001 |
+| `docs/adr/0006-antislop-usage-mode.md`, `docs/adr/0007-design-direction-source.md` | Keputusan pending yang butuh input user (status `PROPOSED`) | P-001 |
+| `scripts/check-doc-links.sh` | Pemeriksa referensi file di seluruh `*.md`. `BROKEN` = kesalahan (exit 1), `PLANNED` = file kode/aset belum dibuat, referensi placeholder dilewati | P-001 |
+
+### Changed
+
+| File | Perubahan | Alasan | Prompt |
+|---|---|---|---|
+| `AGENTS.md` | Ditambah section "Protokol Progress (WAJIB)" dan routing dokumen baru (progress, ADR, development workflow) | Kewajiban update dokumen harus terlihat di entry file yang dibaca agen | P-001 |
+| `docs/design/00-README.md` | Index dokumen ditambah 02, 12, ADR, `DESIGN.md`, `docs/progress/` | Navigasi tidak lagi menyesatkan | P-001 |
+| `docs/design/01-AGENT-WORKFRAME.md` | §4 ditambah langkah 7 (update progress), §6 struktur proyek diperbarui, §7 decision log mengarah ke ADR, §8 diganti menjadi tabel gap & keputusan pending yang aktual | Menyatukan aturan dan menghapus daftar yang sudah usang | P-001 |
+| `docs/design/90-AGENT-GUIDE.md` | §1 ditambah jalur resume sesi, §5 decision log mengarah ke ADR, §7 quick reference ditambah perintah verifikasi progress | Agen yang melanjutkan butuh titik masuk yang benar | P-001 |
+| `docs/design/20-SRS.md` | §2.1 typo teks campuran diperbaiki; §2.4/§2.5 constraint diselaraskan dengan ADR-0004 (deployment fleksibel, Docker opsional) | SRS bertentangan dengan 01-AGENT-WORKFRAME dan 00-README | P-001 |
+| `docs/design/80-ROADMAP.md` | §3 progress bar 100% diganti tabel status nyata + pointer ke `docs/progress/STATE.md` | Progress bar lama mengklaim MVP selesai padahal kode belum ada | P-001 |
+| `docs/design/12-DEVELOPMENT-WORKFLOW.md` | §8 perintah link check diganti pemanggilan `scripts/check-doc-links.sh` | Perintah grep lama me-resolve path dari root sehingga menghasilkan false positive | P-001 |
+| `docs/design/90-AGENT-GUIDE.md` | §7 quick reference memakai `scripts/check-doc-links.sh` + keterangan arti BROKEN/PLANNED | Konsisten dengan alur verifikasi resmi | P-001 |
+| `docs/progress/OPEN-QUESTIONS.md` | Q-003 menulis `skills/<nama>/SKILL.md` (sebelumnya nama berkas tanpa path sehingga terdeteksi sebagai referensi rusak) | Agar pemeriksa referensi tidak bising oleh penulisan placeholder | P-001 |

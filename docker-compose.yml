@@ -1,0 +1,103 @@
+# docker-compose.yml — referensi resmi deployment BWDCS
+#
+# Sumber: docs/design/60-DEPLOYMENT.md §2 dan ADR-0004 (mekanisme deployment
+# fleksibel; Docker Compose adalah referensi, bukan syarat).
+#
+# Validasi tanpa menjalankan apa pun (tidak mengunduh image):
+#   docker compose --env-file .env.example -f docker-compose.yml config -q
+#
+# DUA MODE PEMAKAIAN
+#
+#   A. Self-contained (default)
+#      docker compose up -d
+#      Menjalankan app + container PostgreSQL 16. Data PostgreSQL masuk ke
+#      volume `pgdata`, dan port host yang dipakai adalah 5433 supaya tidak
+#      bertabrakan dengan PostgreSQL 16 yang sudah berjalan di host (5432).
+#
+#   B. Memakai PostgreSQL yang sudah ada di host
+#      Set di `.env`: DB_HOST=host.docker.internal dan DB_PORT=5432, lalu
+#      docker compose up -d app --no-deps
+#      `--no-deps` mencegah container postgres ikut dinyalakan.
+#
+# CATATAN LOKAL (mesin development ini, lihat docs/progress/STATE.md §2)
+#   - Port 8080 sudah dipakai proses lain (`wms-backend`), jadi app dipetakan
+#     ke host 8081. Port di dalam container tetap 8080 sesuai APP_PORT.
+#   - PostgreSQL 16.10 (Postgres.app) sudah berjalan di host:5432.
+#   - Dockerfile backend belum ada sampai task T-003; `docker compose build`
+#     baru bisa berhasil setelah itu.
+#
+# Untuk produksi: hapus pemetaan port `postgres` (tidak boleh terbuka ke host),
+# lihat 60-DEPLOYMENT.md §8 (Security Hardening).
+
+name: bwdcs
+
+services:
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: bwdcs/app:local
+    container_name: bwdcs-app
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: "8080"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-bwdcs}
+      DB_USER: ${DB_USER:-bwdcs}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD wajib diisi di .env}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET wajib diisi di .env (minimal 32 karakter)}
+      JWT_EXPIRY: ${JWT_EXPIRY:-24h}
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      STORAGE_PATH: /app/storage
+      REDIS_URL: ${REDIS_URL:-}
+      # Bootstrap admin pertama; hanya berefek bila tabel users masih kosong (ADR-0010).
+      ADMIN_ORG_NAME: ${ADMIN_ORG_NAME:-}
+      ADMIN_ORG_CODE: ${ADMIN_ORG_CODE:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+    ports:
+      - "${APP_HOST_PORT:-8081}:8080"
+    volumes:
+      - storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # Sama dengan endpoint di 60-DEPLOYMENT.md §5 (`GET /health`).
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: bwdcs-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-bwdcs}
+      POSTGRES_USER: ${DB_USER:-bwdcs}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD wajib diisi di .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Skema TIDAK dibuat lewat init.sql. Semua perubahan skema memakai migrasi
+      # goose (ADR-0003): 001-009 di backend/internal/migration/.
+    ports:
+      # Hapus baris ini di produksi. 5433 dipakai agar tidak menabrak PostgreSQL
+      # yang sudah berjalan di host:5432.
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-bwdcs} -d ${DB_NAME:-bwdcs}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+    driver: local
+  storage:
+    driver: local

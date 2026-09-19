@@ -1,0 +1,33 @@
+# --- Rahasia & konfigurasi lokal (T-002a: .env TIDAK boleh masuk repo) ---
+.env
+.env.*
+!.env.example
+
+# --- Storage dokumen lokal (ADR-0005; pola tanpa garis miring cocok di semua level) ---
+storage/
+
+# --- Artefak build backend ---
+bin/
+*.exe
+*.test
+*.out
+coverage.out
+
+# --- Frontend (Phase 4) ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Editor & OS ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+*.swp
+
+# --- State tooling lokal (bukan bagian proyek) ---
+.freebuff/
