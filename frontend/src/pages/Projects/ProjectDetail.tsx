@@ -1,11 +1,18 @@
+import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import { Button } from "@/components/common/Button";
 import { DataTable, type DataTableColumn } from "@/components/common/DataTable";
+import { Dialog } from "@/components/common/Dialog";
+import { Field } from "@/components/common/Field";
+import { SelectField } from "@/components/common/SelectField";
 import { Panel } from "@/components/common/Panel";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/States";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAuditList } from "@/queries/audit";
+import { useAdminUsers } from "@/queries/admin";
 import { useDocumentList } from "@/queries/documents";
 import { useProject } from "@/queries/projects";
 import { useTaskList } from "@/queries/tasks";
@@ -16,12 +23,17 @@ import type { DocumentRecord } from "@/services/documents";
 import type { TaskRecord } from "@/services/tasks";
 import type { WorkflowInstance } from "@/services/workflows";
 import {
+  addProjectMember,
   projectMemberRoleLabels,
+  projectMemberRoles,
+  removeProjectMember,
   type ProjectMember,
 } from "@/services/projects";
+import { useAuthStore } from "@/store/auth";
 import { documentStatus, projectStatus, taskStatus } from "@/types/status";
 import { EMPTY_DATE, EMPTY_VALUE, formatTimestamp } from "@/utils/format";
 import { OverdueFlag } from "@/components/common/StatusBadge";
+import type { AdminUser } from "@/services/admin";
 
 /** Bagian halaman detail yang memang sudah dibangun pada sesi ini. */
 const builtTabs = ["overview", "members", "documents", "tasks", "workflow", "activity"] as const;
@@ -87,6 +99,37 @@ export function ProjectDetailPage() {
     { enabled: tab === "activity" && id !== "" },
   );
 
+  const currentUser = useAuthStore((s) => s.profile);
+  const canManageMembers = currentUser?.permissions.includes("project_member:manage") ?? false;
+
+  const queryClient = useQueryClient();
+
+  const addMemberMutation = useMutation({
+    mutationFn: (input: { user_id: string; role: "owner" | "manager" | "contributor" | "viewer" }) =>
+      addProjectMember(id, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["project", id] });
+    },
+  });
+
+  const removeMemberMutation = useMutation({
+    mutationFn: (userId: string) => removeProjectMember(id, userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["project", id] });
+    },
+  });
+
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [selectedRole, setSelectedRole] = useState<string>("contributor");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const usersQuery = useAdminUsers(
+    { search: searchQuery, limit: 20 },
+    { enabled: showAddDialog },
+  );
+
   if (query.isPending) {
     return (
       <div className="flex flex-col gap-5">
@@ -122,6 +165,46 @@ export function ProjectDetailPage() {
   }
 
   const { project, members } = detail;
+
+  const handleAddMember = async () => {
+    setFormError(null);
+    if (!selectedUserId) {
+      setFormError("Pilih pengguna terlebih dahulu.");
+      return;
+    }
+    try {
+      await addMemberMutation.mutateAsync({
+        user_id: selectedUserId,
+        role: selectedRole as "owner" | "manager" | "contributor" | "viewer",
+      });
+      setShowAddDialog(false);
+      setSearchQuery("");
+      setSelectedUserId("");
+      setSelectedRole("contributor");
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 409) {
+          setFormError("Pengguna sudah menjadi anggota project ini.");
+        } else if (error.status === 422) {
+          setFormError((error.details as { message?: string })?.message ?? "Role tidak sah.");
+        } else {
+          setFormError(error.message ?? "Gagal menambahkan anggota.");
+        }
+      } else {
+        setFormError("Terjadi kesalahan jaringan.");
+      }
+    }
+  };
+
+  const handleRemoveMember = async (userId: string) => {
+    try {
+      await removeMemberMutation.mutateAsync(userId);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        alert("Pemilik project tidak dapat dicabut keanggotaannya.");
+      }
+    }
+  };
 
   const documentColumns: DataTableColumn<DocumentRecord>[] = [
     {
@@ -294,6 +377,24 @@ export function ProjectDetailPage() {
       width: "180px",
       render: (row) => formatTimestamp(row.joined_at),
     },
+    {
+      key: "actions",
+      header: "Aksi",
+      width: "100px",
+      align: "right",
+      render: (row) =>
+        row.role === "owner" ? (
+          <span className="text-12 text-text-muted">-</span>
+        ) : canManageMembers ? (
+          <button
+            type="button"
+            onClick={() => void handleRemoveMember(row.user_id)}
+            className="text-12 text-danger hover:underline"
+          >
+            Hapus
+          </button>
+        ) : null,
+    },
   ];
 
   const metadata: { label: string; value: string }[] = [
@@ -304,6 +405,15 @@ export function ProjectDetailPage() {
     { label: "Dibuat", value: formatTimestamp(project.created_at) },
     { label: "Diperbarui", value: formatTimestamp(project.updated_at) },
   ];
+
+  const availableUsers = usersQuery.data?.items ?? [];
+  const filteredUsers = availableUsers.filter(
+    (u) =>
+      u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.email.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
+
+  const selectedUser = filteredUsers.find((u) => u.id === selectedUserId);
 
   return (
     <div className="flex flex-col gap-5">
@@ -436,18 +546,35 @@ export function ProjectDetailPage() {
       ) : null}
 
       {tab === "members" ? (
-        <DataTable
-          caption="Anggota project"
-          columns={memberColumns}
-          rows={members}
-          rowKey={(row) => row.user_id}
-          emptyState={
-            <EmptyState
-              title="Belum ada anggota"
-              description="Server selalu menambahkan pemilik sebagai anggota ber-role Owner, jadi keadaan ini seharusnya tidak terjadi."
-            />
+        <Panel
+          title="Anggota project"
+          note="GET /projects/:id - daftar lengkap anggota dalam cakupan."
+          actions={
+            canManageMembers ? (
+              <Button
+                variant="primary"
+                onClick={() => setShowAddDialog(true)}
+                disabled={addMemberMutation.isPending}
+              >
+                Tambah anggota
+              </Button>
+            ) : null
           }
-        />
+        >
+          <DataTable<ProjectMember>
+            caption="Anggota project"
+            columns={memberColumns}
+            rows={members}
+            rowKey={(row) => row.user_id}
+            actionsHeader="Aksi"
+            emptyState={
+              <EmptyState
+                title="Belum ada anggota"
+                description="Server selalu menambahkan pemilik sebagai anggota ber-role Owner, jadi keadaan ini seharusnya tidak terjadi."
+              />
+            }
+          />
+        </Panel>
       ) : null}
 
       {tab === "documents" ? (
@@ -582,10 +709,113 @@ export function ProjectDetailPage() {
           </Panel>
         ))}
 
-      <p className="text-12 text-text-muted">
-        Menambah atau mencabut anggota belum tersedia: keduanya butuh memilih
-        pengguna, dan belum ada endpoint pencarian pengguna (catatan C-063).
-      </p>
+      {showAddDialog ? (
+        <Dialog
+          title="Tambah anggota project"
+          description="Cari pengguna dan tentukan peran project-nya."
+          onClose={() => {
+            setShowAddDialog(false);
+            setSearchQuery("");
+            setSelectedUserId("");
+            setSelectedRole("contributor");
+            setFormError(null);
+          }}
+          footer={
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowAddDialog(false);
+                  setSearchQuery("");
+                  setSelectedUserId("");
+                  setSelectedRole("contributor");
+                  setFormError(null);
+                }}
+                disabled={addMemberMutation.isPending}
+              >
+                Batal
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => void handleAddMember()}
+                disabled={addMemberMutation.isPending || !selectedUserId}
+              >
+                Tambahkan
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-4">
+            <Field
+              label="Cari pengguna"
+              hint="Ketik nama atau surel untuk menyaring."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSelectedUserId("");
+              }}
+              placeholder="Nama atau surel..."
+            />
+
+            {usersQuery.isPending ? (
+              <TableSkeleton rows={3} columns={1} />
+            ) : usersQuery.error instanceof ApiError ? (
+              <p className="text-12 text-danger">Gagal memuat daftar pengguna.</p>
+            ) : filteredUsers.length === 0 && searchQuery ? (
+              <p className="text-13 text-text-muted">Tidak ditemukan pengguna yang cocok.</p>
+            ) : (
+              <fieldset className="flex flex-col gap-2 rounded-panel border border-line p-3">
+                <legend className="text-12 font-medium text-text-muted">Hasil pencarian</legend>
+                {filteredUsers.map((user: AdminUser) => (
+                  <label
+                    key={user.id}
+                    className={[
+                      "flex cursor-pointer items-center gap-3 rounded-control px-2 py-1.5",
+                      "hover:bg-surface-hover",
+                      selectedUserId === user.id ? "bg-surface-hover" : "",
+                    ].join(" ")}
+                  >
+                    <input
+                      type="radio"
+                      name="selected-user"
+                      value={user.id}
+                      checked={selectedUserId === user.id}
+                      onChange={() => setSelectedUserId(user.id)}
+                      className="h-4 w-4 accent-text"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-13 font-medium text-text">{user.username}</span>
+                      <span className="text-12 text-text-muted">{user.email}</span>
+                    </div>
+                  </label>
+                ))}
+              </fieldset>
+            )}
+
+            <SelectField
+              label="Peran project"
+              value={selectedRole}
+              onChange={(e) => setSelectedRole(e.target.value as string)}
+            >
+              {projectMemberRoles.map((role) => (
+                <option key={role} value={role}>
+                  {projectMemberRoleLabels[role]}
+                </option>
+              ))}
+            </SelectField>
+
+            {formError ? (
+              <p className="text-12 text-danger">{formError}</p>
+            ) : null}
+
+            {selectedUser ? (
+              <p className="text-12 text-text-muted">
+                Pengguna yang dipilih: <span className="text-text">{selectedUser.username}</span>
+              </p>
+            ) : null}
+          </div>
+        </Dialog>
+      ) : null}
     </div>
   );
 }

@@ -68,6 +68,14 @@ vi.mock("@/services/audit", async (importOriginal) => {
   };
 });
 
+vi.mock("@/services/admin", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/admin")>();
+  return {
+    ...actual,
+    listAdminUsers: mocks.list,
+  };
+});
+
 const { ProjectDetailPage } = await import("./ProjectDetail");
 
 const detail: ProjectDetail = {
@@ -124,6 +132,8 @@ beforeEach(() => {
   mocks.listWorkflows.mockResolvedValue({ items: [], meta: { page: 1, limit: 20, total: 0, total_page: 0 } });
   mocks.listAudit.mockReset();
   mocks.listAudit.mockResolvedValue({ items: [], meta: { page: 1, limit: 50, total: 0, total_page: 0 } });
+  mocks.list.mockReset();
+  mocks.list.mockResolvedValue({ items: [], meta: { page: 1, limit: 20, total: 0, total_page: 0 } });
   useAuthStore.setState({
     status: "authenticated",
     profile,
@@ -232,5 +242,87 @@ describe("halaman detail project", () => {
     await screen.findByRole("heading", { name: "Website Redesign" });
 
     expect(await runAxe(container)).toEqual([]);
+  });
+
+  it("menampilkan tombol Tambah anggota pada tab Members ketika memiliki izin manage", async () => {
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: { ...profile, permissions: ["project:read", "project_member:read", "project_member:manage"] },
+      error: null,
+      pending: false,
+    });
+    renderDetail("/projects/p1?tab=members");
+    await screen.findByRole("heading", { name: "Website Redesign" });
+
+    const addButton = screen.getByRole("button", { name: /Tambah anggota/i });
+    expect(addButton).toBeInTheDocument();
+  });
+
+  it("tidak menampilkan tombol Tambah anggota ketika tanpa izin manage", async () => {
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: { ...profile, permissions: ["project:read", "project_member:read"] },
+      error: null,
+      pending: false,
+    });
+    renderDetail("/projects/p1?tab=members");
+    await screen.findByRole("heading", { name: "Website Redesign" });
+
+    expect(screen.queryByRole("button", { name: /Tambah anggota/i })).not.toBeInTheDocument();
+  });
+
+  it("menampilkan tombol Hapus untuk anggota bukan owner", async () => {
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: { ...profile, permissions: ["project:read", "project_member:read", "project_member:manage"] },
+      error: null,
+      pending: false,
+    });
+    renderDetail("/projects/p1?tab=members");
+    await screen.findByRole("heading", { name: "Website Redesign" });
+
+    const table = screen.getByRole("table", { name: "Anggota project" });
+    expect(within(table).getByText("Hapus")).toBeInTheDocument();
+  });
+
+  it("tidak menampilkan tombol Hapus untuk owner", async () => {
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: { ...profile, permissions: ["project:read", "project_member:read", "project_member:manage"] },
+      error: null,
+      pending: false,
+    });
+    renderDetail("/projects/p1?tab=members");
+    await screen.findByRole("heading", { name: "Website Redesign" });
+
+    const table = screen.getByRole("table", { name: "Anggota project" });
+    const adminRow = within(table).getByRole("row", { name: /admin/i });
+    expect(within(adminRow).queryByText("Hapus")).not.toBeInTheDocument();
+  });
+
+  it("membuka dialog tambah anggota dan menampilkan hasil pencarian pengguna", async () => {
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: { ...profile, permissions: ["project:read", "project_member:read", "project_member:manage"] },
+      error: null,
+      pending: false,
+    });
+    renderDetail("/projects/p1?tab=members");
+    await screen.findByRole("heading", { name: "Website Redesign" });
+
+    mocks.list.mockResolvedValue({
+      items: [
+        { id: "u3", username: "newuser", email: "new@example.test", is_active: true, roles: ["contributor"] },
+      ],
+      meta: { page: 1, limit: 20, total: 1, total_page: 1 },
+    });
+
+    const addButton = screen.getByRole("button", { name: /Tambah anggota/i });
+    await vi.waitFor(() => expect(addButton).toBeEnabled());
+    await addButton.click();
+
+    expect(screen.getByRole("dialog", { name: /Tambah anggota project/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Cari pengguna/i)).toBeInTheDocument();
+    await vi.waitFor(() => expect(screen.getByText("newuser")).toBeInTheDocument());
   });
 });

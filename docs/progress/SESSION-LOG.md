@@ -8,6 +8,15 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-070 — 2026-09-24 — Project Members CRUD UI (T-084)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md"
+- **Konstruksi:** `services/admin.ts` (listAdminUsers, listAdminRoles, listAdminOrganizations), `queries/admin.ts` (useAdminUsers), `components/common/SelectField.tsx` (select field dengan label/hint/error), `ProjectDetail.tsx` — tab Members: tombol "Tambah anggota" (project_member:manage), dialog add member (radio user search via useAdminUsers, select role via SelectField, formError 409/422), baris tabel dengan kolom "Aksi": Hapus button (bukan owner, project_member:manage), owner → "-"; invalidasi kueri project sesudah add/remove; `ProjectDetail.test.tsx` 5 test baru (manage button muncul, tidak muncul tanpa izin, Hapus untuk non-owner, tidak untuk owner, dialog + search results).
+- **Bukti:** `tsc --noEmit` bersih, `eslint .` bersih, frontend **299 test / 30 berkas** (naik 5), `check-ledger OK 283`, `readme-facts OK 51`, `api-contract OK 126/56`, `BROKEN 0`, `antislop-refs OK` (R-02 em dash diperbaiki → `-`), `navigation OK`. Menutup **C-063/Q-024**.
+- **Status:** DONE. **Next:** `T-085` Documents category filter (`?category_id=` di `Documents` page).
+
+---
+
 ## P-069 — 2026-09-24 — Administration Users/Roles/Organizations (T-083)
 
 - **Prompt user:** "Lanjutkan sesuai CONTINUE.md"

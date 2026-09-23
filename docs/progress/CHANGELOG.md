@@ -6,6 +6,23 @@
 
 ---
 
+## 2026-09-24 (sesi P-070)
+
+Project Members CRUD UI `T-084` DONE. Tab Members di `ProjectDetail.tsx`: tombol "Tambah anggota" (hanya bila `project_member:manage`), dialog add member (radio user search via `GET /admin/users` + select role `SelectField`, formError 409/422 inline), hapus anggota bukan owner via `DELETE /projects/:id/members/:userId` + invalidasi kueri project. Baru: `services/admin.ts`, `queries/admin.ts`, `components/common/SelectField.tsx`. Frontend **294 → 299 test** (naik 5), menutup **C-063/Q-024**.
+
+### Added
+
+- `frontend/src/services/admin.ts` — `listAdminUsers`, `listAdminRoles`, `listAdminOrganizations` (P-070)
+- `frontend/src/queries/admin.ts` — `useAdminUsers` (P-070)
+- `frontend/src/components/common/SelectField.tsx` — select field dengan label/hint/error (P-070)
+
+### Changed
+
+- `frontend/src/pages/Projects/ProjectDetail.tsx` — tab Members: tombol "Tambah anggota", dialog add, kolom Aksi (Hapus untuk non-owner, "-" untuk owner), error handling 409/422 (P-070)
+- `frontend/src/pages/Projects/ProjectDetail.test.tsx` — 5 test baru: manage button visible, hidden without permission, Hapus for non-owner, not for owner, dialog + search (P-070)
+
+---
+
 ## 2026-09-24 (sesi P-069)
 
 Administration Users/Roles/Organizations `GET /admin/users`, `POST /admin/users`, `GET /admin/roles`, `GET /admin/organizations` (user:read/create, role:read, organization:read, Admin saja) — `T-083` DONE. `UserService` ListUsers (search, page/limit, total), CreateUser (username/email/password 8+, role_ids UUID, bcrypt 12, tx + user_roles, audit USER_CREATED), ListRoles, ListOrganizations; `UserHandler` 4 handlers + validasi 401/403/422 + 201/200; `router.go` 5 admin routes (51 total, 1→5 admin), `user_handler_test.go` (401/403, list 200 meta, create 201 + search, roles 200, viewer 403).
