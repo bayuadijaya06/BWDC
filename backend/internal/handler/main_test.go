@@ -79,6 +79,7 @@ type engineParts struct {
 	analytics    *service.AnalyticsService
 	notification *service.NotificationService
 	audit        *service.AuditReadService
+	report       *service.ReportService
 }
 
 // newEngine merakit engine lengkap seperti `cmd/server/main.go` merakitnya.
@@ -139,6 +140,13 @@ func newEngineParts(t *testing.T, maxLoginAttempts int) engineParts {
 	auditService := service.NewAuditReadService(
 		repository.NewAuditRepository(testPool),
 	)
+	reportService := service.NewReportService(
+		testPool,
+		repository.NewProjectRepository(testPool),
+		repository.NewDocumentRepository(testPool),
+		repository.NewTaskRepository(testPool),
+		users,
+	)
 
 	engine := gin.New()
 	handler.Setup(engine, handler.RouterDeps{
@@ -155,6 +163,7 @@ func newEngineParts(t *testing.T, maxLoginAttempts int) engineParts {
 		Analytics:    handler.NewAnalyticsHandler(analyticsService, discardLogger()),
 		Notification: handler.NewNotificationHandler(notificationService, discardLogger()),
 		Audit:        handler.NewAuditHandler(auditService, discardLogger()),
+		Report:       handler.NewReportHandler(reportService, discardLogger()),
 		AuthMiddleware: middleware.AuthMiddleware(middleware.AuthConfig{
 			Validator: tokens,
 			Sessions:  revocations,
@@ -173,6 +182,7 @@ func newEngineParts(t *testing.T, maxLoginAttempts int) engineParts {
 		analytics:    analyticsService,
 		notification: notificationService,
 		audit:        auditService,
+		report:       reportService,
 	}
 }
 

@@ -8,6 +8,15 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-068 — 2026-09-24 — Reports Export GET /reports/export CSV (T-082)
+
+- **Prompt user:** "Commit dan push seluruh progress ke repository. Lanjutkan sesuai file CONTINUE.md." + "Lanjutkan sesuai CONTINUE.md"
+- **Konstruksi:** `dto/report_dto.go` `ReportExportQuery`; `service/report_service.go` `REPORT_EXPORTED` + `ReportService Export` CSV (header = kolom tabel 50-FSD, `systemScope`/`taskScope` Limit 10000) + audit `NewAuditService.Log` dalam `pool.Begin` tx; `handler/report_handler.go` `Export` + `parseReportExportQuery` (type projects/documents/tasks, format csv, project_id UUID) `200 text/csv` `Content-Disposition: attachment; filename="bwdcs-<type>-<YYYYMMDD>.csv"` + `401`/`403`/`422` `field=type/format/project_id`; `router.go` `Report` deps + `GET /reports/export` `report:export` (47 route, 1 reports); `main.go` wiring `reportService`; `main_test.go` engineParts `report`; `report_handler_test.go` validation (401/403/422) + success (projects/documents/tasks 200 text/csv Disposition `bwdcs-*` header `code`/`document_number`/`title`); `check-readme-facts.sh` ember `reports` + `README 46→47`; `STATE 279→281`.
+- **Bukti:** `go vet`/`go build` OK, `make test` 9 paket **281 test** (handler 2 baru), `check-ledger OK (281)`, `readme-facts OK (47)`, `api-contract OK (122/56)`, `BROKEN 0`, `antislop-refs OK`, `navigation OK`, `typecheck/lint/test:run/build` hijau.
+- **Status:** DONE. **Next:** `T-083` Administration Users/Roles/Organizations.
+
+---
+
 ## P-067 — 2026-09-24 — Perbaikan create button, grouping chart dashboard, kontras dark, audit antislop (T-090)
 
 - **Prompt user:** "Perbaiki tampilan create button, kurang kontras di dark mode, samakan dengan button 'Daftar Project' pada laman detail proyek. Grouping chart di dashboard menjadi beberapa tab agar tidak penuh pada satu laman, tampilan chart kurang kontras di dark mode, sehingga sulit untuk dibaca. Cek semua UI yang sudah anda buat, pastikan selaras dengan rules antislop. Jika ada yang masih belum sesuai, segera sesuaikan." + lanjutan "Cantumkan seluruh perubahan pada dokumen progress dan aplikasi BWDCS, kemudian lanjutkan CONTINUE.md, kerjakan sebanyak yang anda mampu dalam satu sesi, jangan hanya satu task jika memungkinkan."

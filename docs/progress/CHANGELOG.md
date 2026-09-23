@@ -6,6 +6,29 @@
 
 ---
 
+## 2026-09-24 (sesi P-068)
+
+Reports Export `GET /reports/export?type=projects|documents|tasks&format=csv` (report:export, cakupan 44-SECURITY §3.1.3, audit REPORT_EXPORTED) — `T-082` DONE. `ReportService` CSV header = kolom tabel 50-FSD (projects: code/name/status/owner/start/target/member_count/created_at; documents: document_number/title/category/status/version/owner/updated_at; tasks: title/status/priority/due_date/assignee/project) dengan `systemScope` / `taskScope` + Limit 10000, `ReportHandler` validasi `type`/`format`/`project_id` (422) + `401`/`403`, `router.go` 1 reports route (47 total), `main.go` wiring, `main_test.go` report engine, `report_handler_test.go` (401/403/422 + 200 csv header + Content-Disposition `bwdcs-<type>-<YYYYMMDD>.csv` + audit), `check-readme-facts.sh` ember reports + `README 46→47`, `STATE 279→281`.
+
+### Added
+
+- `backend/internal/dto/report_dto.go` — `ReportExportQuery` (P-068)
+- `backend/internal/service/report_service.go` — `REPORT_EXPORTED` + `Export` CSV + audit tx (P-068)
+- `backend/internal/handler/report_handler.go` — `Export` + `parseReportExportQuery` (P-068)
+- `backend/internal/handler/report_handler_test.go` — `TestReportExportValidation` + `TestReportExportSuccess` (P-068)
+- `docs/progress/prompts/P-068-2026-09-24-reports-export.md` (P-068)
+
+### Changed
+
+- `backend/internal/handler/router.go` — `Report` deps + `GET /reports/export` `report:export` (P-068)
+- `backend/cmd/server/main.go` — `reportService` wiring + `Report` handler (P-068)
+- `backend/internal/handler/main_test.go` — `report` engineParts + wiring (P-068)
+- `scripts/check-readme-facts.sh` — `n_reports` + `known_receivers` + `actual_parts` reports (P-068)
+- `README.md` — `46 → 47 route (1 reports)` (P-068)
+- `docs/progress/STATE.md` — `279 → 281 test` (P-068)
+
+---
+
 ## 2026-09-24 (sesi P-067)
 
 Perbaikan create button, grouping chart dashboard, kontras dark mode, audit antislop — `T-090` DONE. Create button `primary` `bg-accent text-paper-000` (dark `1.74:1` FAIL) → `bg-text text-surface-raised border-text hover:opacity-90` (light `17.8:1`, dark `14.1:1` — setara `Daftar Project` `border-line-strong bg-surface-raised text-text`). Dashboard 8 chart dalam satu grid → 3 tab `Dokumen` (Sebaran, Funnel, Kategori) / `Workflow` (Volume, Approval, Activity) / `Antrian` (Aging, Avg Time) dengan `role=tablist` `aria-selected`; per chart `CartesianGrid stroke var(--line)`, `XAxis/YAxis tick var(--text-muted) stroke var(--line-strong)`, `Tooltip contentStyle bg var(--surface-raised) border var(--line)`, `Legend wrapperStyle var(--text-muted)`. Test `Dashboard.test.tsx` tab grouping + `Tasks.test.tsx` `WEB` title.

@@ -82,20 +82,21 @@ n_workflow=$(route_receiver workflows)
 n_analytics=$(route_receiver analytics)
 n_notification=$(route_receiver notifications)
 n_audit=$(route_receiver audit)
+n_reports=$(route_receiver reports)
 n_total=$(route_total)
 
 # Setiap penerima route harus punya ember di atas. Tanpa pemeriksaan ini sebuah group baru akan
 # menambah total tanpa masuk rincian, dan README akan tampak cocok padahal tidak.
-known_receivers="r auth admin projects documents tasks comments workflows analytics notifications audit"
+known_receivers="r auth admin projects documents tasks comments workflows analytics notifications audit reports"
 unclassified=$(grep -oE "$ROUTE_RE" "$ROUTER" | sed -E 's/^[[:space:]]+([A-Za-z0-9_]+)\..*/\1/' | sort -u | grep -vxE "$(printf '%s' "$known_receivers" | tr ' ' '|')" || true)
 if [ -n "$unclassified" ]; then
   fail_msg "$ROUTER: group route belum terklasifikasi di skrip ini ($(printf '%s' "$unclassified" | tr '\n' ' ')) — tambahkan embernya di sini dan di README, lalu perbarui jumlahnya"
 fi
 
-sum_parts=$((n_health + n_auth + n_admin + n_project + n_document + n_task + n_comment + n_workflow + n_analytics + n_notification + n_audit))
+sum_parts=$((n_health + n_auth + n_admin + n_project + n_document + n_task + n_comment + n_workflow + n_analytics + n_notification + n_audit + n_reports))
 [ "$sum_parts" -eq "$n_total" ] || fail_msg "$ROUTER: rincian route berjumlah $sum_parts, total tercatat $n_total — ada route yang lolos dari pengklasifikasian"
 
-info "route: $n_total ($n_health health, $n_auth auth, $n_admin admin, $n_project project, $n_document document, $n_task task, $n_comment comment, $n_workflow workflow, $n_analytics analytics, $n_notification notifications, $n_audit audit) <- $ROUTER"
+info "route: $n_total ($n_health health, $n_auth auth, $n_admin admin, $n_project project, $n_document document, $n_task task, $n_comment comment, $n_workflow workflow, $n_analytics analytics, $n_notification notifications, $n_audit audit, $n_reports reports) <- $ROUTER"
 
 hit=$(grep -nE 'router: \*\*[0-9]+ route\*\*' "$README" | head -1)
 checks=$((checks + 1))
@@ -107,14 +108,14 @@ else
   [ "$claimed_total" = "$n_total" ] || fail_msg "$README:$no: jumlah route ditulis $claimed_total, sebenarnya $n_total (sumber: $ROUTER)"
 fi
 
-actual_parts="(1 health, $n_auth auth, $n_admin admin, $n_project project, $n_document document, $n_task task, $n_comment comment, $n_workflow workflow, $n_analytics analytics, $n_notification notifications, $n_audit audit)"
-hit=$(grep -nE '\(1 health, [0-9]+ auth, [0-9]+ admin, [0-9]+ project, [0-9]+ document, [0-9]+ task, [0-9]+ comment, [0-9]+ workflow, [0-9]+ analytics, [0-9]+ notifications, [0-9]+ audit\)' "$README" | head -1)
+actual_parts="(1 health, $n_auth auth, $n_admin admin, $n_project project, $n_document document, $n_task task, $n_comment comment, $n_workflow workflow, $n_analytics analytics, $n_notification notifications, $n_audit audit, $n_reports reports)"
+hit=$(grep -nE '\(1 health, [0-9]+ auth, [0-9]+ admin, [0-9]+ project, [0-9]+ document, [0-9]+ task, [0-9]+ comment, [0-9]+ workflow, [0-9]+ analytics, [0-9]+ notifications, [0-9]+ audit, [0-9]+ reports\)' "$README" | head -1)
 checks=$((checks + 1))
 if [ -z "$hit" ]; then
   fail_msg "$README: rincian route per modul tidak ditemukan — perbarui pola di skrip ini"
 else
   no=${hit%%:*}
-  claimed_parts=$(printf '%s' "${hit#*:}" | grep -oE '\(1 health, [0-9]+ auth, [0-9]+ admin, [0-9]+ project, [0-9]+ document, [0-9]+ task, [0-9]+ comment, [0-9]+ workflow, [0-9]+ analytics, [0-9]+ notifications, [0-9]+ audit\)' | head -1)
+  claimed_parts=$(printf '%s' "${hit#*:}" | grep -oE '\(1 health, [0-9]+ auth, [0-9]+ admin, [0-9]+ project, [0-9]+ document, [0-9]+ task, [0-9]+ comment, [0-9]+ workflow, [0-9]+ analytics, [0-9]+ notifications, [0-9]+ audit, [0-9]+ reports\)' | head -1)
   [ "$claimed_parts" = "$actual_parts" ] || fail_msg "$README:$no: rincian route ditulis \"$claimed_parts\", sebenarnya \"$actual_parts\" (sumber: $ROUTER)"
 fi
 

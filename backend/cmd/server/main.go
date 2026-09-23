@@ -211,6 +211,15 @@ func run() error {
 		repository.NewAuditRepository(pool),
 	)
 
+	// --- Reports Export (`42-API.md` §10, 50-FSD §10.6, FR-REP-01)
+	reportService := service.NewReportService(
+		pool,
+		repository.NewProjectRepository(pool),
+		repository.NewDocumentRepository(pool),
+		repository.NewTaskRepository(pool),
+		users,
+	)
+
 	engine := gin.New()
 	handler.Setup(engine, handler.RouterDeps{
 		Logger:       logger,
@@ -226,6 +235,7 @@ func run() error {
 		Analytics:    handler.NewAnalyticsHandler(analyticsService, logger),
 		Notification: handler.NewNotificationHandler(notificationService, logger),
 		Audit:        handler.NewAuditHandler(auditService, logger),
+		Report:       handler.NewReportHandler(reportService, logger),
 		AuthMiddleware: middleware.AuthMiddleware(middleware.AuthConfig{
 			Validator: tokenService,
 			Sessions:  revocations,

@@ -39,6 +39,7 @@ type RouterDeps struct {
 	Analytics    *AnalyticsHandler
 	Notification *NotificationHandler
 	Audit        *AuditHandler
+	Report       *ReportHandler
 
 	// Auth  : middleware validasi token (wajib untuk group terproteksi).
 	AuthMiddleware gin.HandlerFunc
@@ -345,6 +346,17 @@ func Setup(r *gin.Engine, deps RouterDeps) {
 		audit.GET("",
 			middleware.RequirePermission(deps.Permission, "audit", "read"),
 			deps.Audit.List)
+	}
+
+	// --- Reports Export (`42-API.md` §10, 50-FSD §10.6, FR-REP-01) ---
+	//
+	// Izin `report:export` (Administrator, Manager — 44-SECURITY §3.1.2).
+	// Cakupan barisnya diterapkan di kueri via service.
+	if deps.Report != nil {
+		reports := api.Group("/reports", deps.AuthMiddleware)
+		reports.GET("/export",
+			middleware.RequirePermission(deps.Permission, "report", "export"),
+			deps.Report.Export)
 	}
 
 	// Endpoint lain menyusul per modul; setiap route terproteksi wajib memasang
