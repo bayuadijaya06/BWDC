@@ -156,3 +156,147 @@ func TestUnlockEndpointValidationAndNotFound(t *testing.T) {
 		})
 	}
 }
+
+func TestAdminUsersListAndCreate(t *testing.T) {
+	admin := createActor(t, "administrator")
+	viewer := createActor(t, "viewer")
+	engine := newEngine(t, 5)
+	_, adminLogin := logins(t, engine, admin.Username, admin.Password)
+	_, viewerLogin := logins(t, engine, viewer.Username, viewer.Password)
+
+	t.Run("tanpa token -> 401", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status %d, want 401 body=%s", w.Code, w.Body.String())
+		}
+	})
+	t.Run("viewer tanpa user:read -> 403", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
+		req.Header.Set("Authorization", "Bearer "+viewerLogin.Data.Token)
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status %d, want 403 body=%s", w.Code, w.Body.String())
+		}
+	})
+	t.Run("admin list -> 200 dengan meta", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users?limit=5", nil)
+		req.Header.Set("Authorization", "Bearer "+adminLogin.Data.Token)
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status %d, want 200 body=%s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Success bool `json:"success"`
+			Data    []any `json:"data"`
+			Meta    struct {
+				Total int `json:"total"`
+			} `json:"meta"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if !resp.Success || resp.Meta.Total < 1 {
+			t.Fatalf("meta total %d, want >=1", resp.Meta.Total)
+		}
+	})
+	t.Run("create user -> 201 dan list search menemukannya", func(t *testing.T) {
+		// ambil satu role id
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/roles", nil)
+		req.Header.Set("Authorization", "Bearer "+adminLogin.Data.Token)
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("list roles: %d %s", w.Code, w.Body.String())
+		}
+		var roleResp struct {
+			Success bool `json:"success"`
+			Data    []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &roleResp); err != nil {
+			t.Fatalf("parse roles: %v", err)
+		}
+		if len(roleResp.Data) == 0 {
+			t.Fatal("tidak ada role")
+		}
+		roleID := roleResp.Data[0].ID
+		username := "uji-admin-" + uuid.NewString()[:6]
+		email := username + "@example.invalid"
+		body := `{"username":"` + username + `","email":"` + email + `","password":"TempPass123","role_ids":["` + roleID + `"]}`
+		w = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", "Bearer "+adminLogin.Data.Token)
+		req.Header.Set("Content-Type", "application/json")
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create user: %d %s", w.Code, w.Body.String())
+		}
+		// search
+		w = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/users?search="+username, nil)
+		req.Header.Set("Authorization", "Bearer "+adminLogin.Data.Token)
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("search: %d %s", w.Code, w.Body.String())
+		}
+		if !contains(w.Body.String(), username) {
+			t.Fatalf("search tidak menemukan user %s: %s", username, w.Body.String())
+		}
+	})
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (func() bool {
+		for i := 0; i <= len(s)-len(sub); i++ {
+			if s[i:i+len(sub)] == sub {
+				return true
+			}
+		}
+		return false
+	})()
+}
+
+func TestAdminRolesAndOrgs(t *testing.T) {
+	admin := createActor(t, "administrator")
+	viewer := createActor(t, "viewer")
+	engine := newEngine(t, 5)
+	_, adminLogin := logins(t, engine, admin.Username, admin.Password)
+	_, viewerLogin := logins(t, engine, viewer.Username, viewer.Password)
+
+	t.Run("roles admin -> 200", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/roles", nil)
+		req.Header.Set("Authorization", "Bearer "+adminLogin.Data.Token)
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status %d, want 200 body=%s", w.Code, w.Body.String())
+		}
+		if !contains(w.Body.String(), "administrator") {
+			t.Fatalf("roles tidak memuat administrator: %s", w.Body.String())
+		}
+	})
+	t.Run("roles viewer -> 403", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/roles", nil)
+		req.Header.Set("Authorization", "Bearer "+viewerLogin.Data.Token)
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status %d, want 403", w.Code)
+		}
+	})
+	t.Run("orgs admin -> 200", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/organizations", nil)
+		req.Header.Set("Authorization", "Bearer "+adminLogin.Data.Token)
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status %d, want 200 body=%s", w.Code, w.Body.String())
+		}
+	})
+}

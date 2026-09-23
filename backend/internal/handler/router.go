@@ -296,13 +296,24 @@ func Setup(r *gin.Engine, deps RouterDeps) {
 			deps.Workflow.Resubmit)
 	}
 
-	// --- Administration > Users (`42-API.md` §11) ---
+	// --- Administration (`42-API.md` §11) ---
 	//
-	// Izin `user:update` (Administrator saja, `44-SECURITY.md` §3.1.2).
-	// Endpoint `/admin/*` lain menyusul per modul; yang sudah diputuskan dan
-	// hidup hari ini hanya pembukaan lock akun lebih awal (ADR-0022 butir 5).
+	// Izin: user:read/create/update, role:read, organization:read (Administrator saja, 44-SECURITY §3.1.2).
+	// Endpoint unlock sudah hidup (ADR-0022); sisanya T-083.
 	if deps.User != nil {
 		admin := api.Group("/admin", deps.AuthMiddleware)
+		admin.GET("/users",
+			middleware.RequirePermission(deps.Permission, "user", "read"),
+			deps.User.ListUsers)
+		admin.POST("/users",
+			middleware.RequirePermission(deps.Permission, "user", "create"),
+			deps.User.CreateUser)
+		admin.GET("/roles",
+			middleware.RequirePermission(deps.Permission, "role", "read"),
+			deps.User.ListRoles)
+		admin.GET("/organizations",
+			middleware.RequirePermission(deps.Permission, "organization", "read"),
+			deps.User.ListOrganizations)
 		admin.POST("/users/:id/unlock",
 			middleware.RequirePermission(deps.Permission, "user", "update"),
 			deps.User.Unlock)

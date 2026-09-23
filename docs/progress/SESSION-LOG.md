@@ -8,6 +8,15 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-069 — 2026-09-24 — Administration Users/Roles/Organizations (T-083)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md"
+- **Konstruksi:** `dto/user_dto.go` DTO admin; `service/user_service.go` `ListUsers` (search ILIKE, page/limit 1-100, count + query, roles per user), `CreateUser` (trim, password 8+, role_ids UUID exists, bcrypt 12, `OrganizationID` dari actor, tx `users` + `user_roles` + audit `USER_CREATED`), `ListRoles`/`ListOrganizations` (SELECT ORDER BY name); `handler/user_handler.go` 4 handlers (ListUsers page/limit 422, ListUsers 200 meta, CreateUser 401/403/422 field, 201, ListRoles 200, ListOrganizations 200, viewer 403); `router.go` 5 admin routes (51 total); `user_handler_test.go` 2 func (ListAndCreate 401/403/list 200 meta/create 201+search, RolesAndOrgs 200/403).
+- **Bukti:** `go vet/build` OK, `make test` 9 paket **283 test** (naik 2: admin), `check-ledger OK 283`, `readme-facts OK 51`, `api-contract OK 122/56`, `BROKEN 0`, `antislop-refs OK`, `navigation OK`.
+- **Status:** DONE. **Next:** `T-084` Members CRUD UI (Q-024 kini dapat diisi via GET /admin/users), `T-085` category filter.
+
+---
+
 ## P-068 — 2026-09-24 — Reports Export GET /reports/export CSV (T-082)
 
 - **Prompt user:** "Commit dan push seluruh progress ke repository. Lanjutkan sesuai file CONTINUE.md." + "Lanjutkan sesuai CONTINUE.md"

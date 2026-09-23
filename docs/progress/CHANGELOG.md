@@ -6,6 +6,26 @@
 
 ---
 
+## 2026-09-24 (sesi P-069)
+
+Administration Users/Roles/Organizations `GET /admin/users`, `POST /admin/users`, `GET /admin/roles`, `GET /admin/organizations` (user:read/create, role:read, organization:read, Admin saja) — `T-083` DONE. `UserService` ListUsers (search, page/limit, total), CreateUser (username/email/password 8+, role_ids UUID, bcrypt 12, tx + user_roles, audit USER_CREATED), ListRoles, ListOrganizations; `UserHandler` 4 handlers + validasi 401/403/422 + 201/200; `router.go` 5 admin routes (51 total, 1→5 admin), `user_handler_test.go` (401/403, list 200 meta, create 201 + search, roles 200, viewer 403).
+
+### Added
+
+- `backend/internal/dto/user_dto.go` — `CreateUserRequest`, `UserResponse`, `RoleResponse`, `OrganizationResponse` (P-069)
+- `docs/progress/prompts/P-069-2026-09-24-administration-users-roles-orgs.md` (P-069)
+
+### Changed
+
+- `backend/internal/service/user_service.go` — `ListUsers`, `CreateUser`, `ListRoles`, `ListOrganizations` + `ErrUserAlreadyExists`/`ErrRoleNotFound` (P-069)
+- `backend/internal/handler/user_handler.go` — `ListUsers`, `CreateUser`, `ListRoles`, `ListOrganizations` (P-069)
+- `backend/internal/handler/router.go` — 5 admin routes (`GET /admin/users`, `POST /admin/users`, `GET /admin/roles`, `GET /admin/organizations`, `POST /admin/users/:id/unlock`) → 51 total (P-069)
+- `backend/internal/handler/user_handler_test.go` — `TestAdminUsersListAndCreate`, `TestAdminRolesAndOrgs` (P-069)
+- `README.md` — `47 → 51 route (1→5 admin)` (P-069)
+- `docs/progress/STATE.md` — `281 → 283 test` (P-069)
+
+---
+
 ## 2026-09-24 (sesi P-068)
 
 Reports Export `GET /reports/export?type=projects|documents|tasks&format=csv` (report:export, cakupan 44-SECURITY §3.1.3, audit REPORT_EXPORTED) — `T-082` DONE. `ReportService` CSV header = kolom tabel 50-FSD (projects: code/name/status/owner/start/target/member_count/created_at; documents: document_number/title/category/status/version/owner/updated_at; tasks: title/status/priority/due_date/assignee/project) dengan `systemScope` / `taskScope` + Limit 10000, `ReportHandler` validasi `type`/`format`/`project_id` (422) + `401`/`403`, `router.go` 1 reports route (47 total), `main.go` wiring, `main_test.go` report engine, `report_handler_test.go` (401/403/422 + 200 csv header + Content-Disposition `bwdcs-<type>-<YYYYMMDD>.csv` + audit), `check-readme-facts.sh` ember reports + `README 46→47`, `STATE 279→281`.
