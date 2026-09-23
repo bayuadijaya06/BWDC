@@ -52,9 +52,17 @@ type JWTClaims struct {
 
 - Token disimpan di HTTP-only cookie (recommended) atau Authorization header
 - Secret disimpan di environment variable, tidak di-hardcode
-- Token expiration: 24 jam default
-- Refresh token: optional, 7 hari expiration
+- Token expiration: 24 jam default (`JWT_EXPIRY`)
 - Setiap access token memuat klaim `jti` (UUID unik per token) sebagai kunci revokasi
+
+**Refresh token (ADR-0023).** Bentuknya ditetapkan agar tidak lagi ambigu:
+
+- JWT kedua dari penerbit yang sama, bertanda klaim **`typ: refresh`** (access token: `typ: access`), berumur **7 hari** sebagai konstanta kode `jwt.RefreshExpiry`. `typ` bersifat **wajib**: token tanpa `typ` ditolak.
+- **Tidak disimpan di server** dan **tidak ada tabelnya** — tidak ada token buram, tidak ada rotasi berdeteksi, dan karena itu tidak ada migrasi untuknya.
+- **Tidak dapat saling tukar:** refresh token tidak pernah diterima middleware sebagai bearer token, dan access token tidak pernah diterima `POST /auth/refresh`. Keduanya ditolak `401 UNAUTHORIZED`. Inilah alasan klaim `typ` ada: tanpanya, satu refresh token yang bocor menjadi akses penuh selama sepekan.
+- **Pencabutannya memakai pemeriksaan yang sama** dengan access token (`jti` di `token_revocations` **atau** `iat < users.tokens_invalid_before`), sehingga `logout_all` dan `change-password` juga mematikan refresh token lama tanpa aturan tambahan.
+- **Diterbitkan bersama access token saat login**, dan setiap penukaran mengembalikan sepasang token baru sehingga jendela 7 hari bergulir.
+- **Batas yang diterima sadar:** token lama tidak dicabut saat rotasi, jadi pemakaian ulang tidak dapat dideteksi; token yang dicuri tetap sah sampai `exp` kecuali `jti`-nya dicabut atau sesinya dimatikan lewat `tokens_invalid_before`. Penilaian opsi yang lebih kuat (token buram ber-rotasi di tabel sendiri) ada di ADR-0023 §3.
 
 **Invalidasi token (ADR-0009).** JWT bersifat stateless, sehingga logout tidak otomatis membatalkan token yang sudah diterbitkan. Mekanisme yang mengikat:
 
@@ -72,8 +80,8 @@ Middleware auth memeriksa `jti` terhadap daftar revokasi setelah validasi tanda 
 
 | Mechanism | Implementation |
 |---|---|
-| Rate Limiting | Percobaan gagal per 15 menit per username; ambang `auth.max_login_attempts` (default **5**) dari `system_settings` (FR-AUTH-06) |
-| Account Lockout | **Auto-lock sementara** setelah ambang terlampaui, dibuka otomatis setelah `auth.lockout_duration_minutes` atau lebih awal oleh Administrator lewat `POST /admin/users/:id/unlock` (ADR-0022) |
+| Rate Limiting | Batas per **alamat klien** pada `POST /auth/login` (20/menit, `internal/handler/router.go`) → `429` + header `Retry-After`. Ambang per username ada di baris berikutnya — keduanya berlaku bersama (FR-AUTH-06 bagian pertama dan kedua) |
+| Account Lockout | Hitungan percobaan **gagal per username** dibaca dari `login_attempts` (jendela 15 menit) dengan ambang `auth.max_login_attempts` (default **5**) dari `system_settings`; lampaui ambang → `users.locked_until = NOW() + auth.lockout_duration_minutes` dan login dibalas **`423 LOCKED`** + `details.retry_after_seconds`. Lock terbuka sendiri, atau lebih awal oleh Administrator lewat `POST /admin/users/:id/unlock` (ADR-0022) |
 | Percobaan login tercatat | Setiap percobaan — berhasil maupun gagal — menulis satu baris `login_attempts`; bertahan lintas restart dan lintas instance (ADR-0022) |
 | Brute Force Protection | CAPTCHA after 3 failures (future) |
 | Session Management | Revokasi `jti` di `token_revocations` saat logout **plus** penanda per user `users.tokens_invalid_before` untuk logout semua perangkat / ganti password / reset admin / akun dinonaktifkan (ADR-0009 + **ADR-0021**) |
@@ -90,7 +98,7 @@ UPDATE users SET locked_until = NOW() + ($2 || ' minutes')::interval WHERE id = 
 
 Tiga hal yang harus dibaca bersama tabel di atas supaya tidak dikira belum ada, atau dikira lebih dari yang ada:
 
-- **Auto-lock memakai `users.locked_until`, bukan penghitung di memori.** Penghitung lama (`service.LoginGuard`) hilang saat restart dan menjadi N kali ambang pada beberapa instance; **ADR-0022** memindahkannya ke tabel `login_attempts`. Lock bersifat **sementara** (bukan permanen) supaya penyerang tidak dapat mengunci akun orang lain — perilaku yang diminta praktik OWASP/CIS.
+- **Auto-lock memakai `users.locked_until`, bukan penghitung di memori.** Penghitung lama (`service.LoginGuard`) hilang saat restart dan menjadi N kali ambang pada beberapa instance; **ADR-0022** memindahkannya ke tabel `login_attempts`, dan sejak **P-030** (`T-041`) penghitung di memori itu **sudah dihapus** — tidak ada dua pembatas yang berbeda pendapat. Lock bersifat **sementara** (bukan permanen) supaya penyerang tidak dapat mengunci akun orang lain — perilaku yang diminta praktik OWASP/CIS, dan karena itu percobaan berikutnya **tidak** memperpanjang lock yang masih aktif.
 - **FR-AUDIT-01 "login" berarti login berhasil.** Percobaan **gagal** tidak masuk `audit_logs`, dan itu keputusan, bukan kekurangan: `audit_logs.actor_id` tetap `NOT NULL REFERENCES users(id)` karena tabel itu bermakna "tindakan aktor yang terautentikasi" (temuan **C-035**, ditutup **ADR-0022** butir 2). Jejak percobaan gagal hidup di `login_attempts` (username yang dicoba, IP, user agent, correlation id) dengan retensi 90 hari.
 - **`423 LOCKED` berbeda dari `429 TOO_MANY_REQUESTS`.** `429` membatasi **percobaan** (per username per jendela waktu, juga per alamat klien); `423` menyatakan **akun** sedang terkunci dan menyertakan sisa waktu tunggu. Keduanya berlaku bersamaan.
 
@@ -204,7 +212,7 @@ Hanya nilai berikut yang boleh muncul di kolom `role_permissions.resource` dan `
 Catatan yang menjelaskan baris tertentu:
 
 - `project:create` untuk Manager memenuhi FR-PROJ-01 ("Manager+"); Administrator termasuk karena memiliki semua izin.
-- `document:create` dan `document:update` untuk Contributor: unggah dokumen adalah pekerjaan utama role ini. Baris `document:delete` (Admin/Manager) **tidak** dipakai endpoint arsip: arsip adalah perubahan keadaan dan memakai `document:update` (**ADR-0019** butir 4). Baris `document:delete` tetap ada di matriks karena ia disediakan untuk penghapusan **permanen**, yang belum ada di MVP (hak penghapusan data kelak, endpoint terpisah khusus Administrator). Sampai `T-039` selesai, kode masih memakai baris itu untuk `DELETE /documents/:id`; jangan menambah pemakai baru atas baris itu tanpa ADR.
+- `document:create` dan `document:update` untuk Contributor: unggah dokumen adalah pekerjaan utama role ini. Baris `document:delete` (Admin/Manager) **tidak** dipakai endpoint arsip: arsip adalah perubahan keadaan dan memakai `document:update` (**ADR-0019** butir 4). Baris `document:delete` tetap ada di matriks karena ia disediakan untuk penghapusan **permanen**, yang belum ada di MVP (hak penghapusan data kelak, endpoint terpisah khusus Administrator). Sejak `T-039` (P-029) **tidak ada satu pun route** yang memakai baris itu; jangan menambah pemakai baru atas baris itu tanpa ADR.
 - `workflow_instance:approve`/`reject`/`request_revision` hanya Admin/Manager. **Penanggung jawab step bukan role sistem**: `workflow_steps.responsible_role` adalah syarat *tambahan* (lihat §3.3). Ini menutup temuan C-006 (label "Reviewer") sebagai peran fungsional, bukan role kelima.
 - `comment:create` untuk semua role memenuhi FR-CMT-01 ("User dapat menambahkan comment") tanpa batasan role. Edit/hapus komentar dibatasi **kepemilikan**, bukan izin (lihat §3.1.3).
 - `notification:read`/`update` untuk semua role, tetapi hanya notifikasi milik sendiri — dibatasi scoping, bukan izin.
@@ -242,6 +250,13 @@ Rujukan implementasi ketiga (**modul task**, `T-038`) — inilah modul pertama y
 - Tulis: `taskWritePredicate` (administrator tanpa batas project; manager hanya pada project yang diikutinya; contributor hanya task yang ditugaskan kepadanya atau dibuatnya). Dipakai `FindByIDForUpdate`, `Update`, dan `Complete` — task yang boleh **dibaca** karena keanggotaan project belum tentu boleh **diubah**, dan di situ jawabannya `404` (bukan `403`), persis seperti aturan di atas.
 
 Penyusunnya tetap **satu** tempat: `taskScope` (`internal/service/scope.go`) membaca role sistem sekali, lalu seluruh pembeda role dikirim sebagai parameter boolean ke kedua predikat di `internal/repository/task_repository.go` (parameterized statement, §4.3). `AllInOrganization` tetap bukan bypass izin: matriks §3.1.2 menentukan boleh-tidaknya. Penyaring daftar (`?status=`, `?priority=`, `?assignee_id=`, `?project_id=`, `?overdue=`) tidak menambah izin apa pun — ia hanya menyempitkan hasil yang sudah dibatasi cakupan.
+
+Rujukan implementasi keempat (**modul komentar**, `T-042`) — modul pertama yang cakupannya **tidak dapat** dibaca langsung dari barisnya sendiri: tabel `comments` (`41-DATABASE.md` §2.5) tidak menyimpan `project_id`, sehingga "komentar pada entitas yang boleh dibaca" hanya dapat ditegakkan dengan menurunkan project dari `(entity_type, entity_id)`.
+
+- Pemetaan entitas → project tinggal **satu** di `internal/repository/comment_repository.go` (`commentEntityProjectCase`): `project` → kolom itu sendiri, `document` → `documents.project_id`, `task` → `tasks.project_id`, `workflow` → `documents.project_id` lewat `workflow_instances.document_id`. Kueri daftar, kueri detail, dan pemeriksaan entitas saat membuat memakainya, sehingga tidak ada empat salinan aturan yang bisa berbeda diam-diam.
+- Predikat cakupannya **bukan predikat baru**: `commentReadPredicate` adalah bentuk yang sama dengan `projectScopePredicate` (organisasi + keanggotaan project + `AllInOrganization`), dengan `projects` di-JOIN ke hasil pemetaan di atas. Penyusun cakupannya juga sama, `systemScope` — bukan `taskScope`, karena baris dasar §3.1.3 untuk `comment` identik dengan `project`.
+- Baris kedua tabel ini ("`comment` edit/hapus: hanya komentar milik sendiri") **bukan cakupan, melainkan kepemilikan**, dan karena itu tidak ditegakkan middleware: `WHERE created_by_id = $actor` ada di kueri `Update`/`Delete` (`FindOwn` juga memakai kueri tanpa JOIN `projects`). Konsekuensinya disengaja: penulis tetap dapat menyunting komentarnya walau ia kemudian dikeluarkan dari project, sedangkan anggota project yang bukan penulisnya dijawab `404` — bukan `403` — sama seperti "bukan milik Anda" pada baris di atas.
+- Karena matriks §3.1.2 tidak memuat `comment:update`/`comment:delete`, kelima endpoint §7 hanya dijaga `comment:read` (baca, ubah, hapus) dan `comment:create`. Menambah pasangan izin baru di route berarti mengubah matriks tanpa ADR; yang memisahkan "boleh mengubah" adalah kepemilikan di kueri.
 
 ### 3.2 Permission Checker
 
@@ -347,8 +362,18 @@ Sketsa di atas adalah **daftar kebijakan**, bukan kode yang dipakai apa adanya. 
    (`io.LimitReader` akan memotong dan membuat `size`/`checksum` yang tersimpan menipu).
 2. **MIME dari isi berkas.** Handler membaca 512 byte pertama, memanggil `http.DetectContentType`,
    lalu mengembalikan posisi pembaca ke awal supaya isi berkas utuh. Daftar yang diterima sama
-   dengan sketsa di atas (pdf, txt, csv, xls, xlsx, jpg, png).
-3. **Ekstensi** dari nama berkas diperiksa sebagai penjaga kedua; `.jpeg` diterima.
+   dengan sketsa di atas (pdf, txt, csv, xls, xlsx, jpg, png). **Parameternya dibuang lebih dulu**
+   (`normalizeMimeType`): `http.DetectContentType` mengembalikan `text/plain; charset=utf-8` untuk
+   berkas teks, sedangkan daftar ini memuat `text/plain`, sehingga perbandingan yang tidak membuang
+   parameter menolak **setiap** `.txt` dan `.csv` yang justru dijanjikan (`50-FSD.md` §4.2). Sketsa
+   `allowed[mimeType]` di atas **tidak** memuat langkah itu — ia sumber kekeliruannya, dan temuan
+   **C-072** mencatatnya supaya tidak dikembalikan.
+3. **Ekstensi** dari nama berkas diperiksa sebagai penjaga kedua; `.jpeg` diterima. Kedua penjaga
+   **tidak berpasangan**: yang diperiksa adalah keanggotaan masing-masing nilai di daftarnya, bukan
+   kesesuaian keduanya. Berkas `.pdf` yang isinya teks karena itu **tidak** ditolak (isinya masih
+   berada di daftar tipe yang diterima) — dan itu memang disengaja, sebab aturan pasangan akan
+   menolak `.csv` yang isinya teks biasa, yang justru kasus paling umum. Yang menentukan adalah isi
+   berkasnya, bukan namanya: berkas berisi arsip ZIP bernama apa pun tetap ditolak dari tipe isinya.
 4. **Penolakan** dibalas `422 VALIDATION_ERROR` dengan `details[].field = "file"` (`42-API.md` §4),
    bukan `413`: bab Error Responses `42-API.md` §12 tidak memuat `413`, dan menambahkannya berarti
    menambah kode status baru untuk satu kasus.
@@ -456,7 +481,7 @@ Catatan yang mengikat implementasi:
 - Trigger **bukan** jalur menulis audit: entri tetap ditulis service di dalam transaksi yang sama (ADR-0011). Trigger hanya menolak perubahan setelah entri ada.
 - `TRUNCATE` diblokir walaupun tidak ada endpoint maupun kode yang memakainya, supaya janji "tidak dapat diedit/dihapus" tidak bergantung pada kebetulan.
 - Salinan SQL ini ke migrasi `007` **wajib** membungkus badan fungsinya dengan sepasang anotasi `StatementBegin` dan `StatementEnd`: pengurai goose memecah berkas per titik-koma, dan tanpa pembungkus itu `CREATE FUNCTION ... $$ ... $$` terpotong (temuan **C-031**). Jangan menuliskan kata penanda anotasi goose di dalam komentar biasa — pengurai mencarinya di mana pun dalam baris.
-- **Trigger ini hanya untuk `audit_logs`.** `document_versions` **tidak** diberi trigger serupa di MVP: `DELETE /documents/:id` memang didefinisikan *cascade to versions* (`42-API.md` §4), sehingga trigger yang menolak `DELETE` akan mematahkan perilaku yang sudah dikontrak — dan semantik hapus/arsip dokumen masih menunggu temuan **C-004**. Imutabilitas versi (FR-VER-03) ditegakkan di service (tidak ada endpoint ubah/hapus versi) dan di storage (`Save` menolak menimpa berkas, `40-TSD.md` §2.4).
+- **`document_versions` kini mendapat trigger yang sama** — lihat **§6.1**. Sebelum **ADR-0019**, tabel itu sengaja dibiarkan tanpa trigger karena `DELETE /documents/:id` didefinisikan *cascade to versions* (`42-API.md` §4), sehingga trigger yang menolak `DELETE` akan mematahkan perilaku yang sudah dikontrak. Arsip menggantikan kaskade itu, jadi pengecualiannya hilang. Sejak migrasi `010` (`T-039`, P-029) ketiga lapis penegakannya lengkap: service (tidak ada endpoint ubah/hapus versi), storage (`Save` menolak menimpa berkas, `40-TSD.md` §2.4), dan database (dua trigger di §6.1).
 
 Down migration `007` menghapus kedua trigger lalu fungsinya:
 
@@ -481,6 +506,8 @@ CREATE TRIGGER trg_document_versions_no_truncate
 BEFORE TRUNCATE ON document_versions
 FOR EACH STATEMENT EXECUTE FUNCTION prevent_audit_modification();
 ```
+
+> Di berkas migrasi `010`, `CREATE TRIGGER` **bukan** pernyataan ber-titik-koma tunggal yang aman: goose memecah berkas per titik-koma, jadi keduanya wajib dibungkus anotasi `StatementBegin`/`StatementEnd` (temuan **C-031**). Salinan di sini adalah rujukan SQL-nya, bukan berkas migrasinya.
 
 Alasan: FR-VER-03 menuntut versi lama **immutable**, dan sebelumnya itu hanya ditegakkan di service (`40-TSD.md` §2.4, "tidak ada endpoint ubah/hapus versi"). Pengecualian yang selama ini tertulis di sini — "`document_versions` sengaja tidak diberi trigger karena `DELETE /documents/:id` cascade" — **dihapus** bersama endpoint kaskade itu: ADR-0019 menggantinya dengan arsip, sehingga tidak ada lagi jalur sah yang menghapus baris versi. `document_versions` memakai jalur pemeliharaan `bwdcs.audit_maintenance` yang sama, supaya teardown test dan operasi terjadwal tetap punya satu pintu.
 
@@ -524,7 +551,7 @@ Append-only berarti "tidak dapat **diubah**", bukan "tidak dapat **dipangkas** k
 - [ ] File upload vulnerability test (shell upload, path traversal)
 - [ ] Audit log append-only test — `UPDATE`, `DELETE`, dan `TRUNCATE` pada `audit_logs` ditolak `23001` (`70-TESTING.md` §4.3)
 - [ ] `document_versions` append-only test — `UPDATE`/`DELETE` ditolak `23001` (ADR-0019, `70-TESTING.md` §4.3)
-- [ ] Lockout test — ambang `auth.max_login_attempts` tercapai → `423 LOCKED`, terbuka sendiri setelah durasi, dan `POST /admin/users/:id/unlock` membukanya lebih awal (ADR-0022)
-- [ ] Percobaan login tercatat — login gagal atas username yang **tidak** ada tetap menulis satu baris `login_attempts` (ADR-0022, temuan C-035)
-- [ ] Pencabutan seluruh sesi — token sebelum `users.tokens_invalid_before` ditolak `401 TOKEN_REVOKED`, token sesudahnya diterima (ADR-0021)
+- [x] Lockout test — ambang `auth.max_login_attempts` tercapai → `423 LOCKED`, terbuka sendiri setelah durasi, dan `POST /admin/users/:id/unlock` membukanya lebih awal (ADR-0022). Bukti: `70-TESTING.md` §3.12 baris `T-041` + §3.12b
+- [x] Percobaan login tercatat — login gagal atas username yang **tidak** ada tetap menulis satu baris `login_attempts` (ADR-0022, temuan C-035). Bukti: `70-TESTING.md` §3.12 baris `T-041`
+- [x] Pencabutan seluruh sesi — token sebelum `users.tokens_invalid_before` ditolak `401 TOKEN_REVOKED`, token sesudahnya diterima (ADR-0021). Bukti: `70-TESTING.md` §3.12 baris `T-040` + §3.12b
 - [ ] Retensi audit dijalankan lewat jalur pemeliharaan — `DELETE` tanpa `bwdcs.audit_maintenance` tetap ditolak `23001` (ADR-0020)

@@ -50,6 +50,14 @@ const projectSelectColumns = `
 
 const projectFrom = `FROM projects p JOIN users owner ON owner.id = p.owner_id`
 
+// projectListWhere adalah syarat WHERE daftar project, dipakai bersama oleh
+// `List` dan `count` supaya keduanya tidak dapat menyimpang.
+//
+// Posisi parameter: 1-3 cakupan, 4 status, 5 pencarian.
+var projectListWhere = projectScopePredicate(1, 2, 3) + `
+			AND ($4 = '' OR p.status = $4)
+			AND ($5 = '' OR p.name ILIKE '%' || $5 || '%' OR p.code ILIKE '%' || $5 || '%')`
+
 // ProjectListFilter adalah penyaring daftar project (`42-API.md` §3 GET /projects).
 type ProjectListFilter struct {
 	Status string
@@ -79,6 +87,13 @@ func (r *ProjectRepository) WithTx(tx pgx.Tx) *ProjectRepository {
 //
 // Cakupan anggota diterapkan di dalam WHERE, jadi project di luar cakupan tidak
 // pernah terkirim ke lapisan atas — bukan disaring setelah dibaca.
+//
+// Total dihitung `COUNT(*) OVER()`, tetapi jendela itu dievaluasi **per baris
+// hasil**: halaman di luar rentang tidak menghasilkan baris sama sekali,
+// sehingga totalnya akan terbaca 0 dan klien mengira halamannya tidak ada.
+// Lubang itu ditambal di `count`, yang hanya dipanggil pada kasus tersebut
+// (temuan C-048; pola yang sama dipakai modul komentar dan kini seluruh endpoint
+// daftar).
 func (r *ProjectRepository) List(ctx context.Context, scope ProjectScope, filter ProjectListFilter) ([]model.Project, int, error) {
 	limit := filter.Limit
 	if limit <= 0 {
@@ -91,16 +106,13 @@ func (r *ProjectRepository) List(ctx context.Context, scope ProjectScope, filter
 	offset := (page - 1) * limit
 
 	// Posisi parameter: 1-3 cakupan, 4 status, 5 search, 6 limit, 7 offset.
-	query := fmt.Sprintf(`
-		SELECT `+projectSelectColumns+`,
+	query := `
+		SELECT ` + projectSelectColumns + `,
 			COUNT(*) OVER() AS total
-		%s
-		WHERE %s
-			AND ($4 = '' OR p.status = $4)
-			AND ($5 = '' OR p.name ILIKE '%%' || $5 || '%%' OR p.code ILIKE '%%' || $5 || '%%')
+	` + projectFrom + `
+		WHERE ` + projectListWhere + `
 		ORDER BY p.created_at DESC, p.code ASC
-		LIMIT $6 OFFSET $7`,
-		projectFrom, projectScopePredicate(1, 2, 3))
+		LIMIT $6 OFFSET $7`
 
 	rows, err := r.db.Query(ctx, query,
 		scope.OrganizationID, scope.AllInOrganization, scope.UserID,
@@ -127,7 +139,36 @@ func (r *ProjectRepository) List(ctx context.Context, scope ProjectScope, filter
 		return nil, 0, fmt.Errorf("iterasi daftar project: %w", err)
 	}
 
+	// Halaman kosong yang bukan halaman pertama: jendela `COUNT(*) OVER()` tidak
+	// punya baris untuk dievaluasi, jadi totalnya dihitung ulang dengan penyaring
+	// yang sama persis.
+	if len(projects) == 0 && offset > 0 {
+		counted, err := r.count(ctx, scope, filter)
+		if err != nil {
+			return nil, 0, err
+		}
+		total = counted
+	}
+
 	return projects, total, nil
+}
+
+// count menghitung seluruh project yang cocok dengan penyaring, memakai FROM dan
+// WHERE yang sama dengan `List` supaya keduanya tidak dapat berbeda diam-diam.
+func (r *ProjectRepository) count(ctx context.Context, scope ProjectScope, filter ProjectListFilter) (int, error) {
+	query := `
+		SELECT count(*)
+	` + projectFrom + `
+		WHERE ` + projectListWhere
+
+	var total int
+	if err := r.db.QueryRow(ctx, query,
+		scope.OrganizationID, scope.AllInOrganization, scope.UserID,
+		filter.Status, filter.Search,
+	).Scan(&total); err != nil {
+		return 0, fmt.Errorf("hitung daftar project: %w", err)
+	}
+	return total, nil
 }
 
 // FindByID membaca satu project **di dalam cakupan** aktor.

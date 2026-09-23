@@ -144,8 +144,14 @@ func (s *WorkflowService) ExecuteAction(instanceID uuid.UUID, input ActionInput)
     // 3. Tolak lebih awal bila input.Version != nil dan != instance.Version
     //    -> 409 WORKFLOW_CONFLICT (tanpa menyentuh database)
     // 4. Validate actor can act on current step
-    //    - Actor must have the responsible_role OR be admin
-    //    - Actor must not have already acted on this step DALAM SIKLUS BERJALAN
+    //    - Aktor WAJIB memegang role penanggung jawab step (atau role step NULL =
+    //      siapa pun yang terautentikasi) — DAN —
+    //    - Aktor WAJIB punya izin `workflow_instance:<action>` pada matriks §3.1.2
+    //      (Administrator/Manager). Keduanya syarat, bukan salah satu: dokumen yang
+    //      berlaku (44-SECURITY.md §3.1, 50-FSD.md §5.4, 51-UX.md §2.1) menetapkan
+    //      penunjukan step sebagai syarat *tambahan* atas izin, sehingga Administrator
+    //      pun tidak otomatis menjadi penanggung jawab step (temuan C-073)
+    //    - Aktor must not have already acted on this step DALAM SIKLUS BERJALAN
     //      (aksi setelah request_revision terakhir — §4.6); cek ini berlaku per siklus,
     //      bukan seumur instance, agar reviewer step yang di-rollback dapat memutuskan lagi
     //    - Dokumen TIDAK sedang revision_required (jeda revisi — §4.6, 42-API.md §5)

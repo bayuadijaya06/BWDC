@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -66,15 +67,18 @@ func actorOf(actor testActor) service.Actor {
 // documentPayload adalah bentuk `data` pada `POST /documents` dan `GET /documents/:id`.
 type documentPayload struct {
 	Document struct {
-		ID             string `json:"id"`
-		ProjectID      string `json:"project_id"`
-		DocumentNumber string `json:"document_number"`
-		Title          string `json:"title"`
-		Status         string `json:"status"`
-		CurrentVersion int    `json:"current_version"`
-		LatestVersion  string `json:"latest_version"`
-		OwnerUsername  string `json:"owner_username"`
-		ProjectCode    string `json:"project_code"`
+		ID             string  `json:"id"`
+		ProjectID      string  `json:"project_id"`
+		DocumentNumber string  `json:"document_number"`
+		Title          string  `json:"title"`
+		Status         string  `json:"status"`
+		ArchivedAt     *string `json:"archived_at"`
+		CurrentVersion int     `json:"current_version"`
+		LatestVersion  string  `json:"latest_version"`
+		OwnerUsername  string  `json:"owner_username"`
+		ProjectCode    string  `json:"project_code"`
+		CreatedAt      string  `json:"created_at"`
+		UpdatedAt      string  `json:"updated_at"`
 	} `json:"document"`
 	CurrentVersion *documentVersionPayload `json:"current_version"`
 }
@@ -95,10 +99,11 @@ type documentVersionPayload struct {
 
 // documentListPayload adalah bentuk daftar dokumen pada `GET /documents`.
 type documentListPayload []struct {
-	ID             string `json:"id"`
-	DocumentNumber string `json:"document_number"`
-	Status         string `json:"status"`
-	LatestVersion  string `json:"latest_version"`
+	ID             string  `json:"id"`
+	DocumentNumber string  `json:"document_number"`
+	Status         string  `json:"status"`
+	LatestVersion  string  `json:"latest_version"`
+	CategoryID     *string `json:"category_id"`
 }
 
 // documentVersionsPayload adalah bentuk `data` pada `GET /documents/:id/versions`.
@@ -197,7 +202,7 @@ func TestDocumentEndpointsRequireAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/v1/documents"},
 		{http.MethodPost, "/api/v1/documents"},
 		{http.MethodGet, "/api/v1/documents/" + documentID},
-		{http.MethodDelete, "/api/v1/documents/" + documentID},
+		{http.MethodPost, "/api/v1/documents/" + documentID + "/archive"},
 		{http.MethodGet, "/api/v1/documents/" + documentID + "/versions"},
 		{http.MethodGet, "/api/v1/documents/" + documentID + "/download/" + versionID},
 	}
@@ -228,8 +233,9 @@ func TestDocumentUploadRequiresAuthenticationWithoutToken(t *testing.T) {
 }
 
 // TestDocumentPermissionsFollowMatrix menutup `44-SECURITY.md` §3.1.2 untuk
-// dokumen: Viewer tidak boleh membuat/menghapus, Contributor tidak boleh
-// menghapus.
+// dokumen: Viewer tidak boleh membuat maupun mengarsipkan, sedangkan Contributor
+// boleh keduanya — arsip memakai **`document:update`**, bukan `document:delete`
+// (ADR-0019 butir 4).
 func TestDocumentPermissionsFollowMatrix(t *testing.T) {
 	fixture := newDocumentHTTPFixture(t)
 	engine := fixture.parts.engine
@@ -262,7 +268,8 @@ func TestDocumentPermissionsFollowMatrix(t *testing.T) {
 		})
 	}
 
-	// Contributor boleh mengunggah (document_version:upload) tetapi tidak menghapus.
+	// Contributor boleh mengunggah (document_version:upload) **dan** mengarsipkan
+	// (document:update) — sedangkan Viewer tidak boleh mengarsipkan.
 	contributor := fixture.createUserInOrg(owner.OrgID, "contributor")
 	fixture.addMember(owner, projectID, contributor.ID, model.ProjectRoleContributor)
 	contributorToken := loginToken(t, engine, contributor)
@@ -278,8 +285,17 @@ func TestDocumentPermissionsFollowMatrix(t *testing.T) {
 		contributorToken, "berkas.pdf", []byte("%PDF-1.4 isi"))
 	requireStatus(t, rec, http.StatusCreated)
 
-	rec = doJSON(t, engine, http.MethodDelete, "/api/v1/documents/"+created.Document.ID.String(), contributorToken, "")
+	viewer := fixture.createUserInOrg(owner.OrgID, "viewer")
+	fixture.addMember(owner, projectID, viewer.ID, model.ProjectRoleViewer)
+	viewerToken := loginToken(t, engine, viewer)
+
+	rec = doJSON(t, engine, http.MethodPost,
+		"/api/v1/documents/"+created.Document.ID.String()+"/archive", viewerToken, "")
 	requireStatus(t, rec, http.StatusForbidden)
+
+	rec = doJSON(t, engine, http.MethodPost,
+		"/api/v1/documents/"+created.Document.ID.String()+"/archive", contributorToken, "")
+	requireStatus(t, rec, http.StatusOK)
 }
 
 // TestCreateDocumentEndToEnd menutup FR-DOC-01/02/03/04 lewat HTTP: nomor
@@ -464,7 +480,14 @@ func TestUploadRejectsUnsupportedFileHTTP(t *testing.T) {
 		content  []byte
 	}{
 		{name: "ekstensi dan isi di luar daftar", filename: "arsip.zip", content: []byte("PK\x03\x04 isi zip")},
-		{name: "ekstensi .pdf tetapi isi bukan PDF", filename: "palsu.pdf", content: []byte("ini teks biasa")},
+		// Perhatikan: isi teks di dalam nama `.pdf` **bukan** alasan penolakan.
+		// `44-SECURITY.md` §4.2 memakai dua penjaga yang berdiri sendiri (ekstensi
+		// di daftar **dan** MIME di daftar), tanpa aturan pasangan; kasus lama di
+		// sini menuntut `422` untuk `palsu.pdf` berisi teks, dan ia lulus
+		// **hanya** karena cacat C-072 (setiap MIME teks tertolak akibat
+		// parameter `; charset=utf-8`). Yang ditolak adalah MIME di luar daftar.
+		{name: "ekstensi .pdf berisi arsip zip", filename: "palsu.pdf", content: []byte("PK\x03\x04 isi zip")},
+		{name: "ekstensi .sh di luar daftar", filename: "skrip.sh", content: []byte("#!/bin/sh\n")},
 	}
 
 	for _, testCase := range cases {
@@ -477,6 +500,64 @@ func TestUploadRejectsUnsupportedFileHTTP(t *testing.T) {
 			decodeBody(t, rec, &failure)
 			if failure.Error == nil || len(failure.Error.Details) == 0 || failure.Error.Details[0].Field != "file" {
 				t.Errorf("422 tanpa detail field file: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestUploadAcceptsDocumentedTextTypesHTTP menutup temuan **C-072** di lapisan
+// HTTP: `.txt` dan `.csv` yang dijanjikan `50-FSD.md` §4.2 dahulunya **selalu**
+// ditolak `422`, karena handler mengirim MIME hasil `http.DetectContentType`
+// (`text/plain; charset=utf-8`) sementara daftar tertutup memuat `text/plain`.
+//
+// Unggahannya multipart sungguhan, dan berkasnya berisi byte yang sungguh
+// dideteksi — bukan MIME yang ditulis di test, karena justru itu cara cacatnya
+// lolos selama ini.
+func TestUploadAcceptsDocumentedTextTypesHTTP(t *testing.T) {
+	fixture := newDocumentHTTPFixture(t)
+	engine := fixture.parts.engine
+
+	manager := fixture.createActor("manager")
+	projectID := fixture.createProject(manager, "terimafiledoc")
+	token := loginToken(t, engine, manager)
+	document := createDocumentHTTP(t, engine, token, projectID, "Dokumen terima")
+
+	cases := []struct {
+		name     string
+		filename string
+		content  []byte
+		mime     string
+	}{
+		{name: "txt berbaris", filename: "catatan.txt", content: []byte("laporan\nbaris kedua\n")},
+		{name: "txt satu baris", filename: "catatan-pendek.txt", content: []byte("laporan tanpa akhir baris")},
+		{name: "csv", filename: "data.csv", content: []byte("nama,nilai\nbudi,1\n")},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			rec := uploadMultipart(t, engine, "/api/v1/documents/"+document.Document.ID+"/upload", token,
+				testCase.filename, testCase.content)
+			requireStatus(t, rec, http.StatusCreated)
+
+			var uploaded documentVersionPayload
+			decodeData(t, rec, &uploaded)
+
+			// MIME yang tersimpan adalah yang benar-benar dideteksi server:
+			// tipe media beserta parameternya, bukan tebakan test.
+			detected := http.DetectContentType(testCase.content)
+			if uploaded.MimeType != detected {
+				t.Errorf("mime_type tersimpan %q, diharapkan %q", uploaded.MimeType, detected)
+			}
+
+			// Unduhannya mengeja tipe itu juga, dan isinya utuh.
+			rec = doJSON(t, engine, http.MethodGet,
+				"/api/v1/documents/"+document.Document.ID+"/download/"+uploaded.ID, token, "")
+			requireStatus(t, rec, http.StatusOK)
+			if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+				t.Errorf("Content-Type unduhan %q, diharapkan berawalan text/plain", got)
+			}
+			if rec.Body.Len() != len(testCase.content) {
+				t.Errorf("unduhan %d byte, diharapkan %d", rec.Body.Len(), len(testCase.content))
 			}
 		})
 	}
@@ -556,38 +637,91 @@ func TestDocumentScopeHidesDocumentsFromOutsiders(t *testing.T) {
 		"/api/v1/documents/"+other.Document.ID+"/download/"+uploaded.ID, ownerToken, "")
 	requireStatus(t, rec, http.StatusNotFound)
 
-	// Dokumen yang masih punya versi hanya dihapus oleh yang berizin; sesudah
-	// dihapus, berkasnya tidak lagi ada di storage.
-	if err := fixture.parts.documents.Delete(ctx, actorOf(owner), uuid.MustParse(document.Document.ID)); err != nil {
-		t.Fatalf("hapus dokumen: %v", err)
+	// Arsip tidak menyentuh berkas: bukti bahwa "tidak menghapus" berlaku juga
+	// untuk objek di storage, bukan hanya baris database (ADR-0019 butir 1).
+	if _, err := fixture.parts.documents.Archive(ctx, actorOf(owner), uuid.MustParse(document.Document.ID)); err != nil {
+		t.Fatalf("arsipkan dokumen: %v", err)
 	}
-	if fixture.parts.storage.Exists(uploaded.FileKey) {
-		t.Errorf("berkas %q masih ada sesudah dokumen dihapus", uploaded.FileKey)
+	if !fixture.parts.storage.Exists(uploaded.FileKey) {
+		t.Errorf("berkas %q hilang dari storage sesudah dokumen diarsipkan", uploaded.FileKey)
 	}
 }
 
-// TestDeleteDocumentEndToEnd menutup kontrak `DELETE /documents/:id` dan
-// FR-AUDIT-01 ("delete" sebagai aksi kritis).
-func TestDeleteDocumentEndToEnd(t *testing.T) {
+// TestArchiveDocumentEndToEnd menutup kontrak `POST /documents/:id/archive`
+// (`42-API.md` §4), `70-TESTING.md` §3.12 baris `T-039`, dan FR-AUDIT-01
+// ("arsip" sebagai aksi kritis).
+//
+// Jalur `DELETE /documents/:id` **tidak** diuji karena tidak ada lagi: rutenya
+// tidak terpasang, dan test ini juga membuktikannya (daftar metode di bawah).
+func TestArchiveDocumentEndToEnd(t *testing.T) {
 	fixture := newDocumentHTTPFixture(t)
 	engine := fixture.parts.engine
 
 	manager := fixture.createActor("manager")
-	projectID := fixture.createProject(manager, "hapusdoc")
+	projectID := fixture.createProject(manager, "arsipdoc")
 	token := loginToken(t, engine, manager)
-	document := createDocumentHTTP(t, engine, token, projectID, "Dokumen untuk dihapus")
+	document := createDocumentHTTP(t, engine, token, projectID, "Dokumen untuk diarsipkan")
 
-	rec := doJSON(t, engine, http.MethodDelete, "/api/v1/documents/"+document.Document.ID, token, "")
+	rec := uploadMultipart(t, engine, "/api/v1/documents/"+document.Document.ID+"/upload", token,
+		"arsip.pdf", []byte("%PDF-1.4 isi"))
+	requireStatus(t, rec, http.StatusCreated)
+	var uploaded documentVersionPayload
+	decodeData(t, rec, &uploaded)
+
+	rec = doJSON(t, engine, http.MethodPost, "/api/v1/documents/"+document.Document.ID+"/archive", token, "")
 	requireStatus(t, rec, http.StatusOK)
 
-	rec = doJSON(t, engine, http.MethodGet, "/api/v1/documents/"+document.Document.ID, token, "")
-	requireStatus(t, rec, http.StatusNotFound)
+	var archived documentPayload
+	decodeData(t, rec, &archived)
+	if archived.Document.Status != model.DocumentStatusArchived {
+		t.Errorf("status response %q, diharapkan %q", archived.Document.Status, model.DocumentStatusArchived)
+	}
+	if archived.Document.ArchivedAt == nil {
+		t.Error("response arsip tidak memuat archived_at")
+	}
 
+	// Dokumennya masih ada dan tetap dapat dibaca serta diunduh.
+	rec = doJSON(t, engine, http.MethodGet, "/api/v1/documents/"+document.Document.ID, token, "")
+	requireStatus(t, rec, http.StatusOK)
+	decodeData(t, rec, &archived)
+	if archived.Document.Status != model.DocumentStatusArchived {
+		t.Errorf("status detail %q, diharapkan archived", archived.Document.Status)
+	}
+	rec = doJSON(t, engine, http.MethodGet,
+		"/api/v1/documents/"+document.Document.ID+"/download/"+uploaded.ID, token, "")
+	requireStatus(t, rec, http.StatusOK)
+
+	// Keluar dari daftar default, kembali muncul pada penyaring status.
+	rec = doJSON(t, engine, http.MethodGet, "/api/v1/documents?project_id="+projectID.String(), token, "")
+	requireStatus(t, rec, http.StatusOK)
+	var list documentListPayload
+	decodeData(t, rec, &list)
+	if len(list) != 0 {
+		t.Errorf("daftar default memuat %d dokumen, diharapkan 0 (terarsip keluar)", len(list))
+	}
+
+	rec = doJSON(t, engine, http.MethodGet,
+		"/api/v1/documents?project_id="+projectID.String()+"&status=archived", token, "")
+	requireStatus(t, rec, http.StatusOK)
+	decodeData(t, rec, &list)
+	if len(list) != 1 || list[0].DocumentNumber != document.Document.DocumentNumber {
+		t.Fatalf("daftar status=archived %+v, diharapkan memuat %s", list, document.Document.DocumentNumber)
+	}
+
+	// Unggahan versi baru dan arsip ulang sama-sama `409`.
+	rec = uploadMultipart(t, engine, "/api/v1/documents/"+document.Document.ID+"/upload", token,
+		"lagi.pdf", []byte("%PDF-1.4 lagi"))
+	requireStatus(t, rec, http.StatusConflict)
+
+	rec = doJSON(t, engine, http.MethodPost, "/api/v1/documents/"+document.Document.ID+"/archive", token, "")
+	requireStatus(t, rec, http.StatusConflict)
+
+	// Jalur lama tidak boleh diam-diam masih hidup sebagai alias.
 	rec = doJSON(t, engine, http.MethodDelete, "/api/v1/documents/"+document.Document.ID, token, "")
 	requireStatus(t, rec, http.StatusNotFound)
 
-	if got := countProjectAudit(t, manager.ID, service.ActionDocumentDeleted); got != 1 {
-		t.Errorf("audit DOCUMENT_DELETED %d, diharapkan 1", got)
+	if got := countProjectAudit(t, manager.ID, service.ActionDocumentArchived); got != 1 {
+		t.Errorf("audit DOCUMENT_ARCHIVED %d, diharapkan 1", got)
 	}
 }
 
@@ -674,3 +808,165 @@ func TestDocumentAuditEntityUsesDocumentNumber(t *testing.T) {
 		t.Errorf("entri audit tertua dari %s, diharapkan baru dibuat", createdAt)
 	}
 }
+
+// TestDocumentListUpdatedAtRangeContractAtHTTP mengunci semantik rentang tanggal
+// `GET /documents` **pada level HTTP**, dengan pola yang sama dengan
+// `TestTaskListDueRangeContractAtHTTP`: interval **tertutup** `[updated_from,
+// updated_to]` — kedua batas inklusif, `updated_to == updated_from` sah, rentang
+// terbalik `422` yang menunjuk `updated_to`. Tujuannya bukan mengulang test
+// service, melainkan menahan perubahan semantik di handler (di situlah batas
+// dibaca dan divalidasi) tanpa mengubah test apa pun.
+func TestDocumentListUpdatedAtRangeContractAtHTTP(t *testing.T) {
+	fixture := newDocumentHTTPFixture(t)
+	engine := fixture.parts.engine
+
+	manager := fixture.createActor("manager")
+	token := loginToken(t, engine, manager)
+	projectID := fixture.createProject(manager, "DOCRANGE")
+
+	doc1 := createDocumentHTTP(t, engine, token, projectID, "Rentang satu")
+	requireStatus(t, doJSON(t, engine, http.MethodPost, "/api/v1/documents", token,
+		fmt.Sprintf(`{"project_id":%q,"title":"Rentang dua"}`, projectID)), http.StatusCreated)
+	doc3 := createDocumentHTTP(t, engine, token, projectID, "Rentang tiga")
+
+	// Waktu lahir kedua dokumen pembatas: `updated_at` dokumen baru sama dengan
+	// `created_at`-nya. Bentuknya RFC 3339 seperti yang dikirim klien — dan
+	// presisinya utuh (RFC3339Nano): memotong ke detik membuat ketiga dokumen
+	// yang lahir dalam detik yang sama punya tepi identik, dan lebih buruk,
+	// tepinya lebih **awal** dari setiap `updated_at` ber-mikrodetik sehingga
+	// `updated_to=tepi` memotong semuanya (enam subtest salah sekaligus).
+	birthOf := func(payload documentPayload) string {
+		t.Helper()
+		parsed, err := time.Parse(time.RFC3339, payload.Document.CreatedAt)
+		if err != nil {
+			t.Fatalf("baca created_at dokumen uji: %v", err)
+		}
+		return parsed.UTC().Format(time.RFC3339Nano)
+	}
+	edge1, edge3 := birthOf(doc1), birthOf(doc3)
+
+	cases := []struct {
+		name  string
+		query string
+		want  int
+	}{
+		{"tanpa penyaring", "", 3},
+		{"hanya updated_from, tepat batas dokumen pertama", "?updated_from=" + edge1, 3},
+		{"hanya updated_from, tepat batas dokumen terakhir", "?updated_from=" + edge3, 1},
+		{"hanya updated_from sesudah semua", "?updated_from=2031-01-01T00:00:00Z", 0},
+		{"hanya updated_to, tepat batas dokumen pertama", "?updated_to=" + edge1, 1},
+		{"hanya updated_to, tepat batas dokumen terakhir", "?updated_to=" + edge3, 3},
+		{"hanya updated_to sebelum semua", "?updated_to=2020-01-01T00:00:00Z", 0},
+		{"kedua batas sama, tepat satu dokumen", "?updated_from=" + edge1 + "&updated_to=" + edge1, 1},
+		{"kedua batas sama, tidak ada dokumen", "?updated_from=2032-01-01T00:00:00Z&updated_to=2032-01-01T00:00:00Z", 0},
+		{"rentang tertutup penuh", "?updated_from=" + edge1 + "&updated_to=" + edge3, 3},
+		{"offset +07:00 eksplisit sama dengan Z", "?updated_from=" + url.QueryEscape("2020-01-01T00:00:00+07:00") + "&updated_to=" + url.QueryEscape("2033-01-01T00:00:00+07:00"), 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doJSON(t, engine, http.MethodGet, "/api/v1/documents"+tc.query, token, "")
+			requireStatus(t, rec, http.StatusOK)
+
+			var env envelope
+			decodeBody(t, rec, &env)
+			if env.Meta == nil || env.Meta.Total != tc.want {
+				t.Errorf("meta %+v, diharapkan total %d", env.Meta, tc.want)
+			}
+		})
+	}
+
+	// Batas yang bukan RFC 3339 ditolak `422` yang menyebut field-nya — bukan
+	// `400` tanpa nama, dan bukan diabaikan.
+	for _, query := range []string{
+		"?updated_from=01-03-2026",
+		"?updated_to=bukan-tanggal",
+		"?updated_from=2026-03-01", // tanggal tanpa offset: zona waktunya jangan ditebak server
+	} {
+		rec := doJSON(t, engine, http.MethodGet, "/api/v1/documents"+query, token, "")
+		requireStatus(t, rec, http.StatusUnprocessableEntity)
+		var env envelope
+		decodeBody(t, rec, &env)
+		if env.Error == nil || len(env.Error.Details) != 1 {
+			t.Fatalf("query %q: details %+v, diharapkan tepat satu", query, env.Error)
+		}
+		if got := env.Error.Details[0]; got.Field != "updated_from" && got.Field != "updated_to" {
+			t.Errorf("query %q: detail %+v, diharapkan field updated_from/updated_to", query, got)
+		}
+	}
+
+	// Rentang terbalik ditolak `422` yang menunjuk `updated_to`, bukan
+	// dikembalikan kosong diam-diam.
+	rec := doJSON(t, engine, http.MethodGet, "/api/v1/documents?updated_from="+edge3+"&updated_to="+edge1, token, "")
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+	var env envelope
+	decodeBody(t, rec, &env)
+	if env.Error == nil || len(env.Error.Details) != 1 || env.Error.Details[0].Field != "updated_to" {
+		t.Fatalf("rentang terbalik: details %+v, diharapkan satu di field updated_to", env.Error)
+	}
+}
+
+func TestDocumentListCategoryFilter(t *testing.T) {
+	requirePool(t)
+	fixture := newDocumentHTTPFixture(t)
+	engine := fixture.parts.engine
+	manager := fixture.createActor("manager")
+	projectID := fixture.createProject(manager, "katdoc")
+	token := loginToken(t, engine, manager)
+
+	// Buat dua kategori di organisasi manager
+	ctx := context.Background()
+	var cat1, cat2 uuid.UUID
+	if err := testPool.QueryRow(ctx, `INSERT INTO document_categories (organization_id, name, code) VALUES ($1, 'Kategori Satu', 'CAT-1') RETURNING id`, manager.OrgID).Scan(&cat1); err != nil {
+		t.Fatalf("buat kategori 1: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `INSERT INTO document_categories (organization_id, name, code) VALUES ($1, 'Kategori Dua', 'CAT-2') RETURNING id`, manager.OrgID).Scan(&cat2); err != nil {
+		t.Fatalf("buat kategori 2: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM document_categories WHERE id IN ($1, $2)`, cat1, cat2)
+	})
+
+	// Dokumen di kategori berbeda
+	d1 := createDocumentWithCategoryHTTP(t, engine, token, projectID, "Dok Satu", &cat1)
+	d2 := createDocumentWithCategoryHTTP(t, engine, token, projectID, "Dok Dua", &cat2)
+	_ = d1
+	_ = d2
+
+	// Filter cat1 -> hanya 1
+	rec := doJSON(t, engine, http.MethodGet, "/api/v1/documents?category_id="+cat1.String(), token, "")
+	requireStatus(t, rec, http.StatusOK)
+	var list documentListPayload
+	decodeData(t, rec, &list)
+	if len(list) != 1 || list[0].CategoryID == nil || *list[0].CategoryID != cat1.String() {
+		t.Fatalf("filter cat1 %+v", list)
+	}
+
+	// Filter cat tidak ada -> 0
+	fake := uuid.New()
+	rec = doJSON(t, engine, http.MethodGet, "/api/v1/documents?category_id="+fake.String(), token, "")
+	requireStatus(t, rec, http.StatusOK)
+	decodeData(t, rec, &list)
+	if len(list) != 0 {
+		t.Fatalf("filter fake %d", len(list))
+	}
+
+	// category_id bukan UUID -> 422
+	rec = doJSON(t, engine, http.MethodGet, "/api/v1/documents?category_id=bukan-uuid", token, "")
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+	var env envelope
+	decodeBody(t, rec, &env)
+	if env.Error == nil || len(env.Error.Details) != 1 || env.Error.Details[0].Field != "category_id" {
+		t.Fatalf("category_id invalid: %+v", env.Error)
+	}
+}
+
+func createDocumentWithCategoryHTTP(t *testing.T, engine *gin.Engine, token string, projectID uuid.UUID, title string, catID *uuid.UUID) documentPayload {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"project_id": projectID.String(), "title": title, "category_id": catID.String()})
+	rec := doJSON(t, engine, http.MethodPost, "/api/v1/documents", token, string(body))
+	requireStatus(t, rec, http.StatusCreated)
+	var payload documentPayload
+	decodeData(t, rec, &payload)
+	return payload
+}
+

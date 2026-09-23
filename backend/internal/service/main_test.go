@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,6 +23,10 @@ import (
 var testPool *pgxpool.Pool
 
 const testPassword = "kata-sandi-uji-auth-2026"
+
+// testLockDuration adalah durasi lock yang dipakai test: cukup lama untuk tidak
+// keburu kedaluwarsa, cukup pendek untuk tidak memperlambat suite.
+const testLockDuration = time.Minute
 
 // TestMain menerapkan migrasi lebih dulu: test auth membaca `role_permissions`
 // hasil seed `008` dan kebijakan login dari `system_settings` (migrasi `002`).
@@ -118,7 +123,28 @@ func createActor(t *testing.T, roles ...string) testActor {
 	}
 
 	t.Cleanup(func() { cleanupActor(t, actor.ID, actor.OrgID) })
+	t.Cleanup(func() { cleanupLoginAttempts(t, actor.ID, actor.Username) })
 	return actor
+}
+
+// cleanupLoginAttempts menghapus telemetri percobaan login milik aktor uji.
+//
+// Baris untuk username yang **tidak** ada (`user_id IS NULL`) juga harus ikut:
+// itulah kasus inti temuan C-035, dan baris seperti itu tidak dapat ditemukan
+// lewat `user_id`. Username-nya unik per test, sehingga pembersihan ini tidak
+// menyentuh baris milik test lain.
+func cleanupLoginAttempts(t *testing.T, userID uuid.UUID, username string) {
+	t.Helper()
+	if testPool == nil {
+		return
+	}
+
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM login_attempts WHERE user_id = $1 OR username_attempted = $2`,
+		userID, username,
+	); err != nil {
+		t.Errorf("hapus percobaan login uji: %v", err)
+	}
 }
 
 // cleanupActor menghapus data uji. Entri audit log tidak dapat dihapus lewat
@@ -181,17 +207,97 @@ func countAudit(t *testing.T, actorID uuid.UUID, action string) int {
 	return count
 }
 
-// isRevoked menanyakan tabel revokasi langsung (cache di-reset lebih dulu) agar
-// hasilnya benar-benar membuktikan barisnya tersimpan.
-func isRevoked(t *testing.T, revocations *repository.RevocationRepository, jti uuid.UUID) bool {
+// isRevoked menanyakan tabel `token_revocations` **langsung**, bukan lewat
+// repository: yang dibuktikan test adalah barisnya benar-benar tersimpan,
+// sehingga cache ber-TTL tidak boleh ikut menjadi bagian dari jawabannya.
+func isRevoked(t *testing.T, jti uuid.UUID) bool {
 	t.Helper()
-	revocations.ResetCache()
+	requirePool(t)
 
-	revoked, err := revocations.IsRevoked(context.Background(), jti)
-	if err != nil {
+	var revoked bool
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT EXISTS (SELECT 1 FROM token_revocations WHERE jti = $1)`, jti,
+	).Scan(&revoked); err != nil {
 		t.Fatalf("periksa revokasi: %v", err)
 	}
 	return revoked
+}
+
+// sessionRevoked menanyakan keputusan repository (dua sebab sekaligus, ADR-0009
+// + ADR-0021) dengan `issuedAt` yang dapat ditentukan test, sehingga test tidak
+// perlu menunggu detik berjalan.
+func sessionRevoked(t *testing.T, revocations *repository.RevocationRepository, jti, userID uuid.UUID, issuedAt time.Time) bool {
+	t.Helper()
+	revocations.ResetCache()
+
+	revoked, err := revocations.SessionRevoked(context.Background(), jti, userID, issuedAt)
+	if err != nil {
+		t.Fatalf("periksa sesi: %v", err)
+	}
+	return revoked
+}
+
+// countLoginAttempts menghitung baris `login_attempts` untuk satu username.
+// `succeeded` nil berarti semua baris.
+func countLoginAttempts(t *testing.T, username string, succeeded *bool) int {
+	t.Helper()
+	requirePool(t)
+
+	var count int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM login_attempts
+		WHERE username_attempted = $1 AND ($2::boolean IS NULL OR succeeded = $2)`,
+		username, succeeded,
+	).Scan(&count); err != nil {
+		t.Fatalf("hitung percobaan login %q: %v", username, err)
+	}
+	return count
+}
+
+// loginAttemptUserID membaca `user_id` percobaan login terakhir untuk satu
+// username. `nil` berarti kolomnya NULL — kasus yang justru paling penting
+// (percobaan atas username yang tidak ada, temuan C-035).
+func loginAttemptUserID(t *testing.T, username string) *uuid.UUID {
+	t.Helper()
+	requirePool(t)
+
+	var userID *uuid.UUID
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT user_id FROM login_attempts
+		WHERE username_attempted = $1
+		ORDER BY created_at DESC LIMIT 1`, username,
+	).Scan(&userID); err != nil {
+		t.Fatalf("baca user_id percobaan login %q: %v", username, err)
+	}
+	return userID
+}
+
+// hasActiveLock menjawab apakah akun sedang terkunci menurut jam database —
+// bukti bahwa lock tersimpan di `users`, bukan di memori proses.
+func hasActiveLock(t *testing.T, userID uuid.UUID) bool {
+	t.Helper()
+	requirePool(t)
+
+	var locked bool
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COALESCE(locked_until > NOW(), false) FROM users WHERE id = $1`, userID,
+	).Scan(&locked); err != nil {
+		t.Fatalf("periksa lock akun: %v", err)
+	}
+	return locked
+}
+
+// boolPtr membantu `countLoginAttempts` menyebut penyaring `succeeded`
+// dengan jelas di tempat pemanggilan.
+func boolPtr(value bool) *bool { return &value }
+
+// requireNoError menggagalkan test bila err tidak nil.
+func requireNoError(t *testing.T, err error, context string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", context, err)
+	}
 }
 
 // requireError memastikan err adalah salah satu error target.
@@ -209,13 +315,18 @@ func requireError(t *testing.T, err error, targets ...error) {
 }
 
 // newAuthService merakit AuthService nyata di atas database test.
+//
+// Ambang percobaan dan durasi lock diberikan eksplisit supaya test tidak
+// bergantung pada nilai seed `system_settings` — yang berlaku di produksi —
+// sekaligus membuktikan keduanya dibaca dari satu kebijakan yang sama.
 func newAuthService(t *testing.T, maxAttempts int) (*service.AuthService, *repository.RevocationRepository) {
 	t.Helper()
 	pool := requirePool(t)
 	users := repository.NewUserRepository(pool)
 	revocations := repository.NewRevocationRepository(pool, 0)
+	attempts := repository.NewLoginAttemptRepository(pool)
 	tokens := newTokenService(t)
 
-	guard := service.NewLoginGuard(maxAttempts, 0) // 0 -> 15 menit (default 44-SECURITY §2.3)
-	return service.NewAuthService(pool, users, revocations, tokens, guard, discardLogger()), revocations
+	policy := repository.AuthPolicy{MaxLoginAttempts: maxAttempts, LockoutDuration: testLockDuration}
+	return service.NewAuthService(pool, users, revocations, attempts, tokens, policy, discardLogger()), revocations
 }

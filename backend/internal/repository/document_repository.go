@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -24,8 +25,17 @@ type DocumentListFilter struct {
 	ProjectID *uuid.UUID
 	Status    string
 	Search    string
-	Page      int
-	Limit     int
+	// UpdatedFrom/UpdatedTo membatasi `updated_at` dengan interval tertutup
+	// `[UpdatedFrom, UpdatedTo]` — kedua batas inklusif, sama semantiknya dengan
+	// `due_from`/`due_to` pada task (`42-API.md` §6, keputusan P-028). `nil` =
+	// tidak disaring. Sumbernya timestamptz eksplisit dari klien (RFC 3339).
+	UpdatedFrom *time.Time
+	UpdatedTo   *time.Time
+	// CategoryID menyaring `documents.category_id` — `50-FSD.md` §4.1 (Q-016),
+	// tanpa migrasi baru karena `document_categories` sudah ada (`41-DATABASE.md` §2.3).
+	CategoryID *uuid.UUID
+	Page       int
+	Limit      int
 }
 
 // documentSelectColumns adalah kolom kanonik daftar/detail dokumen, termasuk
@@ -33,7 +43,7 @@ type DocumentListFilter struct {
 // Project) dan §4.3 (status workflow, status project).
 const documentSelectColumns = `
 	d.id, d.project_id, d.document_number, d.title, d.category_id,
-	COALESCE(d.description, '') AS description, d.owner_id, d.status,
+	COALESCE(d.description, '') AS description, d.owner_id, d.status, d.archived_at,
 	d.current_version, d.workflow_instance_id, d.created_at, d.updated_at,
 	p.code AS project_code, p.name AS project_name, p.status AS project_status,
 	COALESCE(c.name, '') AS category_name,
@@ -57,6 +67,23 @@ const documentFrom = `
 		LIMIT 1
 	) lv ON TRUE`
 
+// documentListWhere adalah syarat WHERE daftar dokumen, dipakai bersama oleh
+// `List` dan `count` supaya keduanya tidak dapat menyimpang.
+//
+// Posisi parameter: 1-3 cakupan, 4 project_id, 5 status, 6 pencarian, 7-8 rentang,
+// 9 category_id.
+//
+// Tanpa penyaring `status`, dokumen terarsip keluar dari daftar default dan
+// hanya muncul pada `?status=archived` (ADR-0019 butir 5). Aturan itu hidup di
+// dalam kueri, bukan di handler, jadi di sini pun ikut terjaga.
+var documentListWhere = projectScopePredicate(1, 2, 3) + `
+			AND ($4::uuid IS NULL OR d.project_id = $4)
+			AND CASE WHEN $5 = '' THEN d.status <> 'archived' ELSE d.status = $5 END
+			AND ($6 = '' OR d.title ILIKE '%' || $6 || '%' OR d.document_number ILIKE '%' || $6 || '%')
+			AND ($7::timestamptz IS NULL OR d.updated_at >= $7)
+			AND ($8::timestamptz IS NULL OR d.updated_at <= $8)
+			AND ($9::uuid IS NULL OR d.category_id = $9)`
+
 // DocumentRepository membaca dan mengubah dokumen beserta versinya.
 type DocumentRepository struct {
 	db DBTX
@@ -78,6 +105,9 @@ func (r *DocumentRepository) WithTx(tx pgx.Tx) *DocumentRepository {
 //
 // Cakupan anggota diterapkan di dalam WHERE, jadi dokumen di luar cakupan tidak
 // pernah terkirim ke lapisan atas (`44-SECURITY.md` §3.1.3).
+//
+// Total dihitung `COUNT(*) OVER()` dengan tambalan `count` untuk halaman di luar
+// rentang (temuan C-048), seperti modul lainnya.
 func (r *DocumentRepository) List(ctx context.Context, scope ProjectScope, filter DocumentListFilter) ([]model.Document, int, error) {
 	limit := filter.Limit
 	if limit <= 0 {
@@ -89,22 +119,21 @@ func (r *DocumentRepository) List(ctx context.Context, scope ProjectScope, filte
 	}
 	offset := (page - 1) * limit
 
-	// Posisi parameter: 1-3 cakupan, 4 project_id, 5 status, 6 search, 7 limit, 8 offset.
-	query := fmt.Sprintf(`
-		SELECT `+documentSelectColumns+`,
+	// Posisi parameter: 1-3 cakupan, 4 project_id, 5 status, 6 search, 7-8 rentang
+	// `updated_at`, 9 category_id, 10 limit, 11 offset. Aturan arsip (default
+	// menyembunyikan `archived`) ada di `documentListWhere`.
+	query := `
+		SELECT ` + documentSelectColumns + `,
 			COUNT(*) OVER() AS total
-		%s
-		WHERE %s
-			AND ($4::uuid IS NULL OR d.project_id = $4)
-			AND ($5 = '' OR d.status = $5)
-			AND ($6 = '' OR d.title ILIKE '%%' || $6 || '%%' OR d.document_number ILIKE '%%' || $6 || '%%')
+	` + documentFrom + `
+		WHERE ` + documentListWhere + `
 		ORDER BY d.created_at DESC, d.document_number DESC
-		LIMIT $7 OFFSET $8`,
-		documentFrom, projectScopePredicate(1, 2, 3))
+		LIMIT $10 OFFSET $11`
 
 	rows, err := r.db.Query(ctx, query,
 		scope.OrganizationID, scope.AllInOrganization, scope.UserID,
-		filter.ProjectID, filter.Status, filter.Search, limit, offset)
+		filter.ProjectID, filter.Status, filter.Search,
+		filter.UpdatedFrom, filter.UpdatedTo, filter.CategoryID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("baca daftar dokumen: %w", err)
 	}
@@ -127,7 +156,36 @@ func (r *DocumentRepository) List(ctx context.Context, scope ProjectScope, filte
 		return nil, 0, fmt.Errorf("iterasi daftar dokumen: %w", err)
 	}
 
+	// Halaman kosong yang bukan halaman pertama: total dihitung ulang karena
+	// `COUNT(*) OVER()` tidak punya baris untuk dievaluasi (C-048).
+	if len(documents) == 0 && offset > 0 {
+		counted, err := r.count(ctx, scope, filter)
+		if err != nil {
+			return nil, 0, err
+		}
+		total = counted
+	}
+
 	return documents, total, nil
+}
+
+// count menghitung seluruh dokumen yang cocok dengan penyaring, memakai FROM
+// dan WHERE yang sama dengan `List` supaya keduanya tidak dapat berbeda.
+func (r *DocumentRepository) count(ctx context.Context, scope ProjectScope, filter DocumentListFilter) (int, error) {
+	query := `
+		SELECT count(*)
+	` + documentFrom + `
+		WHERE ` + documentListWhere
+
+	var total int
+	if err := r.db.QueryRow(ctx, query,
+		scope.OrganizationID, scope.AllInOrganization, scope.UserID,
+		filter.ProjectID, filter.Status, filter.Search,
+		filter.UpdatedFrom, filter.UpdatedTo, filter.CategoryID,
+	).Scan(&total); err != nil {
+		return 0, fmt.Errorf("hitung daftar dokumen: %w", err)
+	}
+	return total, nil
 }
 
 // FindByID membaca satu dokumen **di dalam cakupan** aktor.
@@ -280,53 +338,38 @@ func (r *DocumentRepository) FindVersion(ctx context.Context, documentID, versio
 		WHERE v.document_id = $1 AND v.id = $2`, documentID, versionID))
 }
 
-// VersionKeys mengembalikan seluruh `file_key` satu dokumen, dipakai sebelum
-// barisnya dihapus supaya berkas di storage tidak tertinggal.
-func (r *DocumentRepository) VersionKeys(ctx context.Context, documentID uuid.UUID) ([]string, error) {
-	rows, err := r.db.Query(ctx, `SELECT file_key FROM document_versions WHERE document_id = $1`, documentID)
-	if err != nil {
-		return nil, fmt.Errorf("baca kunci berkas dokumen: %w", err)
-	}
-	defer rows.Close()
-
-	keys := make([]string, 0, 4)
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, fmt.Errorf("scan kunci berkas: %w", err)
-		}
-		keys = append(keys, key)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterasi kunci berkas: %w", err)
-	}
-	return keys, nil
-}
-
-// Delete menghapus dokumen **di dalam cakupan** aktor.
+// Archive mengarsipkan dokumen **di dalam cakupan** aktor (ADR-0019).
 //
-// Kaskade ke `document_versions` adalah perilaku yang sudah dikontrak
-// (`42-API.md` §4: "cascade to versions"), sehingga `document_versions` sengaja
-// tidak diberi trigger append-only (`44-SECURITY.md` §6). Baris `documents`
-// sendiri belum punya kolom arsip — semantik hapus vs arsip masih temuan
-// terbuka **C-004**, jadi perilakunya mengikuti kontrak yang ada.
-func (r *DocumentRepository) Delete(ctx context.Context, scope ProjectScope, id uuid.UUID) (int64, error) {
+// Yang berubah hanya `status` dan `archived_at` (plus `updated_at`); baris,
+// `document_versions`, berkas di storage, dan jejak auditnya tetap ada —
+// inilah sebabnya endpoint ini menggantikan `DELETE` yang dulu berkaskade.
+//
+// Dua penjaga sengaja ada di kueri, bukan hanya di service:
+//
+//   - cakupan project (predikat yang sama dengan modul project), sehingga baris
+//     di luar cakupan tidak pernah tersentuh;
+//   - `status <> 'archived'`, sehingga arsip ulang tidak pernah **menggeser**
+//     waktu arsip. `rowsAffected = 0` karena itu bermakna "tidak ada, atau sudah
+//     terarsip" — service sudah memeriksa lebih dulu untuk membedakan pesannya,
+//     dan nilai 0 di sini menangkap balapan antara dua permintaan bersamaan.
+func (r *DocumentRepository) Archive(ctx context.Context, scope ProjectScope, id uuid.UUID) (int64, error) {
 	// Posisi parameter: 1 = id, 2 = organisasi, 3 = seluruh organisasi, 4 = user.
 	query := fmt.Sprintf(`
-		DELETE FROM documents d
-		USING projects p
-		WHERE d.project_id = p.id AND d.id = $1 AND %s`,
+		UPDATE documents d
+		SET status = 'archived', archived_at = NOW(), updated_at = NOW()
+		FROM projects p
+		WHERE d.project_id = p.id AND d.id = $1 AND d.status <> 'archived' AND %s`,
 		projectScopePredicate(2, 3, 4))
 
 	tag, err := r.db.Exec(ctx, query, id, scope.OrganizationID, scope.AllInOrganization, scope.UserID)
 	if err != nil {
-		return 0, fmt.Errorf("hapus dokumen: %w", err)
+		return 0, fmt.Errorf("arsipkan dokumen: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }
 
 // HasRunningWorkflow menjawab apakah dokumen masih punya instance workflow yang
-// berjalan (`50-FSD.md` §4.3: hapus hanya bila "no workflow running").
+// berjalan (`50-FSD.md` §4.3: arsip hanya bila "no workflow running").
 func (r *DocumentRepository) HasRunningWorkflow(ctx context.Context, documentID uuid.UUID) (bool, error) {
 	var exists bool
 	if err := r.db.QueryRow(ctx, `
@@ -355,7 +398,7 @@ func scanDocument(row pgx.Row) (*model.Document, error) {
 	)
 	if err := row.Scan(
 		&document.ID, &document.ProjectID, &document.DocumentNumber, &document.Title, &document.CategoryID,
-		&document.Description, &document.OwnerID, &document.Status,
+		&document.Description, &document.OwnerID, &document.Status, &document.ArchivedAt,
 		&document.CurrentVersion, &document.WorkflowInstanceID, &document.CreatedAt, &document.UpdatedAt,
 		&document.ProjectCode, &document.ProjectName, &projectStatus,
 		&document.CategoryName, &document.OwnerUsername, &document.LatestVersion, &workflowStatus,
@@ -375,7 +418,7 @@ func scanDocumentRow(rows pgx.Rows, document *model.Document, total *int) error 
 	)
 	if err := rows.Scan(
 		&document.ID, &document.ProjectID, &document.DocumentNumber, &document.Title, &document.CategoryID,
-		&document.Description, &document.OwnerID, &document.Status,
+		&document.Description, &document.OwnerID, &document.Status, &document.ArchivedAt,
 		&document.CurrentVersion, &document.WorkflowInstanceID, &document.CreatedAt, &document.UpdatedAt,
 		&document.ProjectCode, &document.ProjectName, &projectStatus,
 		&document.CategoryName, &document.OwnerUsername, &document.LatestVersion, &workflowStatus,

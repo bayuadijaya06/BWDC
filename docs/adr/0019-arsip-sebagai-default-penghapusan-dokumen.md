@@ -46,7 +46,7 @@ Karena itu `41-DATABASE.md` §4 dan `44-SECURITY.md` §6 memuat catatan eksplisi
 
 ## Bukti / Referensi
 
-- Temuan **C-004** (`AUDIT-001-2026-09-17-kontradiksi-dokumen.md`) — `41-DATABASE.md` §4, `44-SECURITY.md` §6, dan catatan `50-FSD.md` §4.3 semua menyatakan keputusan ini belum ada sejak P-019/P-023.
+- Temuan **C-004** (`docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md`) — `41-DATABASE.md` §4, `44-SECURITY.md` §6, dan catatan `50-FSD.md` §4.3 semua menyatakan keputusan ini belum ada sejak P-019/P-023.
 - Praktik industri: soft delete/arsip sebagai default pada sistem berjejak audit; hard delete disediakan hanya sebagai operasi eksplisit ber-izin, biasanya atas dasar hak penghapusan data (**UU 27/2022** tentang Pelindungan Data Pribadi). Riset lengkap: `OPEN-QUESTIONS.md` §3 baris C-004.
 - Preseden internal: `POST /api/v1/projects/:id/archive` (`FR-PROJ-07`, `50-FSD.md` §3.3) — pola yang sama, sudah berjalan dan diuji sejak P-022.
 - Implementasi & buktinya dicatat di `TASKS.md` **`T-039`**; sampai task itu selesai, kode masih memuat `DELETE` dan `AUDIT-001` mencatat C-004 sebagai **APPROVED** (bukan FIXED).

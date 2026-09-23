@@ -1,0 +1,102 @@
+/* Lapisan dasar. Semua nilai berasal dari token di `tokens.css`. */
+
+@layer base {
+  html {
+    /* Kepadatan alat kerja: 14px body (DESIGN.md §3). */
+    font-size: 100%;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--surface);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: var(--text-14);
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    margin: 0;
+    line-height: 1.25;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  h1 {
+    font-size: var(--text-26);
+  }
+
+  h2 {
+    font-size: var(--text-20);
+  }
+
+  h3 {
+    font-size: var(--text-16);
+  }
+
+  /* Identitas entitas selalu mono (DESIGN.md §3). */
+  code,
+  kbd,
+  samp,
+  .mono {
+    font-family: var(--font-mono);
+    font-size: var(--text-13);
+    font-variant-numeric: tabular-nums;
+  }
+
+  a {
+    color: var(--accent);
+    text-underline-offset: 2px;
+  }
+
+  a:hover {
+    color: var(--accent-strong);
+  }
+
+  /* Fokus terlihat di semua kontrol (R-32, WCAG 2.2 SC 2.4.11).
+     Outline, bukan box-shadow, supaya tidak hilang saat elemen di-clip. */
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-control);
+  }
+
+  /* Jangan hapus focus ring pada elemen yang memang menerima fokus. */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  ::selection {
+    background-color: var(--accent-soft);
+    color: var(--text);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-muted);
+  }
+
+  /* MOTION 1: transisi hanya untuk perubahan status, dan dihentikan total
+     bila pengguna meminta gerak minimal. */
+  *,
+  ::before,
+  ::after {
+    transition-property: background-color, border-color, color;
+    transition-duration: 120ms;
+    transition-timing-function: var(--ease-line);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      transition-duration: 0ms;
+      animation-duration: 0ms;
+    }
+  }
+}

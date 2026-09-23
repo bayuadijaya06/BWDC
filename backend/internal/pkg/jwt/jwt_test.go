@@ -191,6 +191,30 @@ func TestValidateRejectsTokenWithoutJTI(t *testing.T) {
 	}
 }
 
+// TestValidateRejectsTokenWithoutIssuedAt menjaga syarat ADR-0021: tanpa `iat`
+// token tidak dapat dibandingkan dengan `users.tokens_invalid_before`, sehingga
+// pencabutan seluruh sesi tidak dapat ditegakkan untuk token itu.
+func TestValidateRejectsTokenWithoutIssuedAt(t *testing.T) {
+	svc := newTestService(t, time.Hour)
+
+	claims := Claims{
+		UserID: uuid.New(),
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        uuid.NewString(),
+			Issuer:    Issuer,
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	}
+	unsigned, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(testSecret))
+	if err != nil {
+		t.Fatalf("tandatangani token: %v", err)
+	}
+
+	if _, err := svc.Validate(unsigned); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("token tanpa iat seharusnya ditolak, dapat %v", err)
+	}
+}
+
 func TestValidateRejectsWrongIssuer(t *testing.T) {
 	svc := newTestService(t, time.Hour)
 
@@ -253,5 +277,137 @@ func TestValidateRejectsExpiryMissing(t *testing.T) {
 
 	if _, err := svc.Validate(noExp); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("token tanpa exp seharusnya ditolak, dapat %v", err)
+	}
+}
+
+// TestGenerateRefreshIsTaggedAndLongerLived mengunci bentuk refresh token
+// (ADR-0023): bertanda `refresh`, berumur `RefreshExpiry` (7 hari), dan `jti`
+// miliknya sendiri sehingga ia dapat dicabut terpisah dari access token.
+func TestGenerateRefreshIsTaggedAndLongerLived(t *testing.T) {
+	svc := newTestService(t, time.Hour)
+	userID, orgID := uuid.New(), uuid.New()
+
+	refresh, err := svc.GenerateRefresh(userID, orgID, "admin")
+	if err != nil {
+		t.Fatalf("generate refresh: %v", err)
+	}
+
+	claims, err := svc.ValidateRefresh(refresh.Value)
+	if err != nil {
+		t.Fatalf("refresh token seharusnya sah, dapat %v", err)
+	}
+	if claims.Type != TypeRefresh {
+		t.Errorf("klaim typ = %q, diharapkan %q", claims.Type, TypeRefresh)
+	}
+	if claims.UserID != userID {
+		t.Errorf("klaim user_id = %s, diharapkan %s", claims.UserID, userID)
+	}
+	if got := refresh.ExpiresAt.Sub(refresh.IssuedAt); got != RefreshExpiry {
+		t.Errorf("masa berlaku refresh token = %s, diharapkan %s", got, RefreshExpiry)
+	}
+	// Masa berlakunya HARUS lebih panjang daripada access token; kalau tidak,
+	// "memperpanjang sesi" tidak berarti apa pun.
+	if RefreshExpiry <= time.Hour {
+		t.Errorf("RefreshExpiry %s tidak lebih panjang daripada JWT_EXPIRY uji", RefreshExpiry)
+	}
+	if refresh.JTI == uuid.Nil {
+		t.Error("refresh token tidak memuat jti sehingga tidak dapat dicabut")
+	}
+}
+
+// TestAccessTokenIsTaggedAccess melengkapi pemeriksaan di atas: `Generate`
+// menghasilkan tipe `access`, bukan sekadar "bukan refresh".
+func TestAccessTokenIsTaggedAccess(t *testing.T) {
+	svc := newTestService(t, time.Hour)
+
+	access, err := svc.Generate(uuid.New(), uuid.New(), "admin")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	claims, err := svc.Validate(access.Value)
+	if err != nil {
+		t.Fatalf("access token seharusnya sah, dapat %v", err)
+	}
+	if claims.Type != TypeAccess {
+		t.Errorf("klaim typ = %q, diharapkan %q", claims.Type, TypeAccess)
+	}
+}
+
+// TestValidateRejectsRefreshTokenAsAccessToken adalah pengaman inti ADR-0023:
+// refresh token berumur 7 hari **tidak boleh** dapat dipakai sebagai bearer token
+// di endpoint terproteksi. Tanpa pemeriksaan tipe, satu refresh token yang bocor
+// menjadi akses penuh selama sepekan.
+func TestValidateRejectsRefreshTokenAsAccessToken(t *testing.T) {
+	svc := newTestService(t, time.Hour)
+
+	refresh, err := svc.GenerateRefresh(uuid.New(), uuid.New(), "admin")
+	if err != nil {
+		t.Fatalf("generate refresh: %v", err)
+	}
+
+	if _, err := svc.Validate(refresh.Value); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("refresh token sebagai bearer seharusnya ditolak, dapat %v", err)
+	}
+}
+
+// TestValidateRefreshRejectsAccessToken menutup arah sebaliknya: access token
+// tidak dapat ditukar di `POST /auth/refresh`.
+func TestValidateRefreshRejectsAccessToken(t *testing.T) {
+	svc := newTestService(t, time.Hour)
+
+	access, err := svc.Generate(uuid.New(), uuid.New(), "admin")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	if _, err := svc.ValidateRefresh(access.Value); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("access token di endpoint refresh seharusnya ditolak, dapat %v", err)
+	}
+}
+
+// TestValidateRejectsTokenWithoutType membuktikan klaim `typ` **wajib**: token
+// yang ditandatangani dengan kunci yang benar tetapi tanpa tipe ditolak oleh
+// kedua pemeriksa. Konsekuensinya dinyatakan terbuka di ADR-0023: token yang
+// terbit sebelum perubahan ini tidak lagi sah.
+func TestValidateRejectsTokenWithoutType(t *testing.T) {
+	svc := newTestService(t, time.Hour)
+
+	claims := Claims{
+		UserID: uuid.New(),
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        uuid.NewString(),
+			Issuer:    Issuer,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	}
+	untyped, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(testSecret))
+	if err != nil {
+		t.Fatalf("tandatangani token: %v", err)
+	}
+
+	if _, err := svc.Validate(untyped); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("token tanpa typ sebagai access seharusnya ditolak, dapat %v", err)
+	}
+	if _, err := svc.ValidateRefresh(untyped); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("token tanpa typ sebagai refresh seharusnya ditolak, dapat %v", err)
+	}
+}
+
+// TestValidateRefreshRejectsExpired membuktikan refresh token juga tunduk pada
+// `exp`: tipe yang benar tidak membuat token kedaluwarsa diterima.
+func TestValidateRefreshRejectsExpired(t *testing.T) {
+	svc := newTestService(t, time.Hour)
+	// Diterbitkan delapan hari lalu, sehingga lewat RefreshExpiry (7 hari).
+	svc.now = func() time.Time { return time.Now().Add(-8 * 24 * time.Hour) }
+
+	refresh, err := svc.GenerateRefresh(uuid.New(), uuid.New(), "admin")
+	if err != nil {
+		t.Fatalf("generate refresh: %v", err)
+	}
+
+	if _, err := svc.ValidateRefresh(refresh.Value); !errors.Is(err, ErrExpiredToken) {
+		t.Fatalf("refresh token kedaluwarsa seharusnya menghasilkan ErrExpiredToken, dapat %v", err)
 	}
 }

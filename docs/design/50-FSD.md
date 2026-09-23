@@ -122,9 +122,10 @@ FSD mendetailkan fungsi-fungsi sistem dari perspektif pengguna dan sistem. Menja
 **Filters:**
 - Project (dropdown)
 - Status (multi-select)
-- Category (dropdown)
-- Owner (dropdown)
-- Date range
+- Category (dropdown) — `?category_id=` (`42-API.md` §4, Q-016 — tanpa migrasi baru, `document_categories` sudah ada `41-DATABASE.md` §2.3)
+- Owner (dropdown) — *belum ada di kontrak `42-API.md` §4 (Q-016, menunggu Q-024 `GET /users`)*
+- Date range — `updated_from`/`updated_to`, interval tertutup, instan RFC 3339 ber-offset
+  (kontrak `42-API.md` §4); di halaman: satu kelompok ber-label, pola rentang tenggat Tasks (§6.1)
 
 **Columns:**
 Document Number, Title, Category, Status (badge), Version, Owner, Last Updated
@@ -248,7 +249,7 @@ berarti versi baru (FR-VER-03).
 ### 5.4 Halaman Approvals
 
 **URL:** `/approvals`, detail `/approvals/:instanceId`  
-**Access:** Semua role yang mengikuti project terkait (`workflow_instance:read`); aksi terbatas oleh izin aksi (`workflow_instance:approve/reject/request_revision` — Admin/Manager) **dan** penunjukan sebagai penanggung jawab step aktif (`44-SECURITY.md` §3.3). Menu ini **bukan** role kelima "Reviewer" — penugasan step bersifat fungsional (temuan C-006 masih OPEN; jangan mengarang role).
+**Access:** Semua role yang mengikuti project terkait (`workflow_instance:read`); aksi terbatas oleh izin aksi (`workflow_instance:approve/reject/request_revision` — Admin/Manager) **dan** penunjukan sebagai penanggung jawab step aktif (`44-SECURITY.md` §3.3). Menu ini **bukan** role kelima "Reviewer" — penugasan step bersifat fungsional (temuan **C-006**, ditutup P-026; lihat `51-UX.md` §2.1).
 
 **Halaman ini adalah view dari workflow instance, bukan modul baru** — menutup temuan C-018 untuk sisi Approvals. Tidak ada handler `Approvals` terpisah: frontend memakai endpoint workflow (`42-API.md` §5), backend tetap di package `workflow` (`40-TSD.md` §2.0). Struktur folder `Approvals/` di `30-ARCHITECTURE.md` §3.2 adalah artefak frontend, bukan package backend.
 
@@ -291,7 +292,7 @@ Title, Status, Priority, Due Date, Assignee, Project
 
 **Kelima penyaring dilayani server**, bukan disaring di klien: `GET /tasks` memakai `?status=`, `?priority=`, `?project_id=`, `?assignee_id=`, `?due_from=`/`?due_to=`, dan sub-halaman `Overdue` memakai `?overdue=true` — penanda overdue turunan (ADR-0012), sehingga penyaringan harus terjadi sebelum paginasi (kontrak lengkap: `42-API.md` §6).
 
-Rentang tanggal memakai **interval setengah terbuka** `[due_from, due_to)` dengan batas RFC 3339 ber-offset eksplisit (bukan tanggal `YYYY-MM-DD` yang harus ditebak zona waktunya). Konvensi ini sama dengan API publik besar (Stripe: `created[gte]` + `created[lt]`) dan dipilih agar rentang bersebelahan tidak tumpang tindih maupun melewatkan baris; keputusan lengkapnya di `OPEN-QUESTIONS.md` **Q-017** butir (10).
+Rentang tanggal memakai **interval tertutup** `[due_from, due_to]` — kedua batas **inklusif** — dengan batas RFC 3339 ber-offset eksplisit (bukan tanggal `YYYY-MM-DD` yang harus ditebak zona waktunya). Bentuk "dari A sampai B" dipilih **user** pada 2026-09-19 (P-028), menggantikan usulan agen semula yang setengah terbuka; konsekuensinya (rentang bersebelahan dapat tumpang tindih) dinyatakan di `42-API.md` §6, dan keputusan lengkapnya di `OPEN-QUESTIONS.md` **Q-017** butir (10).
 
 **Sub-halaman → penyaring:** My Tasks = `?assignee_id=<diri sendiri>`, Team Tasks = tanpa penyaring (Manager/Administrator melihat seluruh organisasi), Overdue = `?overdue=true`, Completed = `?status=completed`.
 
@@ -335,13 +336,20 @@ Ketiga aksi itu **bukan** tiga nilai pada satu endpoint ubah-status: Complete pu
 
 **Fields:**
 - Content (required, max 2000 chars)
-- Reply (optional, threaded)
+- Reply (optional, threaded) — **belum didukung skema.** Tabel `comments` (`41-DATABASE.md` §2.5) tidak punya kolom induk, jadi balasan saat ini ditulis sebagai komentar biasa pada entitas yang sama dan ditampilkan dalam satu timeline datar. Menghidupkan threading menuntut kolom `parent_id` (migrasi baru) + ADR, dan tidak ada `FR-CMT-*` yang menuntutnya; dicatat sebagai temuan **C-050**/Q-018 dengan rekomendasi menundanya sampai ada kebutuhan nyata.
 
 **Display:**
 - Avatar/initials
 - Author name
 - Timestamp
 - Edit/delete (own comments only)
+
+**Aturan yang mengikat implementasi** (`42-API.md` §7, `44-SECURITY.md` §3.1.3):
+
+- Komentar menempel pada entitas yang **boleh dibaca** penulisnya; komentar pada entitas di luar cakupan project dijawab `404`, bukan `403`.
+- Edit/hapus dibatasi **kepemilikan** (`created_by_id = user`), bukan izin role. Matriks izin tidak punya `comment:update`/`comment:delete`, dan `comment:create` dimiliki **semua** role termasuk Viewer.
+- Urutan tampilan **kronologis** (terlama lebih dulu) dan ber-paginasi; daftar selalu komentar **satu** entitas (`?entity_type=&entity_id=`).
+- `@mention` (notifikasi `COMMENT_MENTION`, §8.1) **bukan** bagian modul ini: pengenalan mention adalah pekerjaan modul Notification yang belum dibangun, sedangkan modul komentar hanya menyimpan isinya.
 
 ---
 
@@ -354,6 +362,7 @@ Ketiga aksi itu **bukan** tiga nilai pada satu endpoint ubah-status: Complete pu
 | TASK_ASSIGNED | Task created/assigned | Assignee |
 | APPROVAL_REQUIRED | Workflow step assigned | Step responsible users |
 | REVISION_REQUESTED | Request revision action (dokumen kembali ke step sebelumnya, ADR-0016) | Document owner |
+| REVIEW_REQUIRED_AGAIN | Penanggung jawab step menerima kembali keputusan: step tujuan setelah `request_revision`, dan step aktif setelah re-submit | Penanggung jawab step tujuan (`workflow_steps.responsible_role`) |
 | DOCUMENT_APPROVED | Final approval | Document owner |
 | DOCUMENT_REJECTED | Reject action | Document owner |
 | TASK_OVERDUE | Due date passed | Assignee, Project manager |
@@ -373,20 +382,29 @@ Ketiga aksi itu **bukan** tiga nilai pada satu endpoint ubah-status: Complete pu
 
 ## 9. Modul Dashboard
 
-**URL:** `/dashboard`  
-**Access:** All authenticated users
+**URL:** `/` (Dashboard) — modul pertama yang dibuka sesudah login (`IDEA.md` flow Login → Dashboard).  
+**Access:** All authenticated users, berbasis cakupan (`44-SECURITY.md` §3.1.3) — angka yang ditampilkan adalah **dalam cakupan aktor**, bukan global.
 
-**Widgets:**
+> Spesifikasi lengkap metrik, chart, filter, drill-down, dan data requirement ada di **`52-DASHBOARD-ANALYTICS.md`** (dokumen baru P-054). Bagian ini hanya ringkasannya; bila berbeda, `52-*.md` yang benar.
 
-| Widget | Content |
-|---|---|
-| Active Projects | Count + list of recent projects |
-| Pending Approvals | Count + list of documents awaiting review |
-| Documents Under Review | Count + list |
-| Revision Required | Count + list |
-| Open Tasks | Count + list (my tasks) |
-| Overdue Tasks | Count + list (urgent) |
-| Recent Activity | Last 10 audit events |
+**KPI Cards MVP (6 yang hidup tanpa migrasi):**
+
+| KPI | Sumber | Drill-down |
+|---|---|---|
+| Total Documents | `documents` (scope) | → `/documents` |
+| Active Workflows | `workflow_instances` `running` | → `/workflows/instances?status=running` |
+| Pending Approvals | `running` + `responsible=aktor` + `doc != revision_required` | → `/approvals?tab=pending` |
+| Overdue Workflows | `running` + `deadline < NOW()` | → `/approvals` (overdue) |
+| Average Approval Time | `AVG(completed_at - created_at)` | breakdown per definisi |
+| Revised This Month | `document_versions` bulan ini | → `/documents` |
+
+Dua KPI dari `Dashboard.md` §9 ditahan untuk MVP: *Documents Due for Review* (butuh `review_due_at`) dan *SLA Compliance* (butuh definisi SLA — Q-DASH-02).
+
+**Charts MVP (8):** Document Status Distribution (Donut 6 status kanonik), Workflow Volume Trend (Line), Approval Trend (Stacked Bar), Workflow Funnel (BWDCS 4 tahap), Pending/Overdue Aging (Bar 5 bucket), Average Time per Stage (Horizontal Bar, estimasi selisih `workflow_actions`), Documents by Category (Horizontal Bar), Activity Trend (Line `audit_logs`). Rincinya `52-DASHBOARD-ANALYTICS.md` §3.2 + metric dictionary §7.
+
+**Filter global MVP:** `Date Range` + `Project` + `Document Status` + `Workflow Status` — yang **ada** di skema. Filter `Department`/`Document Type` khusus/`SLA Status` masuk backlog penuh.
+
+**Yang dahulu di sini (7 widget lama) tetap tercakup:** `Pending Approvals`, `Documents Under Review` (= `in_review`), `Revision Required` (= `revision_required`), `Open/Overdue Tasks` (task module), `Recent Activity` (= 10 `audit_logs` terbaru), `Active Projects` (= count `projects` active). Tidak ada widget yang dihapus, hanya diukur.
 
 ---
 
@@ -442,8 +460,8 @@ Ketiga aksi itu **bukan** tiga nilai pada satu endpoint ubah-status: Complete pu
 |---|---|---|
 | `app.name` | Nama aplikasi di UI | Frontend (judul) |
 | `app.version` | Versi yang ditampilkan | Frontend (footer) |
-| `auth.max_login_attempts` | Ambang percobaan gagal per 15 menit (FR-AUTH-06) | `repository/setting_repository.go` → login |
-| `auth.lockout_duration_minutes` | Lama **lock sementara** akun (ADR-0022) | `repository/setting_repository.go` → login |
+| `auth.max_login_attempts` | Ambang percobaan gagal **per username** dalam jendela 15 menit (FR-AUTH-06) | `repository/setting_repository.go` → `cmd/server/main.go` → `service.AuthService` (login) |
+| `auth.lockout_duration_minutes` | Lama **lock sementara** akun (ADR-0022) | `repository/setting_repository.go` → `cmd/server/main.go` → `service.AuthService` (login) |
 | `file.max_upload_mb` | Batas ukuran unggahan | `internal/config` → unggah dokumen |
 
 > **Yang sengaja tidak ada di halaman ini:**
@@ -453,6 +471,8 @@ Ketiga aksi itu **bukan** tiga nilai pada satu endpoint ubah-status: Complete pu
 > - **Password policy** — aturan minimal 8 karakter (`50-FSD.md` §2.2) ditegakkan validator, bukan nilai yang dapat diubah runtime.
 >
 > Aturan umumnya: **jangan menambah baris di tabel ini tanpa kunci di `41-DATABASE.md` §2.6 dan pembaca di kode.** Halaman Settings pernah memuat "Audit log retention" yang tidak punya keduanya — itulah cacat yang ditutup C-028.
+>
+> Dua kunci `auth.*` dibaca **sekali saat startup** (`cmd/server/main.go`) lalu diserahkan ke `service.AuthService`, seperti `JWT_EXPIRY` dan kebijakan lain di `60-DEPLOYMENT.md` §2.1. Konsekuensinya disebut apa adanya: perubahan nilainya belum mengubah perilaku proses yang **sedang berjalan** — server perlu dijalankan ulang. Halaman Settings karena itu adalah layar **kebijakan**, bukan kontrol real-time; kalau kelak ia harus berlaku tanpa restart, jalur membacanya yang dipindah (per request atau berkala), bukan nilainya yang ditulis ulang di tempat lain. Jendela hitung 15 menit sendiri **tidak** ada di tabel ini: ia konstanta kontrak FR-AUTH-06 di kode (`service.LoginAttemptWindow`).
 
 ### 10.6 Reports
 
@@ -487,7 +507,7 @@ Ketiga aksi itu **bukan** tiga nilai pada satu endpoint ubah-status: Complete pu
 **Tambah step pada definisi yang ada:** `POST /workflows/definitions/:id/steps` — hanya untuk penambahan, bukan edit/reorder step yang sudah ada. `order` unik dalam satu definisi; penambahan tidak menggeser step yang sudah ada.
 
 **Aturan yang mengikat:**
-- `responsible_role` diisi dari 4 role sistem (`administrator`, `manager`, `contributor`, `viewer`) — penugasan fungsional step, bukan role kelima (temuan C-006 OPEN).
+- `responsible_role` diisi dari 4 role sistem (`administrator`, `manager`, `contributor`, `viewer`) — penugasan fungsional step, bukan role kelima (temuan **C-006**, ditutup P-026). Penugasan **per user** ditunda untuk MVP (temuan **C-010**; `43-WORKFLOW.md` §5).
 - **Tidak ada endpoint edit/delete definisi dan step di MVP.** Definisi yang sudah dipakai instance tidak boleh berubah diam-diam (riwayat approval harus dapat direkonstruksi, FR-VER-03); koreksi berarti membuat definisi baru. Jika UI menampilkan tombol edit, itu harus disabled dengan alasan ini.
 - Daftar definisi di modal Submit for Review (§5.2) membaca endpoint yang sama — bukan endpoint lain.
 
@@ -516,7 +536,7 @@ Ketiga aksi itu **bukan** tiga nilai pada satu endpoint ubah-status: Complete pu
 | `rejected` | Rejected | Red | Ditolak |
 | `archived` | Archived | Gray gelap | Diarsipkan (ADR-0019); baris, versi, dan berkasnya tetap ada |
 
-> Nilai `archived` baru boleh dipakai kode setelah migrasi `010` diterapkan (`T-039`). Sebelum itu, daftar kanonik yang berlaku di kode masih lima nilai di atas; label cadangan ini ada supaya halaman dokumen tidak perlu memakai nilai mentah saat nilainya muncul.
+> Nilai `archived` **berlaku di kode** sejak `T-039` (P-029, migrasi `010`): `model.DocumentStatuses` memuat enam nilai, dan test `TestDocumentStatusVocabularyIncludesArchived` membandingkannya dengan `CHECK` kolom di database supaya keduanya tidak dapat berbeda diam-diam. Label ini dipakai pada badge daftar/detail dokumen dan pada penyaring Status.
 
 ### 11.2 Tasks (`tasks.status`)
 

@@ -82,6 +82,13 @@ func (s *DocumentService) UploadVersion(ctx context.Context, actor Actor, docume
 		return nil, err
 	}
 
+	// Dokumen terarsip tetap dapat dibaca dan diunduh, tetapi tidak menerima
+	// versi baru (ADR-0019 butir 5). Diperiksa **sebelum** berkas apa pun ditulis
+	// ke storage, supaya tidak ada berkas yatim yang harus dibersihkan.
+	if document.Status == model.DocumentStatusArchived {
+		return nil, ErrDocumentArchived
+	}
+
 	if err := validateUpload(input); err != nil {
 		return nil, err
 	}
@@ -267,6 +274,19 @@ func (s *DocumentService) auditDownload(ctx context.Context, actor Actor, docume
 	return nil
 }
 
+// normalizeMimeType menyisakan tipe media saja, tanpa parameternya.
+//
+// `http.DetectContentType` mengembalikan `text/plain; charset=utf-8` untuk berkas
+// teks, sedangkan daftar di atas memuat `text/plain`. Perbandingan yang tidak
+// membuang parameter karena itu menolak **setiap** `.txt` dan `.csv` yang justru
+// dijanjikan `50-FSD.md` §4.2 — kelas cacat yang lolos seluruh test karena
+// test-nya menulis MIME dengan tangan, bukan memakai hasil deteksi isi berkas
+// (temuan **C-072**).
+func normalizeMimeType(value string) string {
+	base, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(value)), ";")
+	return strings.TrimSpace(base)
+}
+
 // validateUpload memeriksa ekstensi, MIME, dan ukuran yang diklaim header.
 //
 // Ukuran sebenarnya diperiksa ulang saat berkas mengalir (lihat limitedReader):
@@ -282,7 +302,7 @@ func validateUpload(input UploadVersionInput) error {
 		return ErrDocumentFileType
 	}
 
-	if !allowedDocumentMIMETypes[strings.ToLower(strings.TrimSpace(input.MimeType))] {
+	if !allowedDocumentMIMETypes[normalizeMimeType(input.MimeType)] {
 		return ErrDocumentFileType
 	}
 

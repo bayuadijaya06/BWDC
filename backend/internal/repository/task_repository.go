@@ -83,6 +83,21 @@ const taskFrom = `
 	JOIN users cu ON cu.id = t.created_by_id
 	LEFT JOIN documents d ON d.id = t.document_id`
 
+// taskListWhere adalah syarat WHERE daftar task, dipakai bersama oleh `List`
+// dan `count` supaya keduanya tidak dapat menyimpang.
+//
+// Posisi parameter: 1-3 cakupan, 4 status, 5 project, 6 assignee, 7 prioritas,
+// 8 penyaring overdue, 9-10 rentang `due_date`.
+var taskListWhere = taskReadPredicate(1, 2, 3) + `
+			AND ($4 = '' OR t.status = $4)
+			AND ($5::uuid IS NULL OR t.project_id = $5)
+			AND ($6::uuid IS NULL OR t.assignee_id = $6)
+			AND ($7 = '' OR t.priority = $7)
+			AND ($8::boolean IS NULL
+				OR (t.due_date IS NOT NULL AND t.due_date < now() AND t.status <> 'completed') = $8)
+			AND ($9::timestamptz IS NULL OR t.due_date >= $9)
+			AND ($10::timestamptz IS NULL OR t.due_date <= $10)`
+
 // TaskListFilter adalah penyaring daftar task (`42-API.md` §6 GET /tasks).
 // Nilai `nil` berarti penyaring tidak dipakai.
 type TaskListFilter struct {
@@ -105,13 +120,16 @@ type TaskListFilter struct {
 	// `?overdue=false` mengembalikan tepat yang tidak diminta).
 	Overdue *bool
 
-	// DueFrom/DueTo membatasi `due_date` dengan **interval setengah terbuka**
-	// `[DueFrom, DueTo)` — konvensi yang dipakai API besar (Stripe memakai
-	// `created[gte]` + `created[lt]`) dan yang membuat dua halaman bersebelahan
-	// tidak pernah memuat baris yang sama. Batasnya `timestamptz` eksplisit dari
-	// klien (RFC 3339), jadi tidak ada tafsir zona waktu yang disembunyikan.
-	// Task tanpa `due_date` tidak muncul begitu salah satu batas dikirim: ia
-	// memang tidak berada di dalam rentang mana pun.
+	// DueFrom/DueTo membatasi `due_date` dengan **interval tertutup**
+	// `[DueFrom, DueTo]`: kedua batas inklusif. Batasnya `timestamptz` eksplisit
+	// dari klien (RFC 3339), jadi tidak ada tafsir zona waktu yang disembunyikan.
+	//
+	// Pilihan inklusif-inklusif ditetapkan **user** (2026-09-19, P-028) atas
+	// usulan agen yang semula setengah terbuka; konsekuensinya dicatat di
+	// `42-API.md` §6 (rentang bersebelahan dapat tumpang tindih, dan klien yang
+	// memaksudkan "sampai akhir hari" harus mengirim batas atas di akhir hari
+	// itu). Task tanpa `due_date` tidak muncul begitu salah satu batas dikirim:
+	// ia memang tidak berada di dalam rentang mana pun.
 	DueFrom *time.Time
 	DueTo   *time.Time
 }
@@ -137,6 +155,9 @@ func (r *TaskRepository) WithTx(tx pgx.Tx) *TaskRepository {
 //
 // Cakupan diterapkan di dalam `WHERE`, jadi task di luar cakupan tidak pernah
 // terkirim ke lapisan atas — bukan disaring setelah dibaca (§3.1.3).
+//
+// Total dihitung `COUNT(*) OVER()` dengan tambalan `count` untuk halaman di luar
+// rentang (temuan C-048), seperti modul lainnya.
 func (r *TaskRepository) List(ctx context.Context, scope TaskScope, filter TaskListFilter) ([]model.Task, int, error) {
 	limit := filter.Limit
 	if limit <= 0 {
@@ -150,22 +171,13 @@ func (r *TaskRepository) List(ctx context.Context, scope TaskScope, filter TaskL
 
 	// Posisi parameter: 1-3 cakupan, 4 status, 5 project, 6 assignee, 7 prioritas,
 	// 8 penyaring overdue, 9-10 rentang `due_date`, 11 limit, 12 offset.
-	query := fmt.Sprintf(`
-		SELECT `+taskSelectColumns+`,
+	query := `
+		SELECT ` + taskSelectColumns + `,
 			COUNT(*) OVER() AS total
-		%s
-		WHERE %s
-			AND ($4 = '' OR t.status = $4)
-			AND ($5::uuid IS NULL OR t.project_id = $5)
-			AND ($6::uuid IS NULL OR t.assignee_id = $6)
-			AND ($7 = '' OR t.priority = $7)
-			AND ($8::boolean IS NULL
-				OR (t.due_date IS NOT NULL AND t.due_date < now() AND t.status <> 'completed') = $8)
-			AND ($9::timestamptz IS NULL OR t.due_date >= $9)
-			AND ($10::timestamptz IS NULL OR t.due_date < $10)
+	` + taskFrom + `
+		WHERE ` + taskListWhere + `
 		ORDER BY t.created_at DESC, t.id ASC
-		LIMIT $11 OFFSET $12`,
-		taskFrom, taskReadPredicate(1, 2, 3))
+		LIMIT $11 OFFSET $12`
 
 	rows, err := r.db.Query(ctx, query,
 		scope.OrganizationID, scope.AllInOrganization, scope.UserID,
@@ -194,7 +206,36 @@ func (r *TaskRepository) List(ctx context.Context, scope TaskScope, filter TaskL
 		return nil, 0, fmt.Errorf("iterasi daftar task: %w", err)
 	}
 
+	// Halaman kosong yang bukan halaman pertama: total dihitung ulang karena
+	// `COUNT(*) OVER()` tidak punya baris untuk dievaluasi (C-048).
+	if len(tasks) == 0 && offset > 0 {
+		counted, err := r.count(ctx, scope, filter)
+		if err != nil {
+			return nil, 0, err
+		}
+		total = counted
+	}
+
 	return tasks, total, nil
+}
+
+// count menghitung seluruh task yang cocok dengan penyaring, memakai FROM dan
+// WHERE yang sama dengan `List` supaya keduanya tidak dapat berbeda.
+func (r *TaskRepository) count(ctx context.Context, scope TaskScope, filter TaskListFilter) (int, error) {
+	query := `
+		SELECT count(*)
+	` + taskFrom + `
+		WHERE ` + taskListWhere
+
+	var total int
+	if err := r.db.QueryRow(ctx, query,
+		scope.OrganizationID, scope.AllInOrganization, scope.UserID,
+		filter.Status, filter.ProjectID, filter.AssigneeID, filter.Priority, filter.Overdue,
+		filter.DueFrom, filter.DueTo,
+	).Scan(&total); err != nil {
+		return 0, fmt.Errorf("hitung daftar task: %w", err)
+	}
+	return total, nil
 }
 
 // FindByID membaca satu task **di dalam cakupan** aktor untuk keperluan baca.

@@ -56,8 +56,8 @@ Sebelumnya keputusan tercatat di dua tempat dengan isi berbeda (`01-AGENT-WORKFR
 | 0003 | PostgreSQL 16 dengan migrasi goose | ACCEPTED | 2026-09-17 |
 | 0004 | Mekanisme deployment fleksibel (Docker opsional) | ACCEPTED | 2026-09-17 |
 | 0005 | Abstraksi storage dengan implementasi filesystem lokal lebih dulu | ACCEPTED | 2026-09-17 |
-| 0006 | Mode penggunaan antislop untuk BWDCS | PROPOSED | 2026-09-17 |
-| 0007 | Sumber arah desain (`DESIGN.md`) | PROPOSED | 2026-09-17 |
+| 0006 | Mode penggunaan antislop untuk BWDCS (**`during`**) | ACCEPTED (butir 2 konsekuensi diamandemen ADR-0025) | 2026-09-21 |
+| 0007 | Sumber arah desain (`DESIGN.md`) (**jalur 2: agen atas izin user**) | ACCEPTED | 2026-09-21 |
 | 0008 | Lock-in library backend (Gin, pgx, Viper, goose, jwt/v5) | ACCEPTED | 2026-09-17 |
 | 0009 | Invalidasi token saat logout (daftar revokasi `jti` di PostgreSQL) | ACCEPTED | 2026-09-17 |
 | 0010 | Bootstrap organisasi & admin pertama dari environment variable | ACCEPTED | 2026-09-17 |
@@ -73,5 +73,9 @@ Sebelumnya keputusan tercatat di dua tempat dengan isi berbeda (`01-AGENT-WORKFR
 | 0020 | Retensi audit log sebagai operasi pemeliharaan berlantai 12 bulan | ACCEPTED | 2026-09-19 |
 | 0021 | Pencabutan seluruh sesi lewat `users.tokens_invalid_before` (melengkapi ADR-0009) | ACCEPTED | 2026-09-19 |
 | 0022 | Telemetri login di tabel `login_attempts` dan auto-lock akun | ACCEPTED | 2026-09-19 |
+| 0023 | Bentuk token refresh: JWT bertanda `typ`, tanpa penyimpanan di server | ACCEPTED | 2026-09-20 |
+| 0024 | Versi & tooling frontend (React 19, React Router 7, Tailwind v4 CSS-first, TanStack Query menyusul) | ACCEPTED | 2026-09-21 |
+| 0025 | Skill antislop terpasang dipin ke tag rilis; aturan hanya bersumber dari `antislop.md` | ACCEPTED | 2026-09-22 |
+| 0026 | Dashboard MVP: metrik mana yang hidup tanpa migrasi, dan apa yang ditahan | ACCEPTED | 2026-09-23 |
 
 Setelah membuat ADR baru, tambahkan barisnya ke tabel di atas dan ke `docs/design/00-README.md` bila relevan.

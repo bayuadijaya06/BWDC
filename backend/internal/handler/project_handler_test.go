@@ -126,7 +126,18 @@ func (f *projectHTTPFixture) clean() {
 		sql  string
 		args []any
 	}{
+		// Telemetri login dibersihkan **sebelum** `DELETE FROM users`, dan
+		// itulah satu-satunya kesempatan: `login_attempts.user_id` bersifat
+		// `ON DELETE SET NULL`, sehingga setelah user-nya hilang barisnya tidak
+		// lagi dapat ditemukan lewat id. Fixture ini masuk lewat
+		// `POST /auth/login` yang nyata (`loginToken`), jadi setiap aktornya
+		// meninggalkan satu baris di sini — tanpa langkah ini test database
+		// tidak kembali kosong di antara sesi (temuan **C-056**).
+		{`DELETE FROM login_attempts WHERE user_id = ANY($1::uuid[])`, []any{f.users}},
 		{`DELETE FROM audit_logs WHERE actor_id = ANY($1::uuid[])`, []any{f.users}},
+		// Komentar dihapus sebelum project dan user: `comments.created_by_id`
+		// bersifat `ON DELETE RESTRICT` (modul komentar, T-042).
+		{`DELETE FROM comments WHERE created_by_id = ANY($1::uuid[])`, []any{f.users}},
 		{`DELETE FROM projects WHERE organization_id = ANY($1::uuid[])`, []any{f.orgs}},
 		{`DELETE FROM user_roles WHERE user_id = ANY($1::uuid[])`, []any{f.users}},
 		{`DELETE FROM users WHERE id = ANY($1::uuid[])`, []any{f.users}},

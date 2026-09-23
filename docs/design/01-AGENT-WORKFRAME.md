@@ -32,7 +32,7 @@ Agen harus membaca dokumen ini sebelum memulai pekerjaan apa pun. Setiap keputus
 | `docs/design/12-DEVELOPMENT-WORKFLOW.md` | Bootstrap, konvensi git, Definition of Done, verifikasi standar |
 | `docs/progress/STATE.md` | Posisi proyek saat ini, task aktif, next action |
 | `docs/adr/` | Keputusan arsitektur (sumber tunggal) |
-| `DESIGN.md` | Arah desain final (belum diisi; lihat ADR-0007) |
+| `DESIGN.md` | Arah desain final — **sudah terisi** (ADR-0007 jalur 2, sesi P-037). Wajib dibaca sebelum UI apa pun; nilainya dikunci di `frontend/src/styles/tokens.css` |
 | `docs/design/10-BRD.md` | Kebutuhan bisnis yang tidak boleh diubah |
 | `docs/design/20-SRS.md` | Persyaratan fungsional & non-fungsional |
 | `docs/design/30-ARCHITECTURE.md` | Struktur teknis & pemisahan concern (struktur folder backend sendiri ada di `40-TSD.md` §2.0, ADR-0013) |
@@ -88,45 +88,42 @@ Karena BWDCS adalah **internal business tool** (bukan public landing page), anti
 
 Jika user memilih **during**, semua aturan antislop harus diikuti saat membangun UI.
 
-### 3.2 Antislop Application Map
+### 3.2 Peta Penerapan — **tanpa menyalin aturan**
 
-| Aturan | Berlaku Untuk | Catatan Khusus |
-|---|---|---|
-| R-02 (No em dash) | Semua teks UI | Tidak pakai karakter `—` |
-| R-03 (Mobile) | Layout frontend | Sidebar collapse, table responsive |
-| R-04 (Icons) | Komponen UI | Icon relevan, bukan Lucide default |
-| R-05 (Layout) | Halaman & navigasi | Jangan pakai template AI |
-| R-06 (Typography) | Font selection | Sertakan alasan |
-| R-08 (Arrows) | Button decoration | Hanya jika ada purpose |
-| R-09 (Badges) | Status indicators | Badge status bukan dekorasi |
-| R-10 (Glassmorphism) | Accent only | Max 1-2 elemen |
-| R-11 (Radius) | Component radius | Konsisten, tidak semua pill |
-| R-14 (Cards) | Card layout | Variasi height sesuai konten |
-| R-15 (CTA) | Tombol aksi | Spesifik, bukan "Get Started" |
-| R-16 (Buzzwords) | Semua copy | Bahasa spesifik, bukan klaim |
-| R-19 (Animation) | Motion | Purpose-driven, tidak dekoratif |
-| R-21 (Dark mode) | Theme | Toggle wajib, kedua mode berfungsi |
-| R-25 (Contrast) | Warna teks | WCAG AA minimum |
-| R-26 (Interactive) | Semua button/link | Harus ada behavior nyata |
-| R-27 (States) | Setiap data display | Empty, loading, error |
-| R-32 (Keyboard) | Navigasi | Tab, Enter, Escape works |
-| R-34 (Theme) | Light/dark | Keduanya tested |
-| R-35 (Verify) | Sebelum deliver | Build & click-through wajib |
-| R-36 (Claims) | Copywriting | Tidak ada klaim tanpa bukti |
-| R-37 (Direction) | Sebelum UI work | DESIGN.md wajib dibaca |
-| R-38 (Placeholders) | Asset | Placeholder jelas, bukan final |
+**Daftar aturan, tier, teks aturan, dial, dan Delivery Gate hanya sah bila dibaca dari `antislop.md`.**
+Sesi **P-042** menghapus tabel salinan yang dulu ada di sini: terbukti salinan itu menyimpang dari
+upstream (berkas core di root bahkan tertinggal dari salinan Gate-nya sendiri) — kelas cacat **C-065**,
+sama seperti C-014. Yang boleh hidup di dokumen proyek hanyalah **keputusan proyek tentang aturan itu**,
+dan setiap nomor yang disebut di sini diperiksa `bash scripts/check-antislop-refs.sh`.
+
+Keputusan yang mengikat untuk BWDCS (teks aturannya tetap dibaca di `antislop.md`):
+
+| Aturan | Keputusan proyek ini |
+|---|---|
+| R-02 | Teks yang dibaca pengguna (`frontend/src`, tanpa komentar) bebas em dash, **diperiksa mesin** oleh `scripts/check-antislop-refs.sh` butir 8; nilai kosong dijawab kalimat (`EMPTY_VALUE`/`EMPTY_DATE`), bukan tanda pisah. Prosa dokumen dan komentar kode yang ditulis sebelum aturan ini berlaku **tidak** disapu; apakah disapu menunggu pemilik (**Q-025**) |
+| R-03 | Tiga state lebar (`51-UX.md` §8: laci < 768px, kolom kompak 768-1023px, kolom penuh ≥ 1024px); tabel dapat digulir mendatar **di dalam wadahnya**, bukan halaman yang melebar; target sentuh 44px di layar sentuh dan 36px di desktop (`DESIGN.md` §4, tegangannya dicatat **Q-026**). Diukur mesin di peramban sungguhan: `node scripts/responsive-evidence.mjs` |
+| R-06 | Font **system stack** tanpa berkas font, dan mono hanya untuk **nilai indeks** (kode, nomor, jumlah): `DESIGN.md` §3 |
+| R-09 | Badge **hanya** untuk status kanonik `50-FSD.md` §11 (ADR-0012), selalu berlabel teks, tidak pernah dekoratif |
+| R-11 | Satu radius untuk semua komponen; tidak ada elemen pill kecuali bentuk yang memang bulat |
+| R-21 | Tema terang **dan** gelap keduanya wajib berfungsi; toggle ada di header, dan token yang membalik ada di `tokens.css` |
+| R-25 | Ambang proyek **WCAG 2.2 AA** (lebih ketat dari AA di core): diperiksa `tokens.contrast.test.ts` **dan** dapat diperiksa ulang dengan `python3 skills/antislop-human/contrast-check.py` |
+| R-26/R-27 | Setiap halaman data wajib punya keadaan **memuat, kosong, dan gagal**; menu yang halamannya belum ada tidak ditautkan |
+| R-31 | Setiap keputusan visual ditulis alasannya di `DESIGN.md` (alasan per token), dan Design Read halaman ditulis di log prompt |
+| R-35 | Bukti serah terima = halaman **dibuka di dev server** + satu klik nyata per kontrol, bukan hanya test hijau |
 
 ### 3.3 Dials untuk BWDCS
 
 BWDCS adalah **internal business tool**. Sesuai antislop Part 3:
 
-> Reading this as: internal SaaS dashboard for business users, functional tool aesthetic, dial **ENERGY 1 / RHYTHM 2 / MOTION 1**.
+> Reading this as: internal document-control console for administrators, managers, and contributors who process records daily, in a ruled-ledger visual language (paper, ink, mono index numbers), dial **ENERGY 1 / RHYTHM 2 / MOTION 1**.
 
 | Dial | Value | Reason |
 |---|---|---|
 | ENERGY | 1 | Tool app, bukan marketing site. Fokus pada clarity, bukan impact |
-| RHYTHM | 2 | Table pages uniform, detail pages vary. Intentional rhythm |
+| RHYTHM | 2 | Halaman daftar seragam (tabel), halaman detail bervariasi (kepala rekam + dua kolom + timeline). Keseragaman penuh menyembunyikan hierarki |
 | MOTION | 1 | Hover states & transitions only. No distraction in productivity tool |
+
+**Status:** dial ini **resmi** sejak `DESIGN.md` terisi (P-037). Sebelumnya nilainya adalah *usulan* yang menunggu arah desain, dan temuan audit **C-015** (dokumen ini menulis 1/2/1 sementara `DESIGN.md` masih `[TUNGGU INPUT]`) ditutup bersamaan. Bila `DESIGN.md` §5 berubah, tabel ini yang mengikuti — bukan sebaliknya.
 
 ---
 
@@ -199,7 +196,9 @@ Enum: PascalCase
 
 ### 5.2 Sebelum Commit Frontend
 
-- [ ] `DESIGN.md` sudah terisi; jika belum, output berlabel "draft without direction" (R-37)
+- [ ] `DESIGN.md` sudah terisi (statusnya kini `TERISI`, ADR-0007 jalur 2); bila suatu saat dikosongkan lagi, output berlabel "draft without direction" (R-37)
+- [ ] Design Read halaman ini ditulis di log prompt, dan dialsnya (`DESIGN.md` §5) benar-benar terlihat di halaman
+- [ ] Tidak ada warna/radius/bayangan yang ditulis langsung di komponen (token dari `tokens.css`)
 - [ ] Ledger progress diperbarui (log prompt, `CHANGELOG.md`, `STATE.md`)
 - [ ] Semua button/link punya behavior nyata (R-26)
 - [ ] Empty state ada
@@ -215,62 +214,21 @@ Enum: PascalCase
 
 ### 5.3 Delivery Gate (Sebelum Serah Terima Modul)
 
-Jalankan Delivery Gate antislop:
+**Butir Gate-nya tidak ditulis di sini.** Bacanya di `antislop.md` bagian **Delivery Gate (Mandatory)** —
+salinannya dihapus pada **P-042** karena ia sudah menyimpang dari upstream (mis. butir *scope* R-02 dan
+penanda kotak centang) tanpa ada yang menyadarinya, sekaligus menutup temuan **C-065**. Yang ditetapkan
+di sini hanyalah **bentuk laporan** yang harus keluar di akhir sesi UI:
 
-```
-Block 1: Hard Gate (semua jawab TIDAK)
-  - Ada em dash? [ ]
-  - Mobile overflow? [ ]
-  - Statistik tanpa sumber? [ ]
-  - Testimonial fiktif? [ ]
-  - Asset tanpa instruksi? [ ]
-  - Nav link ke halaman tidak ada? [ ]
-  - Contrast fail? [ ]
-  - Button mati? [ ]
-  - Missing empty/loading/error state? [ ]
-  - FAQ generik? [ ]
-  - Keyboard tidak works? [ ]
-  - Patch script? [ ]
-  - Theme break? [ ]
-  - Belum di-run/verify? [ ]
-  - Klaim fiktif? [ ]
-  - Tanpa direction & tidak dilabel draft? [ ]
+1. Keempat blok dilaporkan **butir per butir**, memakai penanda `PASS`/`FAIL` dan nomor aturannya.
+2. Setiap `PASS` disertai **bukti konkret**, bukan pengulangan pertanyaan. Contoh format yang dipakai
+   sesi P-041 untuk halaman Projects: `R-26 PASS: tombol Buat project membuka dialog dan mengirim
+   POST /projects (201), tombol Arsipkan mengubah status baris ke Archived tanpa reload`; `R-35 PASS:
+   halaman dibuka di dev server 5173, dialog diisi sampai perberan berpindah ke /projects/<uuid>`.
+3. Satu `FAIL` berarti **jangan serahkan**: perbaiki dulu, lalu jalankan Gate ulang.
+4. Laporan itu masuk ke log prompt sesi (`docs/progress/prompts/`), tidak cukup ada di ringkasan lisan.
 
-Block 2: Purpose-Gate (teknik punya alasan?)
-  - Gradient tanpa purpose? [ ]
-  - Icon generik tanpa relevansi? [ ]
-  - Font tanpa alasan brand? [ ]
-  - Background pattern tanpa purpose? [ ]
-  - Arrow dekoratif di setiap button? [ ]
-  - Badge tanpa fungsi? [ ]
-  - Glassmorphism berlebihan? [ ]
-  - Shadow di semua komponen? [ ]
-  - Glow di banyak elemen? [ ]
-  - Cards identik tanpa hierarki? [ ]
-  - Animasi template tanpa purpose? [ ]
-
-Block 3: Liveliness (semua jawaban YA)
-  - Dials ENERGY/RHYTHM/MOTION declared? [ ]
-  - Output konsisten dengan dials? [ ]
-  - One focal point per screen? [ ]
-  - Whitespace structural? [ ]
-  - One deliberate accent? [ ]
-  - Identity motif? [ ]
-  - Design read declared? [ ]
-
-Block 4: Craftsmanship (semua jawaban TIDAK)
-  - Keputusan hanya karena "AI default"? [ ]
-  - Interactive element tidak berfungsi? [ ]
-  - Section hanya isi template? [ ]
-  - UI break di state/breakpoint/theme? [ ]
-  - Klaim fabricated? [ ]
-  - Layout template AI? [ ]
-  - Semua elemen pill-shaped? [ ]
-  - CTA generik? [ ]
-  - Buzzwords? [ ]
-  - Clone produk populer? [ ]
-  - Keputusan visual tanpa reason? [ ]
-```
+Kalau `antislop.md` tidak dapat dibaca (mis. belum tersedia di checkout), **hentikan pekerjaan UI** dan
+catat di `OPEN-QUESTIONS.md`; jangan mengarang butir Gate dari ingatan.
 
 ---
 
@@ -340,9 +298,21 @@ bwdcs/
 │   ├── package.json
 │   └── vite.config.ts
 ├── docker-compose.yml           # Optional
+├── skills/                      # Skill antislop pihak ketiga (dipin ke tag rilis; provenans di skills/README.md)
+│   ├── README.md
+│   ├── antislop/SKILL.md
+│   ├── antislop-ui/SKILL.md
+│   ├── antislop-copywriting/SKILL.md
+│   ├── antislop-human/{SKILL.md,contrast-check.py}
+│   ├── antislop-layoutmobile/SKILL.md
+│   ├── antislop-code/SKILL.md
+│   └── LICENSE-antislop
 └── scripts/
-    ├── backup.sh
-    └── seed.sh
+    ├── check-ledger.sh            # konsistensi ledger (audit, papan task, angka test)
+    ├── check-doc-links.sh         # rujukan berkas di dokumen
+    ├── check-readme-facts.sh      # angka & versi di README vs repo
+    ├── check-api-contract.sh      # anotasi izin endpoint vs matriks RBAC
+    └── check-antislop-refs.sh     # rujukan R-XX, path skill, sha256 berkas antislop
 ```
 
 ---
@@ -358,11 +328,12 @@ Decision log **dipindahkan ke `docs/adr/`** agar hanya ada satu sumber keputusan
 | [0003](../adr/0003-postgresql-goose.md) | PostgreSQL 16 dengan migrasi goose | ACCEPTED |
 | [0004](../adr/0004-flexible-deployment.md) | Mekanisme deployment fleksibel (Docker opsional) | ACCEPTED |
 | [0005](../adr/0005-local-file-storage-first.md) | Abstraksi storage, filesystem lokal lebih dulu | ACCEPTED |
-| [0006](../adr/0006-antislop-usage-mode.md) | Mode penggunaan antislop | PROPOSED |
-| [0007](../adr/0007-design-direction-source.md) | Sumber arah desain (`DESIGN.md`) | PROPOSED |
+| [0006](../adr/0006-antislop-usage-mode.md) | Mode penggunaan antislop | ACCEPTED (2026-09-21) |
+| [0007](../adr/0007-design-direction-source.md) | Sumber arah desain (`DESIGN.md`) | ACCEPTED (2026-09-21) |
 | [0008](../adr/0008-backend-library-lockin.md) | Lock-in library backend (Gin, pgx, Viper, goose, jwt/v5) | ACCEPTED |
 | [0009](../adr/0009-logout-token-invalidation.md) | Invalidasi token saat logout (daftar revokasi `jti`) | ACCEPTED |
 | [0010](../adr/0010-first-run-bootstrap.md) | Bootstrap organisasi & admin pertama dari env | ACCEPTED |
+| [0024](../adr/0024-versi-dan-tooling-frontend.md) | Versi & tooling frontend (React 19, Router 7, Tailwind v4, TanStack Query) | ACCEPTED |
 
 Aturan: satu keputusan = satu ADR. Keputusan baru tidak boleh ditulis di dokumen ini, melainkan dibuat sebagai ADR baru.
 
@@ -374,8 +345,8 @@ Gap di bawah ini menggantikan daftar usulan lama (yang sudah selesai: `AGENTS.md
 
 | # | Item | Jenis | Status | Task |
 |---|---|---|---|---|
-| 1 | `DESIGN.md` belum diisi (identitas, palet, tipografi, dials) | Keputusan user | BLOCKING untuk UI | T-006 (Q-002) |
-| 2 | Mode antislop (during/after) belum dipilih | Keputusan user | BLOCKING untuk UI | T-007 (Q-001) |
+| 1 | `DESIGN.md` belum diisi (identitas, palet, tipografi, dials) | Selesai | **Terisi P-037** (`T-006`): jalur 2 ADR-0007, dials resmi di `DESIGN.md` §5, token di `frontend/src/styles/tokens.css` + test kontras. Menutup **C-015** | — |
+| 2 | Mode antislop (during/after) belum dipilih | Selesai | **`during` dipilih user** (P-037); ADR-0006 `ACCEPTED` | — |
 | 3 | Direktori `skills/antislop-*/SKILL.md` belum tersedia | Aset user | Filter UI sementara hanya `antislop.md` | Q-003 |
 | 4 | Git repository belum diinisialisasi | Teknis | TODO, butuh izin user | T-002 (Q-004) |
 | 5 | Daftar environment variable belum punya `.env.example` | Selesai | `.env.example` + `docker-compose.yml` dibuat dan tervalidasi (T-015) | — |

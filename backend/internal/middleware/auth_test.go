@@ -26,13 +26,28 @@ type fakeValidator struct {
 
 func (f fakeValidator) Validate(string) (*bwjwt.Claims, error) { return f.claims, f.err }
 
-// fakeRevocations menggantikan *repository.RevocationRepository.
-type fakeRevocations struct {
+// fakeSessions menggantikan *repository.RevocationRepository. Satu panggilan
+// mewakili **kedua** sebab (ADR-0009 + ADR-0021): yang diuji di sini adalah
+// keputusan middleware dan argumen yang diteruskannya, sedangkan keputusan
+// "jti tercabut atau iat terlalu tua" milik repository (diuji di
+// `internal/repository`).
+type fakeSessions struct {
 	revoked bool
 	err     error
+
+	// calls mencatat argumen yang diterima, supaya test dapat membuktikan bahwa
+	// middleware meneruskan `iat` klaim — bukan menebaknya sendiri.
+	calls []sessionCall
 }
 
-func (f fakeRevocations) IsRevoked(context.Context, uuid.UUID) (bool, error) {
+type sessionCall struct {
+	jti      uuid.UUID
+	userID   uuid.UUID
+	issuedAt time.Time
+}
+
+func (f *fakeSessions) SessionRevoked(_ context.Context, jti, userID uuid.UUID, issuedAt time.Time) (bool, error) {
+	f.calls = append(f.calls, sessionCall{jti: jti, userID: userID, issuedAt: issuedAt})
 	return f.revoked, f.err
 }
 
@@ -90,7 +105,7 @@ func do(r *gin.Engine, path, authorization string) *httptest.ResponseRecorder {
 }
 
 func TestAuthMiddlewareRejectsMissingHeader(t *testing.T) {
-	r := newRouter(middleware.AuthConfig{Validator: fakeValidator{claims: validClaims()}, Revocations: fakeRevocations{}})
+	r := newRouter(middleware.AuthConfig{Validator: fakeValidator{claims: validClaims()}, Sessions: &fakeSessions{}})
 
 	w := do(r, "/protected", "")
 	if w.Code != http.StatusUnauthorized {
@@ -102,7 +117,7 @@ func TestAuthMiddlewareRejectsMissingHeader(t *testing.T) {
 }
 
 func TestAuthMiddlewareRejectsMalformedHeader(t *testing.T) {
-	r := newRouter(middleware.AuthConfig{Validator: fakeValidator{claims: validClaims()}, Revocations: fakeRevocations{}})
+	r := newRouter(middleware.AuthConfig{Validator: fakeValidator{claims: validClaims()}, Sessions: &fakeSessions{}})
 
 	for _, header := range []string{"token-tanpa-skema", "Bearer ", "Basic abc"} {
 		if w := do(r, "/protected", header); w.Code != http.StatusUnauthorized {
@@ -113,8 +128,8 @@ func TestAuthMiddlewareRejectsMalformedHeader(t *testing.T) {
 
 func TestAuthMiddlewareRejectsInvalidToken(t *testing.T) {
 	r := newRouter(middleware.AuthConfig{
-		Validator:   fakeValidator{err: bwjwt.ErrInvalidToken},
-		Revocations: fakeRevocations{},
+		Validator: fakeValidator{err: bwjwt.ErrInvalidToken},
+		Sessions:  &fakeSessions{},
 	})
 
 	w := do(r, "/protected", "Bearer token-palsu")
@@ -125,7 +140,7 @@ func TestAuthMiddlewareRejectsInvalidToken(t *testing.T) {
 
 func TestAuthMiddlewareAcceptsValidToken(t *testing.T) {
 	claims := validClaims()
-	r := newRouter(middleware.AuthConfig{Validator: fakeValidator{claims: claims}, Revocations: fakeRevocations{}})
+	r := newRouter(middleware.AuthConfig{Validator: fakeValidator{claims: claims}, Sessions: &fakeSessions{}})
 
 	w := do(r, "/protected", "Bearer token-sah")
 	if w.Code != http.StatusOK {
@@ -139,7 +154,7 @@ func TestAuthMiddlewareAcceptsValidToken(t *testing.T) {
 // TestAuthMiddlewareRejectsRevokedToken adalah inti FR-AUTH-04: token yang sah
 // tetapi sudah dicabut saat logout tidak boleh diterima.
 func TestAuthMiddlewareRejectsRevokedToken(t *testing.T) {
-	r := newRouter(middleware.AuthConfig{Validator: fakeValidator{claims: validClaims()}, Revocations: fakeRevocations{revoked: true}})
+	r := newRouter(middleware.AuthConfig{Validator: fakeValidator{claims: validClaims()}, Sessions: &fakeSessions{revoked: true}})
 
 	w := do(r, "/protected", "Bearer token-sah")
 	if w.Code != http.StatusUnauthorized {
@@ -152,8 +167,8 @@ func TestAuthMiddlewareRejectsRevokedToken(t *testing.T) {
 
 func TestAuthMiddlewareFailsClosedOnStoreError(t *testing.T) {
 	r := newRouter(middleware.AuthConfig{
-		Validator:   fakeValidator{claims: validClaims()},
-		Revocations: fakeRevocations{err: errors.New("database mati")},
+		Validator: fakeValidator{claims: validClaims()},
+		Sessions:  &fakeSessions{err: errors.New("database mati")},
 	})
 
 	w := do(r, "/protected", "Bearer token-sah")
@@ -166,7 +181,7 @@ func TestRequirePermissionAllows(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/documents",
-		middleware.AuthMiddleware(middleware.AuthConfig{Validator: fakeValidator{claims: validClaims()}, Revocations: fakeRevocations{}}),
+		middleware.AuthMiddleware(middleware.AuthConfig{Validator: fakeValidator{claims: validClaims()}, Sessions: &fakeSessions{}}),
 		middleware.RequirePermission(fakePermissions{allowed: map[string]bool{"document:create": true}}, "document", "create"),
 		func(c *gin.Context) { c.Status(http.StatusOK) },
 	)
@@ -180,7 +195,7 @@ func TestRequirePermissionDenies(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/documents",
-		middleware.AuthMiddleware(middleware.AuthConfig{Validator: fakeValidator{claims: validClaims()}, Revocations: fakeRevocations{}}),
+		middleware.AuthMiddleware(middleware.AuthConfig{Validator: fakeValidator{claims: validClaims()}, Sessions: &fakeSessions{}}),
 		middleware.RequirePermission(fakePermissions{allowed: map[string]bool{}}, "document", "delete"),
 		func(c *gin.Context) { c.Status(http.StatusOK) },
 	)
@@ -237,6 +252,55 @@ func TestCorrelationIDUsesClientHeader(t *testing.T) {
 	}
 	if w.Header().Get(middleware.HeaderCorrelationID) != "id-dari-proxy" {
 		t.Error("header response tidak memuat correlation id")
+	}
+}
+
+// TestAuthMiddlewareChecksSessionAgainstTokenIssueTime menutup ADR-0021 dari
+// sisi middleware: keputusan "token ini terlalu tua" memang milik repository
+// (yang membandingkannya dengan `users.tokens_invalid_before`), dan middleware
+// wajib meneruskan **`iat` klaim** serta `user_id` kepada pemeriksa itu.
+func TestAuthMiddlewareChecksSessionAgainstTokenIssueTime(t *testing.T) {
+	claims := validClaims()
+	sessions := &fakeSessions{}
+	r := newRouter(middleware.AuthConfig{Validator: fakeValidator{claims: claims}, Sessions: sessions})
+
+	if w := do(r, "/protected", "Bearer token-sah"); w.Code != http.StatusOK {
+		t.Fatalf("status %d, diharapkan 200 (%s)", w.Code, w.Body.String())
+	}
+
+	if len(sessions.calls) != 1 {
+		t.Fatalf("pemeriksaan sesi dipanggil %d kali, diharapkan 1", len(sessions.calls))
+	}
+	got := sessions.calls[0]
+	if got.userID != claims.UserID {
+		t.Errorf("user_id yang diperiksa %s, diharapkan %s", got.userID, claims.UserID)
+	}
+	if !got.issuedAt.Equal(claims.IssuedAt.Time) {
+		t.Errorf("iat yang diperiksa %s, diharapkan %s (ADR-0021 membandingkan iat)", got.issuedAt, claims.IssuedAt.Time)
+	}
+	jti, err := claims.JTI()
+	if err != nil {
+		t.Fatalf("baca jti klaim: %v", err)
+	}
+	if got.jti != jti {
+		t.Errorf("jti yang diperiksa %s, diharapkan %s", got.jti, jti)
+	}
+}
+
+// TestAuthMiddlewareRejectsTokenWithoutIssuedAt membuktikan pemeriksaan
+// pencabutan seluruh sesi tidak dapat dilewati dengan menghilangkan `iat`.
+func TestAuthMiddlewareRejectsTokenWithoutIssuedAt(t *testing.T) {
+	claims := validClaims()
+	claims.IssuedAt = nil
+	sessions := &fakeSessions{}
+	r := newRouter(middleware.AuthConfig{Validator: fakeValidator{claims: claims}, Sessions: sessions})
+
+	w := do(r, "/protected", "Bearer token-tanpa-iat")
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d, diharapkan 401", w.Code)
+	}
+	if len(sessions.calls) != 0 {
+		t.Error("token tanpa iat tidak boleh sampai diperiksa sebagai sesi yang sah")
 	}
 }
 

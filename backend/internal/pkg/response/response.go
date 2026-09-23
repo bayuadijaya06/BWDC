@@ -16,17 +16,22 @@ import (
 // Kode error kanonik. Sumber: `42-API.md` §12. Menambah kode baru wajib
 // menambahkannya di §12 pada perubahan yang sama.
 const (
-	CodeValidation             = "VALIDATION_ERROR"
-	CodeUnauthorized           = "UNAUTHORIZED"
-	CodeTokenRevoked           = "TOKEN_REVOKED"
-	CodeForbidden              = "FORBIDDEN"
-	CodeNotFound               = "NOT_FOUND"
-	CodeConflict               = "CONFLICT"
+	CodeValidation   = "VALIDATION_ERROR"
+	CodeUnauthorized = "UNAUTHORIZED"
+	CodeTokenRevoked = "TOKEN_REVOKED"
+	CodeForbidden    = "FORBIDDEN"
+	CodeNotFound     = "NOT_FOUND"
+	CodeConflict     = "CONFLICT"
+	// CodeWorkflowConflict hanya dipakai transisi workflow instance
+	// (`42-API.md` §5/§12): permintaan mungkin sah, tetapi dibuat untuk keadaan
+	// instance yang sudah berubah — klien harus memuat ulang, bukan memperbaiki
+	// input. Karena itu `details`-nya objek keadaan terkini, bukan daftar field.
+	CodeWorkflowConflict       = "WORKFLOW_CONFLICT"
 	CodeInvalidCredentials     = "INVALID_CREDENTIALS"
 	CodeAccountInactive        = "ACCOUNT_INACTIVE"
 	CodeTooManyRequests        = "TOO_MANY_REQUESTS"
+	CodeLocked                 = "LOCKED"
 	CodeInvalidCurrentPassword = "INVALID_CURRENT_PASSWORD"
-	CodeNotImplemented         = "NOT_IMPLEMENTED"
 	CodeInternal               = "INTERNAL_ERROR"
 )
 

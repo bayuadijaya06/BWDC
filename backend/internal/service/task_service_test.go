@@ -486,8 +486,6 @@ func TestTaskUpdateGuards(t *testing.T) {
 }
 
 // boolPtr menyusun penyaring tri-state `?overdue=` (nil = tidak disaring).
-func boolPtr(value bool) *bool { return &value }
-
 // TestTaskListFiltersAndPagination menutup penyaring `42-API.md` §6
 // (`?project_id=&status=&priority=&assignee_id=&overdue=`) beserta blok `meta`.
 func TestTaskListFiltersAndPagination(t *testing.T) {
@@ -564,12 +562,16 @@ func TestTaskListFiltersAndPagination(t *testing.T) {
 	}
 }
 
-// TestTaskListDueRangeFilterIsHalfOpen menutup penyaring `?due_from=&due_to=`
-// (temuan **C-046**): interval **setengah terbuka** — batas bawah inklusif,
-// batas atas **eksklusif** — supaya rentang bersebelahan tidak tumpang tindih
-// dan tidak ada baris yang terlewat. Task tanpa `due_date` tidak pernah masuk
-// rentang mana pun.
-func TestTaskListDueRangeFilterIsHalfOpen(t *testing.T) {
+// TestTaskListDueRangeFilterIsInclusiveBothEnds menutup penyaring
+// `?due_from=&due_to=` (temuan **C-046**): interval **tertutup** `[from, to]` —
+// kedua batas inklusif, sesuai keputusan user pada 2026-09-19 (P-028) yang
+// menggantikan usulan agen semula (setengah terbuka).
+//
+// Yang diuji karena itu justru batasnya sendiri: task yang `due_date`-nya
+// **tepat sama** dengan `due_from` maupun dengan `due_to` harus ikut terpilih
+// (dulu hanya batas bawah yang begitu), dan rentang yang kedua batasnya sama
+// berarti satu instan. Task tanpa `due_date` tidak pernah masuk rentang mana pun.
+func TestTaskListDueRangeFilterIsInclusiveBothEnds(t *testing.T) {
 	fixture := newTaskFixture(t)
 	manager := fixture.createOrgAndUser("manager")
 	ctx := context.Background()
@@ -607,8 +609,11 @@ func TestTaskListDueRangeFilterIsHalfOpen(t *testing.T) {
 		to       *time.Time
 		wantRows []string
 	}{
-		{"batas atas eksklusif", timePtr(at("2026-03-10T00:00:00+07:00")), timePtr(at("2026-03-20T00:00:00+07:00")), []string{"Sepuluh"}},
+		// Batas atas **inklusif**: task berdue tepat di `due_to` ikut terpilih — inilah
+		// satu-satunya kasus yang membedakan semantik ini dari setengah terbuka.
+		{"batas atas inklusif", timePtr(at("2026-03-10T00:00:00+07:00")), timePtr(at("2026-03-20T00:00:00+07:00")), []string{"Dua puluh", "Sepuluh"}},
 		{"batas bawah inklusif", timePtr(at("2026-03-20T00:00:00+07:00")), timePtr(at("2026-03-21T00:00:00+07:00")), []string{"Dua puluh"}},
+		{"kedua batas sama (satu instan)", timePtr(at("2026-03-20T00:00:00+07:00")), timePtr(at("2026-03-20T00:00:00+07:00")), []string{"Dua puluh"}},
 		// Urutan daftar `created_at DESC`, jadi yang dibuat belakangan tampil dulu.
 		{"dua baris", timePtr(at("2026-03-10T00:00:00+07:00")), timePtr(at("2026-03-25T00:00:00+07:00")), []string{"Dua puluh", "Sepuluh"}},
 		{"tanpa batas bawah", nil, timePtr(at("2026-03-25T00:00:00+07:00")), []string{"Dua puluh", "Sepuluh"}},
@@ -714,4 +719,51 @@ func createDocumentForTest(t *testing.T, fixture *taskFixture, actor testActor, 
 		t.Fatalf("buat dokumen uji: %v", err)
 	}
 	return detail.Document.ID
+}
+
+// TestTaskListOutOfRangePageKeepsTotal menutup temuan **C-048** pada modul task.
+// Ia juga mengunci bahwa kueri hitung memakai cakupan baca yang **sama** dengan
+// daftar: halaman kosong milik aktor di luar cakupan tetap total 0, bukan
+// membocorkan jumlah task organisasi lain.
+func TestTaskListOutOfRangePageKeepsTotal(t *testing.T) {
+	fixture := newTaskFixture(t)
+	manager := fixture.createOrgAndUser("manager")
+	ctx := context.Background()
+	projectID := fixture.createProject(manager, "TASK-PAGE")
+
+	for _, title := range []string{"Satu", "Dua", "Tiga"} {
+		if _, err := fixture.tasks.Create(ctx, actorOf(manager), taskInput(projectID, manager.ID, title)); err != nil {
+			t.Fatalf("buat task %s: %v", title, err)
+		}
+	}
+
+	page1, total1, err := fixture.tasks.List(ctx, actorOf(manager),
+		service.TaskListFilter{ProjectID: &projectID, Page: 1, Limit: 2})
+	if err != nil {
+		t.Fatalf("daftar halaman 1: %v", err)
+	}
+	if len(page1) != 2 || total1 != 3 {
+		t.Fatalf("halaman 1: %d baris, total %d, diharapkan 2 baris dan total 3", len(page1), total1)
+	}
+
+	page3, total3, err := fixture.tasks.List(ctx, actorOf(manager),
+		service.TaskListFilter{ProjectID: &projectID, Page: 3, Limit: 2})
+	if err != nil {
+		t.Fatalf("daftar halaman 3: %v", err)
+	}
+	if len(page3) != 0 || total3 != 3 {
+		t.Errorf("halaman 3: %d baris, total %d, diharapkan 0 baris dan total 3 (C-048)", len(page3), total3)
+	}
+
+	// Aktor di organisasi lain, tanpa keanggotaan project: cakupan baca yang sama
+	// dipakai kueri hitung, jadi totalnya tetap 0.
+	otherOrg := fixture.createOrgAndUser("manager")
+	_, totalOther, err := fixture.tasks.List(ctx, actorOf(otherOrg),
+		service.TaskListFilter{Page: 3, Limit: 2})
+	if err != nil {
+		t.Fatalf("daftar halaman 3 organisasi lain: %v", err)
+	}
+	if totalOther != 0 {
+		t.Errorf("total organisasi lain = %d, diharapkan 0 (cakupan bocor lewat kueri hitung)", totalOther)
+	}
 }

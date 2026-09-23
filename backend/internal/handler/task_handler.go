@@ -369,11 +369,12 @@ func parseTaskListQuery(c *gin.Context) (service.TaskListFilter, []response.Fiel
 		}
 	}
 
-	// Rentang `due_date` memakai interval **setengah terbuka**
-	// `[due_from, due_to)`: batas bawah inklusif, batas atas eksklusif. Batasnya
-	// berupa waktu RFC 3339 dengan offset eksplisit, jadi tidak ada tanggal yang
-	// harus ditebak zona waktunya di server. Rentang terbalik ditolak, bukan
-	// dikembalikan kosong diam-diam.
+	// Rentang `due_date` memakai interval **tertutup** `[due_from, due_to]`:
+	// kedua batas inklusif. Batasnya berupa waktu RFC 3339 dengan offset
+	// eksplisit, jadi tidak ada tanggal yang harus ditebak zona waktunya di
+	// server. Rentang terbalik (`due_to` < `due_from`) ditolak, bukan
+	// dikembalikan kosong diam-diam; `due_to == due_from` **sah** dan berarti satu
+	// instan — itu akibat wajar dari kedua batas yang inklusif.
 	var dueFrom, dueTo *time.Time
 	if raw := strings.TrimSpace(c.Query("due_from")); raw != "" {
 		parsed, err := parseRFC3339Query(raw)
@@ -391,10 +392,10 @@ func parseTaskListQuery(c *gin.Context) (service.TaskListFilter, []response.Fiel
 			dueTo = &parsed
 		}
 	}
-	if dueFrom != nil && dueTo != nil && !dueTo.After(*dueFrom) {
+	if dueFrom != nil && dueTo != nil && dueTo.Before(*dueFrom) {
 		fields = append(fields, response.FieldError{
 			Field: "due_to",
-			Error: "harus lebih besar dari due_from (batas atas eksklusif)",
+			Error: "harus lebih besar atau sama dengan due_from (kedua batas inklusif)",
 		})
 	}
 

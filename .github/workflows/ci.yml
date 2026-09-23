@@ -1,0 +1,100 @@
+name: CI
+
+# Tiga pemeriksa dokumen dijalankan pada setiap push dan pull request. Tujuannya
+# menahan kelas cacat yang dulu lolos ke dokumen karena angka dan rujukan
+# ditulis dari ingatan, bukan dihitung ulang dari berkasnya (C-044, C-055,
+# C-057, C-061): hitungan audit yang tidak cocok dengan tabelnya sendiri,
+# hitungan test yang basi, rujukan test/fungsi yang sudah tidak ada, dan angka
+# di `README.md` (jumlah route, versi dependensi, rentang migrasi) yang diam-diam
+# basi ketika kode berubah.
+#
+# Sejak P-040 ada empat pemeriksa: `scripts/check-ledger.sh`, `scripts/check-doc-links.sh`,
+# `scripts/check-readme-facts.sh`, dan `scripts/check-api-contract.sh` (yang terakhir menahan
+# pasangan izin karangan di kontrak maupun di router — kelas cacat yang membuat matriks RBAC
+# berubah tanpa ADR). Sejak **P-042** ada lima: `scripts/check-antislop-refs.sh` menahan
+# rujukan aturan antislop yang tidak ada, path skill yang didaftarkan tapi tidak ada di disk
+# (C-064), berkas skill yang menyimpang dari tabel provenansnya, dan kalimat aturan upstream
+# yang tersalin ke dokumen proyek (C-065).
+#
+# Sejak **P-051** ada enam: `scripts/check-navigation.sh` menahan pelanggaran batas sidebar
+# (`51-UX.md` §2.1) — entri menu yang membawa kueri penyaring atau menunjuk sub-halaman,
+# halaman anak dengan induk yang tidak ada, dan daftar menu yang menyimpang dari tabel §2.1
+# di dokumen. Aturan itu sebelumnya tidak dijaga apa pun di CI: job frontend tidak ada,
+# dan pemeriksaan di peramban hanya mencari item menu **berkueri** sehingga `Reports > Audit`
+# dapat berdiri sebagai entri sidebar tanpa satu pun pemeriksa menyebutnya.
+#
+# Aturan mainnya ada di `docs/design/02-AGENT-PROGRESS-PROTOCOL.md` §6;
+# jalankan semuanya secara lokal sebelum menutup sesi.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ledger:
+    name: Ledger & dokumen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Konsistensi ledger (hitungan audit, papan kerja, rujukan test)
+        run: bash scripts/check-ledger.sh
+      - name: Rujukan berkas di dokumen
+        run: bash scripts/check-doc-links.sh
+      - name: Angka & versi di README terhadap repo
+        run: bash scripts/check-readme-facts.sh
+      - name: Anotasi izin endpoint terhadap matriks RBAC
+        run: bash scripts/check-api-contract.sh
+      - name: Rujukan & provenans berkas antislop
+        run: bash scripts/check-antislop-refs.sh
+      - name: Batas sidebar terhadap model navigasi & 51-UX.md §2.1
+        run: bash scripts/check-navigation.sh
+
+  backend:
+    name: Backend (build, vet, test)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bwdcs
+          POSTGRES_PASSWORD: bwdcs
+          POSTGRES_DB: bwdcs_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bwdcs -d bwdcs_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Kredensial hanya untuk database service di job ini. Suite memakai
+      # database TERPISAH dari database dev (70-TESTING.md §8.1): `make test`
+      # menurunkan TEST_DATABASE_URL dari nilai-nilai ini.
+      DB_USER: bwdcs
+      DB_PASSWORD: bwdcs
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: bwdcs
+      TEST_DB_NAME: bwdcs_test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: Test (database test terpisah)
+        run: make test

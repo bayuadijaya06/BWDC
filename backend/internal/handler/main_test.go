@@ -69,11 +69,16 @@ func (s stubStorage) Ping() error { return s.err }
 // membutuhkannya untuk menyiapkan data — modul dokumen, mis. memerlukan storage
 // nyata supaya unggahan dan unduhan benar-benar menyentuh berkas.
 type engineParts struct {
-	engine    *gin.Engine
-	storage   *filestorage.LocalStorage
-	projects  *service.ProjectService
-	documents *service.DocumentService
-	tasks     *service.TaskService
+	engine       *gin.Engine
+	storage      *filestorage.LocalStorage
+	projects     *service.ProjectService
+	documents    *service.DocumentService
+	tasks        *service.TaskService
+	comments     *service.CommentService
+	workflows    *service.WorkflowService
+	analytics    *service.AnalyticsService
+	notification *service.NotificationService
+	audit        *service.AuditReadService
 }
 
 // newEngine merakit engine lengkap seperti `cmd/server/main.go` merakitnya.
@@ -99,8 +104,10 @@ func newEngineParts(t *testing.T, maxLoginAttempts int) engineParts {
 
 	users := repository.NewUserRepository(testPool)
 	revocations := repository.NewRevocationRepository(testPool, 0)
-	authService := service.NewAuthService(testPool, users, revocations, tokens,
-		service.NewLoginGuard(maxLoginAttempts, 0), discardLogger())
+	attempts := repository.NewLoginAttemptRepository(testPool)
+	authService := service.NewAuthService(testPool, users, revocations, attempts, tokens,
+		testLoginPolicy(maxLoginAttempts), discardLogger())
+	userService := service.NewUserService(testPool, users, discardLogger())
 	projectService := service.NewProjectService(testPool, repository.NewProjectRepository(testPool), users, discardLogger())
 	documentService := service.NewDocumentService(testPool,
 		repository.NewDocumentRepository(testPool),
@@ -110,8 +117,28 @@ func newEngineParts(t *testing.T, maxLoginAttempts int) engineParts {
 		repository.NewTaskRepository(testPool),
 		repository.NewProjectRepository(testPool),
 		users, discardLogger())
+	commentService := service.NewCommentService(testPool,
+		repository.NewCommentRepository(testPool),
+		repository.NewProjectRepository(testPool),
+		users, discardLogger())
 
 	permissionChecker := service.NewPermissionChecker(users)
+
+	workflowService := service.NewWorkflowService(testPool,
+		repository.NewWorkflowRepository(testPool),
+		repository.NewDocumentRepository(testPool),
+		users, permissionChecker, discardLogger())
+
+	analyticsService := service.NewAnalyticsService(
+		repository.NewAnalyticsRepository(testPool),
+		users,
+	)
+	notificationService := service.NewNotificationService(
+		repository.NewNotificationRepository(testPool),
+	)
+	auditService := service.NewAuditReadService(
+		repository.NewAuditRepository(testPool),
+	)
 
 	engine := gin.New()
 	handler.Setup(engine, handler.RouterDeps{
@@ -122,20 +149,38 @@ func newEngineParts(t *testing.T, maxLoginAttempts int) engineParts {
 		Project:      handler.NewProjectHandler(projectService, discardLogger()),
 		Document:     handler.NewDocumentHandler(documentService, discardLogger()),
 		Task:         handler.NewTaskHandler(taskService, permissionChecker, discardLogger()),
+		Comment:      handler.NewCommentHandler(commentService, discardLogger()),
+		Workflow:     handler.NewWorkflowHandler(workflowService, discardLogger()),
+		User:         handler.NewUserHandler(userService, discardLogger()),
+		Analytics:    handler.NewAnalyticsHandler(analyticsService, discardLogger()),
+		Notification: handler.NewNotificationHandler(notificationService, discardLogger()),
+		Audit:        handler.NewAuditHandler(auditService, discardLogger()),
 		AuthMiddleware: middleware.AuthMiddleware(middleware.AuthConfig{
-			Validator:   tokens,
-			Revocations: revocations,
+			Validator: tokens,
+			Sessions:  revocations,
 		}),
 		Permission: permissionChecker,
 	})
 
 	return engineParts{
-		engine:    engine,
-		storage:   store,
-		projects:  projectService,
-		documents: documentService,
-		tasks:     taskService,
+		engine:       engine,
+		storage:      store,
+		projects:     projectService,
+		documents:    documentService,
+		tasks:        taskService,
+		comments:     commentService,
+		workflows:    workflowService,
+		analytics:    analyticsService,
+		notification: notificationService,
+		audit:        auditService,
 	}
+}
+
+// testLoginPolicy menyusun kebijakan login untuk engine uji: ambangnya dari
+// parameter (supaya test lockout tidak perlu lima percobaan), durasi locknya
+// pendek tetapi tetap jauh lebih lama daripada jalannya satu test.
+func testLoginPolicy(maxAttempts int) repository.AuthPolicy {
+	return repository.AuthPolicy{MaxLoginAttempts: maxAttempts, LockoutDuration: time.Minute}
 }
 
 // testActor adalah user yang benar-benar ter-commit: service auth membuka
@@ -195,7 +240,26 @@ func createActor(t *testing.T, roles ...string) testActor {
 	}
 
 	t.Cleanup(func() { cleanupActor(t, actor.ID, actor.OrgID) })
+	t.Cleanup(func() { cleanupLoginAttempts(t, actor.ID, actor.Username) })
 	return actor
+}
+
+// cleanupLoginAttempts menghapus telemetri percobaan login milik aktor uji.
+// Baris untuk username yang **tidak** ada (`user_id IS NULL`) juga ikut: itu
+// kasus inti temuan C-035, dan baris seperti itu hanya dapat ditemukan lewat
+// `username_attempted`. Username-nya unik per test.
+func cleanupLoginAttempts(t *testing.T, userID uuid.UUID, username string) {
+	t.Helper()
+	if testPool == nil {
+		return
+	}
+
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM login_attempts WHERE user_id = $1 OR username_attempted = $2`,
+		userID, username,
+	); err != nil {
+		t.Errorf("hapus percobaan login uji: %v", err)
+	}
 }
 
 // cleanupActor memakai jalur pemeliharaan `bwdcs.audit_maintenance` karena
@@ -220,6 +284,8 @@ func cleanupActor(t *testing.T, userID, orgID uuid.UUID) {
 	}{
 		{`SET LOCAL bwdcs.audit_maintenance = 'on'`, nil},
 		{`DELETE FROM audit_logs WHERE actor_id = $1`, []any{userID}},
+		// Komentar sebelum user: `comments.created_by_id` ON DELETE RESTRICT.
+		{`DELETE FROM comments WHERE created_by_id = $1`, []any{userID}},
 		{`DELETE FROM user_roles WHERE user_id = $1`, []any{userID}},
 		{`DELETE FROM users WHERE id = $1`, []any{userID}},
 		{`DELETE FROM organizations WHERE id = $1`, []any{orgID}},
@@ -242,7 +308,11 @@ type apiResponse struct {
 	Data    struct {
 		Token     string    `json:"token"`
 		ExpiresAt time.Time `json:"expires_at"`
-		User      struct {
+		// `refresh_token` + `refresh_expires_at` datang dari login dan refresh
+		// (ADR-0023); keduanya dibaca test supaya bentuk response-nya terkunci.
+		RefreshToken     string    `json:"refresh_token"`
+		RefreshExpiresAt time.Time `json:"refresh_expires_at"`
+		User             struct {
 			ID       string   `json:"id"`
 			Username string   `json:"username"`
 			Roles    []string `json:"roles"`

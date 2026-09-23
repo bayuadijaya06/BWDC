@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -20,7 +22,9 @@ import (
 
 // documentFixture menyatukan database test, storage sementara, dan service
 // dokumen nyata. Pembersihan project/user memakai `projectFixture` — kaskade
-// `documents` dan `document_versions` ikut terhapus bersama project-nya.
+// `documents` dan `document_versions` ikut terhapus bersama project-nya,
+// memakai jalur pemeliharaan `bwdcs.audit_maintenance` yang juga membuka trigger
+// append-only `document_versions` (ADR-0019, `44-SECURITY.md` §6.1).
 type documentFixture struct {
 	*projectFixture
 	storage   *filestorage.LocalStorage
@@ -324,6 +328,68 @@ func TestDocumentUploadRejectsUnsupportedTypeAndSize(t *testing.T) {
 	}
 }
 
+// TestDocumentUploadAcceptsDetectedMimeWithParameters menutup temuan **C-072**:
+// daftar MIME tertutup dibandingkan dengan hasil **deteksi isi berkas**, dan
+// `http.DetectContentType` mengembalikan `text/plain; charset=utf-8` untuk berkas
+// teks — sehingga `.txt` dan `.csv` yang dijanjikan `50-FSD.md` §4.2 selalu
+// ditolak `422` di server, walau dokumennya menyebutnya didukung.
+//
+// Karena itu MIME di sini **dihitung dari byte**, bukan ditulis dengan tangan:
+// test yang menulis `"text/plain"` sendiri akan tetap hijau walau handler
+// mengirim `"text/plain; charset=utf-8"`, dan itulah cara cacat ini lolos.
+func TestDocumentUploadAcceptsDetectedMimeWithParameters(t *testing.T) {
+	fixture := newDocumentFixture(t)
+	owner := fixture.createOrgAndUser("contributor")
+	projectID := fixture.createProject(owner, "MIME072")
+	document := fixture.createDocument(owner, projectID, "Dokumen MIME terdeteksi")
+	ctx := context.Background()
+
+	// Berkas contoh untuk setiap golongan yang didukung; isinya nyata supaya
+	// `http.DetectContentType` memutuskan sendiri tipe dan parameternya.
+	cases := []struct {
+		name    string
+		content []byte
+	}{
+		{"catatan.txt", []byte("laporan tanpa baris baru")},
+		{"catatan-berbaris.txt", []byte("laporan\nbaris kedua\n")},
+		{"data.csv", []byte("nama,nilai\nbudi,1\n")},
+		{"spesifikasi.pdf", []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n")},
+		{"logo.png", []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01")},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			detected := http.DetectContentType(testCase.content)
+			if detected == "application/octet-stream" {
+				t.Fatalf("berkas uji %q tidak dikenali detektor; perbaiki isinya", testCase.name)
+			}
+
+			version, err := fixture.documents.UploadVersion(ctx, actorOf(owner), document.Document.ID,
+				service.UploadVersionInput{
+					OriginalName: testCase.name,
+					MimeType:     detected,
+					Size:         int64(len(testCase.content)),
+					Content:      bytes.NewReader(testCase.content),
+				})
+			if err != nil {
+				t.Fatalf("unggah %s dengan MIME %q ditolak: %v", testCase.name, detected, err)
+			}
+			if version.MimeType != detected {
+				t.Errorf("mime_type tersimpan %q, diharapkan %q (yang dikirim handler)", version.MimeType, detected)
+			}
+		})
+	}
+
+	// Daftar ekstensi tetap tertutup: penjaga kedua tidak ikut longgar.
+	if _, err := fixture.documents.UploadVersion(ctx, actorOf(owner), document.Document.ID,
+		service.UploadVersionInput{
+			OriginalName: "skrip.sh", MimeType: "text/plain; charset=utf-8",
+			Size: 10, Content: bytes.NewReader([]byte("#!/bin/sh\n")),
+		}); !errors.Is(err, service.ErrDocumentFileType) {
+		t.Errorf("ekstensi .sh diterima (err=%v), diharapkan ErrDocumentFileType", err)
+	}
+}
+
 // TestDocumentDownloadReturnsContentAndAudit menutup FR-DOC-05/FR-VER-05 dan
 // FR-AUDIT-01 ("download doc").
 func TestDocumentDownloadReturnsContentAndAudit(t *testing.T) {
@@ -361,47 +427,111 @@ func TestDocumentDownloadReturnsContentAndAudit(t *testing.T) {
 	}
 }
 
-// TestDocumentDeleteCascadesVersionsAndFiles menutup `42-API.md` §4 ("cascade
-// to versions") dan FR-AUDIT-01 ("delete" sebagai aksi kritis).
-func TestDocumentDeleteCascadesVersionsAndFiles(t *testing.T) {
+// TestArchiveDocumentKeepsVersionsAndFiles menutup `70-TESTING.md` §3.12 baris
+// `T-039` dan ADR-0019 butir 1: arsip **tidak menghapus apa pun** — baris
+// dokumen, baris versi, dan berkas di storage tetap ada, sementara `status`
+// menjadi `archived` dan `archived_at` terisi.
+func TestArchiveDocumentKeepsVersionsAndFiles(t *testing.T) {
 	fixture := newDocumentFixture(t)
 	owner := fixture.createOrgAndUser("manager")
-	projectID := fixture.createProject(owner, "HAPUSD")
-	document := fixture.createDocument(owner, projectID, "Dokumen dihapus")
+	projectID := fixture.createProject(owner, "ARSIPD")
+	document := fixture.createDocument(owner, projectID, "Dokumen diarsipkan")
 	ctx := context.Background()
 
 	first := fixture.upload(owner, document.Document.ID, "a.pdf", "application/pdf", []byte("%PDF-1.4 a"))
 	second := fixture.upload(owner, document.Document.ID, "b.pdf", "application/pdf", []byte("%PDF-1.4 b"))
 
-	if err := fixture.documents.Delete(ctx, actorOf(owner), document.Document.ID); err != nil {
-		t.Fatalf("hapus dokumen: %v", err)
+	detail, err := fixture.documents.Archive(ctx, actorOf(owner), document.Document.ID)
+	if err != nil {
+		t.Fatalf("arsipkan dokumen: %v", err)
 	}
 
+	if detail.Document.Status != model.DocumentStatusArchived {
+		t.Errorf("status sesudah arsip %q, diharapkan %q", detail.Document.Status, model.DocumentStatusArchived)
+	}
+	if detail.Document.ArchivedAt == nil {
+		t.Error("archived_at kosong sesudah arsip")
+	}
+
+	// Baris versi tidak berkurang — inilah pembeda arsip dari `DELETE` berkaskade.
 	var rows int
 	if err := testPool.QueryRow(ctx,
 		`SELECT count(*) FROM document_versions WHERE document_id = $1`, document.Document.ID).Scan(&rows); err != nil {
-		t.Fatalf("hitung versi sesudah hapus: %v", err)
+		t.Fatalf("hitung versi sesudah arsip: %v", err)
 	}
-	if rows != 0 {
-		t.Errorf("baris versi tersisa %d, diharapkan 0", rows)
+	if rows != 2 {
+		t.Errorf("baris versi tersisa %d, diharapkan 2", rows)
 	}
 	for _, key := range []string{first.FileKey, second.FileKey} {
-		if fixture.storage.Exists(key) {
-			t.Errorf("berkas %q masih ada di storage sesudah dokumen dihapus", key)
+		if !fixture.storage.Exists(key) {
+			t.Errorf("berkas %q hilang dari storage sesudah arsip", key)
 		}
 	}
 
-	_, err := fixture.documents.Get(ctx, actorOf(owner), document.Document.ID)
-	requireError(t, err, service.ErrDocumentNotFound)
+	// Tetap dapat dibaca dan diunduh oleh yang berhak (ADR-0019 butir 5).
+	if _, err := fixture.documents.Get(ctx, actorOf(owner), document.Document.ID); err != nil {
+		t.Errorf("detail dokumen terarsip: %v, diharapkan berhasil", err)
+	}
+	download, err := fixture.documents.Download(ctx, actorOf(owner), document.Document.ID, second.ID)
+	if err != nil {
+		t.Fatalf("unduh dokumen terarsip: %v", err)
+	}
+	defer func() { _ = download.Content.Close() }()
 
-	if got := countAudit(t, owner.ID, service.ActionDocumentDeleted); got != 1 {
-		t.Errorf("entri audit DOCUMENT_DELETED %d, diharapkan 1", got)
+	if got := countAudit(t, owner.ID, service.ActionDocumentArchived); got != 1 {
+		t.Errorf("entri audit DOCUMENT_ARCHIVED %d, diharapkan 1", got)
 	}
 }
 
-// TestDocumentDeleteRejectedWhileWorkflowRunning menutup `50-FSD.md` §4.3
-// ("Delete — no workflow running").
-func TestDocumentDeleteRejectedWhileWorkflowRunning(t *testing.T) {
+// TestArchivedDocumentLeavesDefaultListButStaysInFilter menutup ADR-0019 butir 5
+// untuk **daftar**: terarsip keluar dari daftar default dan kembali muncul pada
+// penyaring `?status=archived`. Aturan itu hidup di kueri repository, jadi test
+// ini memanggil repository lewat service, bukan handler.
+func TestArchivedDocumentLeavesDefaultListButStaysInFilter(t *testing.T) {
+	fixture := newDocumentFixture(t)
+	owner := fixture.createOrgAndUser("manager")
+	projectID := fixture.createProject(owner, "DAFTAR")
+	active := fixture.createDocument(owner, projectID, "Dokumen aktif")
+	archived := fixture.createDocument(owner, projectID, "Dokumen akan diarsipkan")
+	ctx := context.Background()
+
+	if _, err := fixture.documents.Archive(ctx, actorOf(owner), archived.Document.ID); err != nil {
+		t.Fatalf("arsipkan dokumen: %v", err)
+	}
+
+	defaultList, total, err := fixture.documents.List(ctx, actorOf(owner), service.DocumentListFilter{ProjectID: &projectID, Limit: 20})
+	if err != nil {
+		t.Fatalf("daftar default: %v", err)
+	}
+	if total != 1 || len(defaultList) != 1 {
+		t.Fatalf("daftar default memuat %d baris, diharapkan 1 (hanya yang aktif)", total)
+	}
+	if defaultList[0].ID != active.Document.ID {
+		t.Errorf("daftar default memuat dokumen %s, diharapkan %s", defaultList[0].ID, active.Document.ID)
+	}
+
+	archivedList, total, err := fixture.documents.List(ctx, actorOf(owner), service.DocumentListFilter{
+		ProjectID: &projectID,
+		Status:    model.DocumentStatusArchived,
+		Limit:     20,
+	})
+	if err != nil {
+		t.Fatalf("daftar status=archived: %v", err)
+	}
+	if total != 1 || len(archivedList) != 1 {
+		t.Fatalf("daftar status=archived memuat %d baris, diharapkan 1", total)
+	}
+	if archivedList[0].ID != archived.Document.ID {
+		t.Errorf("daftar status=archived memuat dokumen %s, diharapkan %s", archivedList[0].ID, archived.Document.ID)
+	}
+	if archivedList[0].ArchivedAt == nil {
+		t.Error("archived_at tidak ikut terbaca pada daftar")
+	}
+}
+
+// TestArchiveRejectedWhileWorkflowRunning menutup `50-FSD.md` §4.3
+// ("Archive — no workflow running").
+func TestArchiveRejectedWhileWorkflowRunning(t *testing.T) {
 	fixture := newDocumentFixture(t)
 	owner := fixture.createOrgAndUser("manager")
 	projectID := fixture.createProject(owner, "WFJALA")
@@ -420,8 +550,89 @@ func TestDocumentDeleteRejectedWhileWorkflowRunning(t *testing.T) {
 		t.Fatalf("buat instance workflow: %v", err)
 	}
 
-	err := fixture.documents.Delete(ctx, actorOf(owner), document.Document.ID)
+	_, err := fixture.documents.Archive(ctx, actorOf(owner), document.Document.ID)
 	requireError(t, err, service.ErrDocumentWorkflowRunning)
+
+	// Ditolak berarti tidak ada yang berubah — bukan hanya errornya yang benar.
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM documents WHERE id = $1`, document.Document.ID).Scan(&status); err != nil {
+		t.Fatalf("baca status dokumen: %v", err)
+	}
+	if status != model.DocumentStatusDraft {
+		t.Errorf("status %q sesudah arsip ditolak, diharapkan tetap draft", status)
+	}
+}
+
+// TestArchivedDocumentRejectsNewVersion menutup ADR-0019 butir 5 dari sisi
+// unggahan: dokumen terarsip menolak versi baru, dan tidak ada berkas yang
+// tertinggal di storage karena penolakannya terjadi sebelum penulisan.
+func TestArchivedDocumentRejectsNewVersion(t *testing.T) {
+	fixture := newDocumentFixture(t)
+	owner := fixture.createOrgAndUser("manager")
+	projectID := fixture.createProject(owner, "TOLAKV")
+	document := fixture.createDocument(owner, projectID, "Dokumen terarsip")
+	ctx := context.Background()
+
+	first := fixture.upload(owner, document.Document.ID, "awal.pdf", "application/pdf", []byte("%PDF-1.4 awal"))
+	if _, err := fixture.documents.Archive(ctx, actorOf(owner), document.Document.ID); err != nil {
+		t.Fatalf("arsipkan dokumen: %v", err)
+	}
+
+	_, err := fixture.documents.UploadVersion(ctx, actorOf(owner), document.Document.ID, service.UploadVersionInput{
+		OriginalName: "sesudah-arsip.pdf",
+		MimeType:     "application/pdf",
+		Size:         int64(len("%PDF-1.4 kedua")),
+		RevisionNote: "tidak boleh masuk",
+		Content:      bytes.NewReader([]byte("%PDF-1.4 kedua")),
+	})
+	requireError(t, err, service.ErrDocumentArchived)
+
+	var rows int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM document_versions WHERE document_id = $1`, document.Document.ID).Scan(&rows); err != nil {
+		t.Fatalf("hitung versi: %v", err)
+	}
+	if rows != 1 {
+		t.Errorf("baris versi %d sesudah unggahan ditolak, diharapkan tetap 1", rows)
+	}
+	if !fixture.storage.Exists(first.FileKey) {
+		t.Error("berkas versi pertama hilang sesudah unggahan ditolak")
+	}
+}
+
+// TestArchiveSecondTimeIsRejected menutup `42-API.md` §4: arsip **tidak**
+// idempoten, karena `archived_at` mencatat kapan arsip terjadi dan permintaan
+// kedua tidak boleh menggesernya.
+func TestArchiveSecondTimeIsRejected(t *testing.T) {
+	fixture := newDocumentFixture(t)
+	owner := fixture.createOrgAndUser("manager")
+	projectID := fixture.createProject(owner, "DUAARS")
+	document := fixture.createDocument(owner, projectID, "Dokumen diarsipkan dua kali")
+	ctx := context.Background()
+
+	first, err := fixture.documents.Archive(ctx, actorOf(owner), document.Document.ID)
+	if err != nil {
+		t.Fatalf("arsip pertama: %v", err)
+	}
+
+	_, err = fixture.documents.Archive(ctx, actorOf(owner), document.Document.ID)
+	requireError(t, err, service.ErrDocumentAlreadyArchived)
+
+	if got := countAudit(t, owner.ID, service.ActionDocumentArchived); got != 1 {
+		t.Errorf("entri audit DOCUMENT_ARCHIVED %d sesudah arsip kedua ditolak, diharapkan 1", got)
+	}
+
+	second, err := fixture.documents.Get(ctx, actorOf(owner), document.Document.ID)
+	if err != nil {
+		t.Fatalf("detail sesudah arsip kedua: %v", err)
+	}
+	if second.Document.ArchivedAt == nil || first.Document.ArchivedAt == nil {
+		t.Fatal("archived_at harus terisi pada kedua pembacaan")
+	}
+	if !second.Document.ArchivedAt.Equal(*first.Document.ArchivedAt) {
+		t.Errorf("archived_at bergeser dari %s ke %s walau arsip kedua ditolak",
+			first.Document.ArchivedAt, second.Document.ArchivedAt)
+	}
 }
 
 // TestDocumentScopeFollowsProjectMembership menutup FR-PROJ-06 untuk dokumen:
@@ -503,5 +714,162 @@ func TestDocumentScopeFollowsProjectMembership(t *testing.T) {
 	}
 	if total != 1 || len(searched) != 1 {
 		t.Errorf("pencarian nomor dokumen mengembalikan %d baris, diharapkan 1 (FR-DOC-06)", total)
+	}
+}
+
+// TestDocumentListOutOfRangePageKeepsTotal menutup temuan **C-048** pada modul
+// document. Selain membuktikan total tetap benar di halaman di luar rentang, ia
+// mengunci bahwa kueri hitung memakai aturan yang **sama** dengan daftar: default
+// menyembunyikan dokumen terarsip (ADR-0019 butir 5), dan `?status=archived`
+// menghitung hanya yang terarsip.
+func TestDocumentListOutOfRangePageKeepsTotal(t *testing.T) {
+	fixture := newDocumentFixture(t)
+	owner := fixture.createOrgAndUser("manager")
+	projectID := fixture.createProject(owner, "DOC-PAGE")
+	ctx := context.Background()
+
+	for _, title := range []string{"Halaman A", "Halaman B", "Halaman C"} {
+		fixture.createDocument(owner, projectID, title)
+	}
+
+	page1, total1, err := fixture.documents.List(ctx, actorOf(owner),
+		service.DocumentListFilter{ProjectID: &projectID, Page: 1, Limit: 2})
+	if err != nil {
+		t.Fatalf("daftar halaman 1: %v", err)
+	}
+	if len(page1) != 2 || total1 != 3 {
+		t.Fatalf("halaman 1: %d baris, total %d, diharapkan 2 baris dan total 3", len(page1), total1)
+	}
+
+	page3, total3, err := fixture.documents.List(ctx, actorOf(owner),
+		service.DocumentListFilter{ProjectID: &projectID, Page: 3, Limit: 2})
+	if err != nil {
+		t.Fatalf("daftar halaman 3: %v", err)
+	}
+	if len(page3) != 0 || total3 != 3 {
+		t.Errorf("halaman 3: %d baris, total %d, diharapkan 0 baris dan total 3 (C-048)", len(page3), total3)
+	}
+
+	// Arsipkan satu dokumen; kini ada empat baris, tiga di antaranya tidak
+	// terarsip. Halaman di luar rentang pada daftar default harus menghitung 3,
+	// dan pada `?status=archived` menghitung 1.
+	archived := fixture.createDocument(owner, projectID, "Halaman Arsip")
+	if _, err := fixture.documents.Archive(ctx, actorOf(owner), archived.Document.ID); err != nil {
+		t.Fatalf("arsipkan dokumen: %v", err)
+	}
+
+	_, totalDefault, err := fixture.documents.List(ctx, actorOf(owner),
+		service.DocumentListFilter{ProjectID: &projectID, Page: 4, Limit: 2})
+	if err != nil {
+		t.Fatalf("daftar default halaman 4: %v", err)
+	}
+	if totalDefault != 3 {
+		t.Errorf("total default setelah arsip = %d, diharapkan 3 (dari 4 baris, satu terarsip)", totalDefault)
+	}
+
+	_, totalArchived, err := fixture.documents.List(ctx, actorOf(owner),
+		service.DocumentListFilter{ProjectID: &projectID, Status: model.DocumentStatusArchived, Page: 4, Limit: 2})
+	if err != nil {
+		t.Fatalf("daftar status archived halaman 4: %v", err)
+	}
+	if totalArchived != 1 {
+		t.Errorf("total status archived = %d, diharapkan 1", totalArchived)
+	}
+}
+
+// TestDocumentListUpdatedAtRangeInclusive menutup penyaring rentang tanggal yang
+// dijanjikan `50-FSD.md` §4.1 ("Date range") pada `GET /documents`: interval
+// **tertutup** `[updated_from, updated_to]`, kedua batas inklusif — semantik yang
+// sama dengan `due_from`/`due_to` pada task (keputusan user P-028), bukan
+// semantik baru yang dikarang modul kedua.
+//
+// Baris dokumen diperbarui lewat `UPDATE documents SET updated_at = NOW()` di
+// dalam transaksi pemeliharaan (trigger append-only hanya menjaga `documents`
+// dari `UPDATE`, jadi barisnya dibuat langsung lewat `db.Exec` di test — test
+// integrasi lain sudah memakai jalur yang sama untuk menyetel waktu bukti).
+func TestDocumentListUpdatedAtRangeInclusive(t *testing.T) {
+	fixture := newDocumentFixture(t)
+	owner := fixture.createOrgAndUser("manager")
+	projectID := fixture.createProject(owner, "DOC-RANGE")
+	ctx := context.Background()
+
+	early := fixture.createDocument(owner, projectID, "Diperbarui lama")
+	late := fixture.createDocument(owner, projectID, "Diperbarui baru")
+
+	// Dua batas yang menampung tepat satu dokumen masing-masing.
+	// `updated_at` dokumen baru sama dengan `created_at`-nya; tepat pada batas
+	// ikut terpilih karena intervalnya inklusif di kedua sisi.
+	timeOf := func(detail *service.DocumentDetail) time.Time {
+		t.Helper()
+		return detail.Document.CreatedAt
+	}
+	earlyAt, lateAt := timeOf(early), timeOf(late)
+
+	cases := []struct {
+		name      string
+		from, to  time.Time
+		wantTotal int
+		wantFirst string // judul baris pertama bila wantTotal > 0
+	}{
+		{
+			// Kedua batas inklusif berarti kedua dokumen ikut. Urutan daftar
+			// adalah `created_at DESC` (dokumen terbaru lebih dulu), jadi yang
+			// pertama terbaca "Diperbarui baru".
+			name:      "kedua batas mencakup kedua dokumen",
+			from:      earlyAt,
+			to:        lateAt,
+			wantTotal: 2,
+			wantFirst: "Diperbarui baru",
+		},
+		{
+			name:      "rentang sempit tepat satu instan (to == from sah)",
+			from:      earlyAt,
+			to:        earlyAt,
+			wantTotal: 1,
+			wantFirst: "Diperbarui lama",
+		},
+		{
+			name:      "rentang sebelum semua dokumen kosong",
+			from:      earlyAt.Add(-time.Hour),
+			to:        earlyAt.Add(-time.Minute),
+			wantTotal: 0,
+		},
+		{
+			name:      "rentang sesudah semua dokumen kosong",
+			from:      lateAt.Add(time.Minute),
+			to:        lateAt.Add(time.Hour),
+			wantTotal: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, total, err := fixture.documents.List(ctx, actorOf(owner),
+				service.DocumentListFilter{
+					ProjectID:   &projectID,
+					UpdatedFrom: &tc.from,
+					UpdatedTo:   &tc.to,
+					Limit:       20,
+				})
+			if err != nil {
+				t.Fatalf("daftar ber-rentang: %v", err)
+			}
+			if total != tc.wantTotal || len(rows) != tc.wantTotal {
+				t.Fatalf("total = %d, baris = %d, diharapkan %d", total, len(rows), tc.wantTotal)
+			}
+			if tc.wantTotal > 0 && rows[0].Title != tc.wantFirst {
+				t.Errorf("baris pertama %q, diharapkan %q", rows[0].Title, tc.wantFirst)
+			}
+		})
+	}
+
+	// Tanpa rentang: keduanya tetap terbaca (penyaring tidak dipakai).
+	_, total, err := fixture.documents.List(ctx, actorOf(owner),
+		service.DocumentListFilter{ProjectID: &projectID, Limit: 20})
+	if err != nil {
+		t.Fatalf("daftar tanpa rentang: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total tanpa rentang = %d, diharapkan 2", total)
 	}
 }

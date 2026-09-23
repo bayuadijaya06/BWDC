@@ -7,31 +7,28 @@
 
 ## 1. Pertanyaan Terbuka
 
-### Q-001 — Mode penggunaan antislop (BLOCKING untuk UI)
+### Q-001 — Mode penggunaan antislop → **RESOLVED: `during`** (2026-09-21, P-037)
 
-- **Pertanyaan:** antislop dipakai **during** (aturan diterapkan sambil membangun) atau **after** (audit setelah selesai)?
-- **Kenapa penting:** `antislop.md` melarang memulai UI work sebelum pertanyaan ini dijawab. Mode menentukan apakah ada audit bertingkat prioritas di akhir.
-- **Rekomendasi:** `during`, karena UI BWDCS dibangun dari nol dan lebih murah mencegah slop daripada memperbaikinya.
-- **Asumsi sementara:** `during`.
-- **Terkait:** ADR-0006, `01-AGENT-WORKFRAME.md` §3.1, task `T-007`.
+- **Keputusan user:** **`during`** — aturan antislop diterapkan **sambil** membangun, bukan sebagai audit di akhir.
+- **Konsekuensi:** filter antislop dipakai pada setiap sesi UI, dan Delivery Gate dijalankan **sebelum** serah terima, bukan sesudahnya. ADR-0006 dinaikkan dari `PROPOSED` menjadi **`ACCEPTED`** pada sesi yang sama.
+- **Catatan jujur:** direktori `skills/antislop-*/SKILL.md` tetap belum ada (Q-003), jadi filter yang benar-benar dipakai sesi ini adalah `antislop.md` (core) + `DESIGN.md`. Itu dicatat di log prompt `P-037` §7.
+- **Terkait:** ADR-0006, `01-AGENT-WORKFRAME.md` §3.1, task `T-007` (DONE).
 
-### Q-002 — Sumber arah desain (BLOCKING untuk UI)
+### Q-002 — Sumber arah desain → **RESOLVED: jalur (b)/(2) — agen mengisi atas izin eksplisit user** (2026-09-21, P-037)
 
-- **Pertanyaan:** siapa yang mengisi arah desain di `DESIGN.md`?
-  - (a) User mengisi sendiri (paling baik: identitas, palet, tipografi, mood).
-  - (b) Agen mengisi **dengan peringatan eksplisit** bahwa hasilnya cenderung selera default AI, dan hasilnya berlabel draft.
-  - (c) Dilewati: semua UI berstatus "draft without direction", dials ENERGY 1 / RHYTHM 1 / MOTION 1, tidak boleh dianggap deliverable.
-- **Kenapa penting:** antislop R-37. Tanpa arah, hasil UI cenderung steril dan tidak punya identitas.
-- **Rekomendasi:** (a). Jika tidak memungkinkan, (c) lebih jujur daripada (b) yang diam-diam dianggap final.
-- **Asumsi sementara:** belum ada; UI belum boleh dimulai.
-- **Terkait:** ADR-0007, `DESIGN.md`, task `T-006`.
+- **Keputusan user:** user **menyuruh agen menyusun arah desain** ("isi `DESIGN.md`, tentukan dengan rekomendasi Anda berdasarkan best practice"). Itu **jalur 2** ADR-0007, bukan (a) yang tadinya direkomendasikan dan bukan pula (c).
+- **Konsekuensi:** `DESIGN.md` berstatus `TERISI` dengan peringatan yang menyertai statusnya: butir **struktural** (dials, aturan aksesibilitas, pemisahan warna status, aturan mono) adalah keputusan yang dipertanggungjawabkan; butir **rasa** (kepribadian, referensi, penamaan tema) adalah **draf agen** yang boleh diganti user tanpa ADR baru. Status "draft without direction" (R-37) gugur, dan dial sementara 1/1/1 tidak dipakai lagi. ADR-0007 `ACCEPTED`.
+- **Yang membuat keputusan ini tidak bisa diklaim sepihak:** palet dan skala dikunci di `frontend/src/styles/tokens.css` dan **dihitung ulang** test kontras (31 test WCAG 2.2 AA); mengubahnya tanpa mengubah test akan gagal.
+- **Terkait:** ADR-0006/0007/0024, `DESIGN.md`, `11-DESIGN-DIRECTION.md` (kini `SUPERSEDED`), task `T-006` (DONE), temuan C-015 + C-060.
 
-### Q-003 — Skill antislop belum tersedia (NON-BLOCKING)
+### Q-003 — Skill antislop belum tersedia → **RESOLVED: skill terpasang, dipin ke tag rilis** (2026-09-22, P-042)
 
-- **Temuan:** `AGENTS.md` menunjuk `skills/antislop-ui/SKILL.md`, `skills/antislop-copywriting/SKILL.md`, `skills/antislop-human/SKILL.md`, `skills/antislop-layoutmobile/SKILL.md`, `skills/antislop-code/SKILL.md`, tetapi direktori `skills/` tidak ada di repo.
+- **Temuan (semula):** `AGENTS.md` menunjuk `skills/antislop-ui/SKILL.md`, `skills/antislop-copywriting/SKILL.md`, `skills/antislop-human/SKILL.md`, `skills/antislop-layoutmobile/SKILL.md`, `skills/antislop-code/SKILL.md`, tetapi direktori `skills/` tidak ada di repo — entry file menyatakan sesuatu yang tidak benar (temuan **C-064**).
 - **Aturan yang berlaku:** agen tidak boleh mengunduh berkas skill (`skills/<nama>/SKILL.md`) dari jaringan, dan tidak boleh mengarang isinya.
-- **Aksi yang diminta:** user menyediakan folder `skills/<nama>/SKILL.md` dari rilis antislop yang sama dengan `antislop.md` versi ini.
-- **Sampai itu terjadi:** filter UI hanya memakai `antislop.md` (core). Catat di log prompt bahwa skill tidak dipakai.
+- **Keputusan user (2026-09-22):** user menyebutkan sumbernya (`https://github.com/miqdadbadjuber/anti-slop`), meminta skill-nya diterapkan dengan benar, dan **memberi izin eksplisit** kepada agen untuk mengunduhnya langsung dari repo itu. Agen memasang **kelima** skill + core + `contrast-check.py` + salinan `LICENSE`, semuanya byte-identik dari **tag rilis `v3.2.12`** (bukan `main`), dengan `sha256` dicatat di `skills/README.md` §1.
+- **Konsekuensi yang mengikat:** izin itu **satu kali, untuk sesi P-042** — bukan aturan tetap. Sesi berikutnya **tidak boleh** mengunduh ulang atas inisiatif sendiri, termasuk "sekadar menyegarkan"; pembaruan mengikuti `skills/README.md` §2 atas permintaan user. Filter UI kini tersedia dalam bentuk lengkap (core + lima skill), dan `bash scripts/check-antislop-refs.sh` memeriksa rujukan serta keaslian berkasnya.
+- **Sekaligus ditemukan dan ditutup:** **C-065** — `antislop.md` di root ternyata varian lama yang berbeda dari salinan Delivery Gate di dokumen desain, dan daftar aturannya sudah disalin ke `01-AGENT-WORKFRAME.md` §3.2. Salinan itu kini dihapus (dokumen hanya menunjuk), dan salinan core di `skills/antislop/SKILL.md` diperiksa identik dengan core di root.
+- **Terkait:** ADR-0025, ADR-0006 (butir 2 konsekuensinya diamandemen), `skills/README.md`, `AGENTS.md` (blok penunjuk), temuan C-064/C-065, task `T-054`.
 
 ### Q-010 — Temuan audit mana yang diperbaiki? → **RESOLVED sebagian** (2026-09-18, sesi P-008 hingga P-017)
 
@@ -81,7 +78,7 @@ Ditemukan saat memperbaiki C-020 (sesi P-019, temuan C-028). Trigger append-only
 
 ### Q-013 — Mekanisme pencabutan "seluruh token aktif user" → **RESOLVED: kolom per user `users.tokens_invalid_before`, lewat ADR-0021** (2026-09-19, P-026)
 
-**Keputusan: opsi (B), bukan opsi (A) yang dulu lebih disarankan.** Satu kolom di `users`, satu perbandingan di middleware (`iat < tokens_invalid_before` → `401 TOKEN_REVOKED`), tanpa tabel sesi yang tumbuh. Opsi (A) (`session_id` + daftar sesi) **tidak** dibatalkan sebagai kemungkinan kelak — ia dapat dibangun di atas kolom ini tanpa membatalkannya — tetapi MVP tidak membutuhkan *daftar* sesi, hanya kemampuan mematikannya. Keterbatasan yang diterima dengan sadar: `logout_all` juga mematikan sesi di perangkat lain, dan `change-password` menyelesaikannya dengan **menerbitkan token baru** untuk request yang sedang berjalan (bukan dengan `keepJTI`, yang tidak dinyatakan oleh penanda per user). Sumber pertimbangan: §3 di bawah (denylist `jti` vs penanda per user). Task: **`T-040`** (menyertai `T-034`); sampai selesai, `501 NOT_IMPLEMENTED` tetap benar.
+**Keputusan: opsi (B), bukan opsi (A) yang dulu lebih disarankan.** Satu kolom di `users`, satu perbandingan di middleware (`iat < tokens_invalid_before` → `401 TOKEN_REVOKED`), tanpa tabel sesi yang tumbuh. Opsi (A) (`session_id` + daftar sesi) **tidak** dibatalkan sebagai kemungkinan kelak — ia dapat dibangun di atas kolom ini tanpa membatalkannya — tetapi MVP tidak membutuhkan *daftar* sesi, hanya kemampuan mematikannya. Keterbatasan yang diterima dengan sadar: `logout_all` juga mematikan sesi di perangkat lain, dan `change-password` menyelesaikannya dengan **menerbitkan token baru** untuk request yang sedang berjalan (bukan dengan `keepJTI`, yang tidak dinyatakan oleh penanda per user). Sumber pertimbangan: §3 di bawah (denylist `jti` vs penanda per user). Task: **`T-040`** (menyertai `T-034`) — **DONE pada P-030**: `logout_all` mencabut seluruh sesi lewat `users.tokens_invalid_before` dan `501 NOT_IMPLEMENTED` tidak ada lagi.
 
 Ditemukan saat mengerjakan `T-005` (P-021, temuan **C-033**). ADR-0009 butir 3 dan `42-API.md` §2 menjanjikan lebih dari yang dapat dilakukan skema: tabel `token_revocations` hanya memuat `jti` yang **sudah** dicabut, dan sistem tidak menyimpan daftar sesi/token aktif. Tiga janji yang bergantung padanya: `logout_all: true`, "cabut seluruh token lain" pada `POST /auth/change-password` (FR-AUTH-09), dan hal yang sama pada reset password Administrator (FR-AUTH-08).
 
@@ -89,7 +86,8 @@ Ditemukan saat mengerjakan `T-005` (P-021, temuan **C-033**). ADR-0009 butir 3 d
 - **Opsi B — kolom `users.tokens_valid_after`**: token dengan `iat` lebih lama ditolak. Paling murah (satu kolom, satu perbandingan), tetapi `logout_all` **juga** mematikan sesi di perangkat lain yang belum melakukan apa-apa, dan "kecuali sesi yang sedang dipakai" pada `change-password` tidak dapat dinyatakan tanpa mekanisme tambahan.
 - **Opsi C — turunkan janji**: logout mencabut token yang dipakai saja; `logout_all` dan pencabutan sesi lain dibuang dari MVP, `42-API.md` §2 dan ADR-0009 disesuaikan. Tidak ada perubahan skema.
 
-- **Asumsi sementara yang sudah dijalankan:** `logout_all: true` dibalas `501 NOT_IMPLEMENTED` — bukan 200 dengan efek sebagian (`42-API.md` §2/§12). `change-password` dan `refresh` belum didaftarkan sebagai route (kontraknya tetap tertulis sebagai rencana).
+- **Status per P-030:** `logout_all: true` → `200` — seluruh sesi user dicabut lewat `users.tokens_invalid_before` (`42-API.md` §2/§12; `501 NOT_IMPLEMENTED` dihapus). `change-password` dan `refresh` **belum** didaftarkan sebagai route (`T-034`), tetapi mekanisme pencabutan sesinya sudah jalan.
+- **Status per P-034:** `POST /auth/change-password` **sudah berjalan** — `users.tokens_invalid_before` disetel, lalu token pengganti diterbitkan sesudah commit; token lama dan token perangkat lain `401 TOKEN_REVOKED`, sesi user lain tidak tersentuh (`70-TESTING.md` §3.12c). Yang **belum** hanya `POST /auth/refresh`, dan itu bukan lagi soal mekanisme pencabutan melainkan bentuk tokennya: **Q-020** (task `T-045`).
 - **Dampak bila tidak dijawab:** FR-AUTH-08/FR-AUTH-09 tetap `TODO`, dan dua baris kontrak di `42-API.md` §2 tetap tidak dapat dijalankan. Tidak menghalangi modul lain.
 - **Terkait:** ADR-0009, `42-API.md` §2/§12, `41-DATABASE.md` §2.1, `40-TSD.md` §2.4/§5.2.1, `internal/repository/token_revocation_repository.go`, temuan C-033, task `T-005`/`T-034`.
 
@@ -201,6 +199,11 @@ kode error baru, mis. `409`).
 §4.1 menyebutkannya untuk UI, tetapi `42-API.md` §4 hanya memuat `project_id`, `status`, `page`,
 `limit`, `search`; menambah parameter dilakukan di `42-API.md` lebih dulu, bukan di kode saja.
 
+> **Catatan P-047 (tempat penyaring `Milik saya`):** sub-item sidebar yang dahulu menjadi jalan masuk
+> `?view=mine` dipindahkan ke **baris tab di halaman Documents** (`51-UX.md` §2.1). Deep link-nya tetap
+> berjalan seperti sebelumnya, dan karena tabnya kini terlihat di halaman, alasan butir (8) tetap terbaca
+> oleh siapa pun — bukan hanya oleh orang yang menghafal URL-nya. Status pertanyaan ini **tidak berubah**.
+
 - **Asumsi sementara:** kedelapan butir berlaku seperti yang diimplementasikan pada P-023 dan sudah
   ditulis di `42-API.md` §4, `44-SECURITY.md` §3.1.3/§4.2, `50-FSD.md` §4.2/§4.3, dan `40-TSD.md` §2.3-§2.6.
 - **Terkait:** FR-DOC-01..07, FR-VER-01..06, `T-037`, temuan C-040/C-042 (koreksi yang menyertainya).
@@ -259,7 +262,7 @@ agen karena dokumen hanya menyebut "field read-only".
 memuat "Due date range", tidak ada dokumen lain yang menetapkan semantiknya (temuan **C-046**).
 Pilihannya:
 
-- **(a) ✓ DIPILIH** — dua parameter RFC 3339, diimplementasikan sebagai interval **setengah terbuka** `[due_from, due_to)`: batas bawah inklusif, batas atas eksklusif. Alasan pilihan ini (bukan inklusif-inklusif seperti usulan awal): rentang bersebelahan (mis. per bulan) tidak tumpang tindih dan tidak melewatkan baris, dan konvensi itu yang dipakai API publik besar — Stripe memakai `created[gte]` + `created[lt]`. Zona waktu eksplisit dari klien, jadi tidak ada tafsir diam-diam.
+- **(a) ✓ DIPILIH agen pada P-026, lalu DIKOREKSI USER pada 2026-09-19 (P-028)** — dua parameter RFC 3339. Semula diimplementasikan sebagai interval **setengah terbuka** `[due_from, due_to)`: batas bawah inklusif, batas atas eksklusif, dengan alasan rentang bersebelahan tidak tumpang tindih dan konvensi API publik besar (Stripe `created[gte]` + `created[lt]`). **Semantik yang berlaku sekarang: keduanya inklusif** `[due_from, due_to]`, karena user meminta batas inklusif dan pilihan inklusif-inklusif memang dinyatakan reversibel pada butir Status di bawah. Akibatnya: task yang `due_date`-nya tepat sama dengan salah satu batas ikut terpilih, `due_to == due_from` sah (satu instan), hanya rentang terbalik yang ditolak `422`, dan rentang bersebelahan dapat tumpang tindih — klien yang ingin tidak tumpang tindih harus mengirim batas atas satu satuan sebelum batas bawah berikutnya. Perubahan ini tidak menyentuh skema; kontraknya di `42-API.md` §6, testnya `TestTaskListDueRangeFilterIsInclusiveBothEnds`, bukti server nyata di `prompts/P-028-*.md` §6.
 - (b) Ditolak: parameter tanggal `YYYY-MM-DD` menuntut server menetapkan satu zona waktu tetap dan menafsirkannya sendiri — satu konfigurasi baru plus satu tafsir implisit, padahal klien sudah tahu zona waktunya.
 - (c) Ditolak: menyaring di klien atas halaman ber-paginasi menghasilkan hasil yang salah (persis alasan `?overdue=` dibuat server-side).
 
@@ -273,10 +276,13 @@ Penyebabnya `bindJSON` bersama (`internal/handler/project_handler.go`). Pilihann
 - (c) Ditolak: pesannya salah, bukan hanya kurang lengkap.
 - **Dasar best practice:** `uuid.UUID` dan `time.Time` adalah `json.Unmarshaler` kustom yang mengembalikan error tanpa nama field (diperiksa langsung pada Go 1.22 di repo ini: `uuid.invalidLengthError`, bukan `UnmarshalTypeError`), dan `encoding/json` memang hanya mengisi `UnmarshalTypeError.Field`. Panduan umumnya: jangan menyerahkan pelaporan field kepada `encoding/json` — validasi eksplisit (bentuk (b)) atau petakan sendiri seperti dilakukan di sini. Kontrak pemetaannya dicatat di `42-API.md` §12.
 
-- **Status:** butir (1)-(9) berlaku seperti yang diimplementasikan pada P-025; butir (10) dan (11)
-  **diputuskan dan dikerjakan pada P-026** memakai rekomendasi (a) masing-masing, dengan dasar riset di §4.
-  Keduanya tetap reversibel: rentang tanggal dapat diubah menjadi inklusif-inklusif atau `YYYY-MM-DD`,
-  dan atribusi error dapat diganti pendekatan (b), tanpa menyentuh skema.
+- **Status:** butir (1)-(9) berlaku seperti yang diimplementasikan pada P-025. Butir (11) **diputuskan dan
+  dikerjakan pada P-026** memakai rekomendasi (a) dan **masih berlaku apa adanya** (diverifikasi ulang
+  pada P-028: `422` menamai `document_id`/`title`/`due_date`/`body` dan `owner_id` pada `POST /projects`).
+  Butir (10) diputuskan P-026 dengan opsi (a) **setengah terbuka**, lalu **dikoreksi user pada 2026-09-19
+  (P-028)** menjadi **kedua batas inklusif** — itulah yang berlaku sekarang. Keduanya tetap reversibel
+  tanpa menyentuh skema (dan tanpa migrasi): `YYYY-MM-DD` maupun pengembalian ke setengah terbuka masih
+  mungkin, begitu pula pendekatan (b) untuk atribusi error.
 - **Terkait:** FR-TASK-01..07, FR-AUDIT-01, `T-038`, temuan C-045/C-046 (keduanya FIXED pada P-026), `70-TESTING.md` §3.10/§3.11.
 
 ### Q-018 — Urutan fase berikutnya: Comment (menutup Phase 3) atau kembali ke Phase 2 Workflow? (NON-BLOCKING)
@@ -293,7 +299,223 @@ Penyebabnya `bindJSON` bersama (`internal/handler/project_handler.go`). Pilihann
   `documents.status`, optimistic locking, dan notifikasi.
 - **Asumsi sementara:** Comment dikerjakan lebih dulu; bila Anda ingin urutan roadmap dipegang ketat,
   cukup katakan dan Workflow dikerjakan lebih dulu (tidak ada perubahan kode yang terbuang).
+- **Hasil P-027:** **Comment sudah dikerjakan** (`T-042`) dan Phase 3 tertutup, persis seperti rekomendasi.
+  Pertanyaan yang tersisa hanya urutan **sesudahnya**: Workflow (Phase 2) atau modul admin/notification.
 - **Terkait:** `80-ROADMAP.md` §1/§3, `TASKS.md` backlog fase 2/3, temuan C-047.
+
+### Q-019 — Apakah balasan komentar ber-thread (`Reply`) perlu dihidupkan? (NON-BLOCKING)
+
+- **Konteks:** `50-FSD.md` §7 mencantumkan field "Reply (optional, threaded)", sedangkan tabel `comments`
+  (`41-DATABASE.md` §2.5, migrasi `007`) tidak punya kolom induk (`parent_id`/`reply_to_id`). Tabel itu
+  **sudah terpasang** pada database yang berjalan, jadi menambah kolom berarti migrasi baru; dan karena
+  ini mengubah bentuk data, `CONTINUE.md`/`AGENTS.md` mewajibkan **ADR** untuk itu.
+  Ditemukan saat menulis test modul komentar (temuan **C-050**).
+- **Pertanyaan:** apakah threading masuk MVP, ditunda, atau dihapus dari FSD?
+- **Rekomendasi: TUNDA.** Alasannya: (1) tidak ada `FR-CMT-*` yang menuntutnya — `FR-CMT-03` hanya
+  meminta "timeline"; (2) threading bukan sekadar satu kolom: bentuk respons harus diputuskan
+  (datar ber-`parent_id` vs bersarang rekursif), urutan tampilan perlu aturan (kronologis vs per cabang),
+  paginasi menjadi lebih rumit (satu halaman bisa memuat separuh cabang), dan notifikasi
+  `COMMENT_MENTION`/balasan menuntut modul Notification yang belum dibangun; (3) menetapkan bentuk API
+  sebelum ada pemakai nyata berisiko membekukan pilihan yang salah. Alternatif "harga tetap" yang bisa
+  dipilih nanti: kolom `parent_id UUID NULL REFERENCES comments(id)` + tampilan datar dengan penanda
+  "membalas…" — migrasi kecil, tetapi tetap butuh ADR karena mengubah skema.
+- **Asumsi sementara:** balasan ditulis sebagai komentar biasa pada entitas yang sama dan ditampilkan
+  dalam satu timeline datar; `50-FSD.md` §7 sudah menyatakannya sebagai **belum didukung** sehingga tidak
+  ada janji dokumen yang menggantung. Perilaku itu dikunci test
+  (`TestCommentThreadingIsNotSupported`, yang gagal bila kelak kolom induk muncul).
+- **Terkait:** `50-FSD.md` §7/§8.1, `41-DATABASE.md` §2.5, `42-API.md` §7, temuan C-050, `70-TESTING.md` §3.13.
+
+### Q-021 — Refresh token di klien: `sessionStorage` atau cookie `HttpOnly`? (NON-BLOCKING)
+
+- **Konteks:** `42-API.md` §2/ADR-0023 mengembalikan refresh token **di body respons**, dan backend tidak memasang cookie. `frontend/src/services/session.ts` karena itu menyimpan refresh token di `sessionStorage` (`localStorage` ditolak supaya sesi berakhir saat tab ditutup), sedangkan **access token hanya di memori** agar tidak dapat dibaca dari penyimpanan. Praktik yang dituju (OWASP) adalah refresh token di cookie `HttpOnly` + `Secure` + `SameSite`, dengan access token tetap di memori.
+- **Kenapa belum dikerjakan:** memindahkannya **mengubah kontrak backend** (`Set-Cookie` di `login`/`refresh`, `credentials: true`, aturan CORS dengan origin eksplisit, dan `/auth/refresh` menerima token dari cookie alih-alih body). Itu keputusan yang menyentuh ADR-0023 dan `42-API.md`, jadi tidak dikerjakan sendiri oleh agen pada sesi scaffold.
+- **Risiko bila dibiarkan:** XSS yang berhasil berjalan di halaman dapat membaca refresh token dari `sessionStorage` dan mempertahankan sesi lebih lama. Dampaknya dibatasi klaim `typ` (refresh token **tidak** dapat dipakai sebagai bearer — sudah dibuktikan test) dan umur 7 hari, tetapi tetap lebih lemah daripada cookie `HttpOnly`.
+- **Asumsi sementara:** `sessionStorage` sebagai jembatan, terisolasi di **satu berkas** (`services/session.ts`) supaya perpindahan ke cookie hanya menyentuh berkas itu plus `http.ts` (`withCredentials: false`).
+- **Terkait:** ADR-0009/0021/0023, `42-API.md` §2, `44-SECURITY.md` §2.2, `frontend/src/services/session.ts`.
+
+### Q-022 — Konvensi frontend yang diputuskan agen saat scaffold (NON-BLOCKING)
+
+- **Konteks:** membangun kerangka frontend (`T-048`, P-037) menuntut keputusan yang belum ada di dokumen desain. Semuanya diputuskan agen dan dicatat di sini supaya dapat dikoreksi user, bukan ditemukan belakangan sebagai penyimpangan.
+- **Keputusan yang diambil (beserta alasannya singkat):**
+  1. **Tailwind v4 CSS-first, tanpa `tailwind.config.js`** — token hidup di `src/styles/tokens.css` (`@theme` + lapisan semantik). Satu sumber token untuk utility dan CSS biasa. Dikunci **ADR-0024**.
+  2. **React Router 7 library mode** (bukan framework mode) — SPA tanpa SSR, sesuai ADR-0002.
+  3. **`VITE_API_BASE_URL` default relatif `/api/v1`** — memakai proxy dev server Vite, jadi tidak perlu CORS dibuka lebar; produksi juga relatif karena web server yang mem-proxy.
+  4. **`withCredentials: false`** sampai Q-021 selesai.
+  5. **Penukaran refresh di klien bersifat single-flight** — banyak permintaan yang gagal bersama hanya memicu **satu** penukaran, karena ADR-0023 tidak mencabut refresh token lama saat rotasi sehingga penukaran berulang tidak menambah keamanan.
+  6. **Zustand hanya untuk keadaan klien** (sesi, tema). Hasil API **tidak** disimpan di sana; pustaka server-state (**TanStack Query**) akan ditambahkan bersama halaman data pertama, dan itu disebut di `30-ARCHITECTURE.md` §2.1.
+  7. **Halaman menu yang belum dibangun tampil sebagai `ModulePending`** yang menyebut apa yang belum ada — bukan tabel kosong atau angka contoh. Aturan yang sama untuk Dashboard (R-18/R-36).
+  8. **Motif "punggung rekam" (`DESIGN.md` §6) dijalankan lewat token, bukan CSS ad-hoc** — garis status pada baris tabel memakai pasangan `--color-status-*-ink`.
+- **Risiko bila salah:** semuanya konvensi internal yang murah dibalik; yang paling mahal adalah (1) dan (6) karena menyentuh banyak berkas.
+- **Terkait:** `30-ARCHITECTURE.md` §2.1/§2.2, ADR-0024, `60-DEPLOYMENT.md` §3.2, `frontend/src/services/*`.
+
+### Q-023 — Lisensi proyek dan kebijakan kontribusi pihak ketiga (BLOCKING untuk distribusi, NON-BLOCKING untuk pengembangan)
+
+- **Konteks:** `README.md` §13 menyatakan status lisensi **belum ditetapkan**, dan repositori ini memang
+tidak punya berkas `LICENSE`, tidak punya field `license` di `frontend/package.json`, dan tidak punya
+`CONTRIBUTING.md`. Sesi P-038 meminta pemilik proyek menetapkan lisensinya sebelum berkas `LICENSE`
+dibuat — dan pemilik memilih **menunda keputusan itu** sambil tetap menjawab siapa **pemegang hak cipta**-nya.
+- **Yang sudah dijawab pemilik (2026-09-21, P-038):**
+  - **Butir (b) — pemegang hak cipta: `BSA`** (pribadi pemilik proyek). Ini yang akan ditulis pada baris
+    hak cipta berkas `LICENSE` begitu jenis lisensinya ditetapkan; tercatat juga di `README.md` §13.
+- **Yang masih menunggu keputusan pemilik:**
+  - **Butir (a) — jenis lisensi.** Belum diputuskan. Pilihan yang sudah disiapkan agen: proprietary
+    *all rights reserved* (paling konsisten dengan alat internal perusahaan, dan menegaskan keadaan
+    bawaan yang sudah berlaku), **MIT** (paling ringkas dan umum untuk proyek publik), atau **Apache-2.0**
+    (permisif plus pemberian lisensi paten eksplisit). Sampai diputuskan, **tidak ada** yang boleh
+    menganggap proyek ini open source, dan agen tidak boleh membuat berkas `LICENSE` sendiri.
+  - **Butir (c) — apakah kontribusi pihak ketiga diterima**, dan lewat kanal apa (pelacak isu, surel,
+    atau pull request). Saat ini jalur satu-satunya adalah ledger: entri di `TASKS.md` untuk usulan kerja
+    dan `OPEN-QUESTIONS.md` untuk hal yang butuh keputusan pemilik.
+- **Konsekuensi bila ditunda terus:** tidak ada perubahan pada pengembangan (build, test, dan migrasi
+  tidak bergantung pada lisensi). Yang tertahan hanya **distribusi dan penerimaan kontribusi luar**:
+  tanpa lisensi, pihak ketiga tidak punya hak apa pun atas kode ini — termasuk hak untuk ikut
+  menyumbang dengan aman secara hukum. Karena itu butir (a) dan (c) sebaiknya dijawab bersamaan.
+- **Asumsi sementara:** pengembangan berjalan seolah proyek ini privat (module Go-nya pun sudah privat:
+  `bwdcs/backend`, tanpa domain), `frontend/package.json` tetap `"private": true` tanpa field `license`,
+  dan tidak ada berkas `LICENSE` yang dibuat. Tidak ada kode yang bergantung pada asumsi ini.
+- **Terkait:** `README.md` §12.6/§13, ADR-0004 (mekanisme deployment fleksibel), `docs/progress/TASKS.md` **T-050**.
+
+### Q-025 — Apakah prosa dokumen dan komentar kode lama juga disapu em dash? (NON-BLOCKING)
+
+- **Konteks:** aturan **R-02** melarang em dash pada teks yang ditulis agen, dan keputusan proyeknya di
+  `01-AGENT-WORKFRAME.md` §3.2 semula berbunyi "semua teks UI **dan dokumentasi baru** bebas em dash" —
+  tetapi tidak ada pemeriksa yang membaca keputusan itu, sehingga tiga teks di layar memang masih
+  memuatnya (temuan **C-069**, ditutup P-043). Sejak P-043 yang diperiksa mesin adalah **teks yang dibaca
+  pengguna** (`frontend/src`, tanpa komentar), dan baris §3.2 sudah dipersempit agar tidak menjanjikan
+  lebih dari yang ditegakkan.
+- **Yang belum diputuskan:** prosa di `docs/**` dan komentar kode **lama** masih memakai em dash sebagai
+  tanda pisah dalam kalimat Indonesia (ratusan kemunculan, tersebar di hampir seluruh berkas). Menyapunya
+  berarti menyunting prosa teknis dalam jumlah besar: risikonya bukan pada alat (penggantian mekanis
+  mudah) melainkan pada **makna** — banyak kalimat memakai tanda itu untuk sisipan yang tidak setara
+  dengan koma, sehingga penggantian buta menghasilkan kalimat yang salah baca.
+- **Pilihan:**
+  - **(a) Biarkan pada cakupan sekarang** (hanya teks yang dibaca pengguna yang diperiksa). Paling murah,
+    dan yang benar-benar dibaca pengguna akhir sudah bersih. Risikonya: aturan upstream lebih luas
+    daripada yang ditegakkan, sehingga selisihnya harus tetap dinyatakan di §3.2 — seperti sekarang.
+  - **(b) Sapu juga dokumentasi baru ke depan** (berlaku untuk berkas yang dibuat sesudah aturan ini),
+    tanpa menyentuh prosa lama. Menambah disiplin tanpa gelombang suntingan besar; menuntut pemeriksa
+    yang tahu "berkas baru", dan itu tidak dapat diperiksa mesin tanpa daftar tambahan.
+  - **(c) Sapu seluruh repo sekarang**, termasuk prosa dan komentar lama, dengan pemeriksa yang diperluas
+    ke `docs/**`. Konsisten dengan aturan upstream, tetapi diff-nya besar (menyentuh hampir setiap
+    dokumen) dan setiap kalimat perlu dibaca ulang untuk menjaga maknanya.
+- **Rekomendasi agen:** **(a) sekarang, (b) saat berkas baru ditulis** — karena teks yang benar-benar
+  sampai ke pengguna sudah dijaga mesin, sedangkan (c) paling baik dikerjakan bersamaan dengan sesi yang
+  memang menyentuh dokumen itu, bukan sebagai gelombang tersendiri yang menenggelamkan perubahan lain.
+- **Keputusan Anda:** _(belum dijawab)_
+
+### Q-026 — Target sentuh di desktop: pertahankan 36px (padat) atau naikkan ke 44px? (NON-BLOCKING)
+
+- **Konteks:** `DESIGN.md` §4 menetapkan kepadatan alat kerja: baris tabel dan kontrol 36px di desktop,
+  44px di layar sentuh (`tap-target` di `tokens.css` membalik nilainya pada `min-width: 64rem`). Keputusan
+  itu beralasan (alat kerja yang padat menampilkan lebih banyak baris dalam satu layar), tetapi aturan
+  kerajinan layar sentuh menulis ambang **44px tanpa kualifikasi**, dan Delivery Gate menanyakannya
+  sebagai satu butir yang harus dijawab "ya". Sejak P-043 ambangnya **diukur mesin** per lebar
+  (`scripts/responsive-evidence.mjs`: 44px < 1024px, 36px ≥ 1024px) dan keputusannya dinyatakan di
+  `51-UX.md` §9, jadi tidak ada lagi klaim yang tidak diperiksa — yang tersisa hanya ketegangan antara
+  dua aturan itu sendiri.
+- **Pilihan:**
+  - **(a) Pertahankan dua register** (44px sentuh, 36px desktop) dengan alasan tertulis seperti sekarang.
+    Rekomendasi agen: halaman ini alat kerja internal, sasarannya kursor di desktop, dan mode sentuhnya
+    sudah memenuhi syarat.
+  - **(b) Naikkan semuanya ke 44px**, termasuk desktop. Paling aman terhadap aturan, dengan biaya:
+    baris tabel dan kontrol menjadi lebih tinggi, informasi per layar berkurang sekitar seperlima.
+  - **(c) Naikkan hanya kontrol yang sering dipakai** (tombol aksi, item navigasi) sementara baris tabel
+    tetap 36px. Menuntut daftar kontrol yang "sering dipakai" — dan daftar seperti itu tidak dapat
+    diperiksa mesin, jadi ia menambah aturan yang harus diingat manusia.
+- **Rekomendasi agen:** **(a)**, karena alasan kepadatannya memang tertulis dan kini diukur, dan karena
+  (b) mengubah tata letak demi memenuhi ambang yang jelas-jelas dimaksudkan untuk layar sentuh.
+- **Keputusan Anda:** _(belum dijawab)_
+
+### Q-024 — Bagaimana klien memilih **pengguna** (field `Owner` project) tanpa endpoint daftar pengguna? (NON-BLOCKING)
+
+- **Konteks:** `50-FSD.md` §3.2 mencantumkan field `Owner` sebagai **wajib** dan bertipe "dropdown / User
+  select", plus aturan server "`Owner` yang dipilih langsung menjadi anggota project dengan role Owner".
+  Halaman **Projects** dibangun pada P-041 dan tidak dapat memenuhinya: **tidak ada satu pun endpoint**
+  yang dapat menyebutkan daftar pengguna — `42-API.md` §3 tidak memuatnya, `GET /admin/users` (§11)
+  belum diimplementasikan, dan izin `user:read` menurut matriks `44-SECURITY.md` §3.1.2 hanya dimiliki
+  **Administrator**, sementara halaman Administrasi juga belum ada. Ditemukan saat **membangun**
+  halamannya, bukan dari membaca kontrak — dicatat sebagai temuan **C-063**.
+- **Yang dilakukan sementara (tidak menunggu keputusan):** dialog membuat project menampilkan pemilik
+  sebagai teks tetap **(Anda)**, halaman detail menyebut batas yang sama, dan test mengunci perilaku itu
+  supaya tidak berubah menjadi dropdown kosong atau daftar pengguna karangan. Artinya **owner selalu
+  pembuat project**; perilaku itu sah menurut `POST /projects` (server menambahkan pemilik sebagai
+  anggota `Owner` dalam transaksi yang sama), hanya tidak memenuhi "User select" di FSD.
+- **Pilihan yang disiapkan agen:**
+  - **(a) Tambah satu endpoint baca daftar/pencarian pengguna** (`GET /users?q=&limit=`, terpaginasi,
+    tanpa detail sensitif) dan tetapkan izinnya lewat ADR — memakai ulang `user:read` (Administrator)
+    berarti pemilih pengguna hanya jalan bagi Administrator, atau menambah pasangan baru
+    (`user:list`, semua role internal) berarti matriks `44-SECURITY.md` §3.1.2 berubah dan itu selalu
+    butuh ADR (ADR-0014). **Rekomendasi agen**, karena `Owner` di FSD bukan hiasan: tanpanya project
+    hanya dapat dibuat oleh dan untuk pembuatnya, Administrator tidak dapat menyerahkan kepemilikan,
+    dan halaman **Members** (`42-API.md` §3) tidak dapat dibangun sama sekali.
+  - **(b) Turunkan FSD §3.2 untuk MVP** menjadi "pemilik selalu pembuat project", lalu hapus janji
+    "User select" beserta kalimat aturan servernya — murah, tetapi menghapus kemampuan menyerahkan
+    kepemilikan dari dokumen, dan itu keputusan produk.
+  - **(c) Gabungkan dengan modul Administration** (`42-API.md` §11): kerjakan `GET /admin/users` beserta
+    halaman Administrasi lebih dulu, lalu pemilih pengguna di halaman Projects memakai endpoint itu
+    (hanya untuk Administrator). Paling lengkap, paling lama, dan tetap menyisakan masalah (b).
+- **Dampak bila ditunda:** **tidak menghalangi** halaman Projects, Documents, Tasks, Approvals, maupun
+  Reports — hanya form anggota project dan pemilihan owner di halaman Projects yang tertahan, dan
+  keduanya sudah dinyatakan terbuka di layar (C-063), bukan disenyapkan.
+- **Terkait:** temuan **C-063**, `50-FSD.md` §3.2, `42-API.md` §3 dan §11, `44-SECURITY.md` §3.1.2 (ADR-0014),
+  `frontend/src/pages/Projects/CreateProjectDialog.tsx` + `ProjectDetail.tsx`.
+
+### Q-020 — Bentuk token `POST /auth/refresh` → **RESOLVED: JWT bertanda `typ` tanpa penyimpanan di server, lewat ADR-0023** (2026-09-20, P-034)
+
+**Keputusan: opsi (A).** Refresh token adalah JWT kedua dari penerbit yang sama, bertanda klaim
+`typ: refresh` (`access` untuk token akses), berumur **7 hari** sebagai konstanta kode `jwt.RefreshExpiry`,
+**tidak disimpan di server**, dan tanpa migrasi apa pun. Klaim `typ` **wajib**: token tanpa `typ` ditolak,
+refresh token tidak pernah diterima middleware, dan access token tidak pernah diterima endpoint refresh.
+Login menerbitkan keduanya; setiap penukaran mengembalikan sepasang token baru sehingga jendela 7 hari
+bergulir. Pencabutannya memakai jalur yang **sama** (ADR-0021 butir 6), sehingga `logout_all` dan
+`change-password` otomatis mematikan refresh token lama. **Batas yang diterima sadar:** token lama tidak
+dicabut saat rotasi karena bentuknya stateless, jadi pemakaian ulang tidak dapat dideteksi; opsi (B)
+yang lebih kuat (token buram ber-rotasi di tabel sendiri, pola OWASP) **tidak** dibatalkan sebagai
+kemungkinan kelak, dan `TestRefreshKeepsPreviousRefreshTokenValid` sengaja ditulis untuk gagal lebih dulu
+bila mekanismenya kelak diganti. Opsi (C) (menghapus endpoint dari kontrak) ditolak karena user memilih
+agar kontrak di `42-API.md` §2 benar-benar berjalan. **Hasil:** route hidup, ADR-0023 `ACCEPTED`,
+task **`T-045`** `DONE`, dan `POST /auth/login` kini juga mengembalikan `refresh_token`.
+
+- **Konteks:** `42-API.md` §2 sudah memuat `POST /auth/refresh` sejak lama, dan `40-TSD.md` §2.4
+  mencantumkan `Refresh(refreshToken string) (*AuthToken, error)` pada sketsa `AuthService`. Yang
+  **belum** ada adalah bentuk tokennya: tidak ada tabel maupun kolom untuk menyimpannya, tidak ada
+  requirement `FR-AUTH-*` yang menuntutnya, dan `44-SECURITY.md` §2.2 hanya menyebut "Refresh token:
+  optional, 7 hari expiration" tanpa mekanisme. Karena itu `42-API.md` §2 memuat larangan eksplisit:
+  **jangan mengarang bentuk refresh token di kode sebelum ada keputusan**. Ditemukan saat mengerjakan
+  `T-034` (P-034), yang akhirnya hanya dapat menyelesaikan `change-password`.
+- **Yang sudah diputuskan, dan mengikat apa pun jawabannya nanti:** pemeriksaan pencabutan refresh
+  memakai jalur yang **sama** dengan endpoint terproteksi lain — token ditolak bila `jti`-nya ada di
+  `token_revocations` **atau** `iat`-nya lebih tua daripada `users.tokens_invalid_before` (ADR-0009
+  butir 7 + ADR-0021 butir 6). Refresh tidak boleh punya jalur pemeriksaan sendiri. Konsekuensinya:
+  `logout_all` dan `change-password` otomatis membuat refresh token lama tidak berguna.
+- **Pertanyaan:** token refresh disimpan bagaimana, dan berapa masa berlakunya?
+- **Opsi A — JWT bertanda `typ` (tanpa migrasi), *rekomendasi*.** Refresh token adalah JWT kedua dengan
+  klaim pembeda (`typ: refresh`), masa berlaku 7 hari (sesuai `44-SECURITY.md` §2.2), dan divalidasi
+  lewat pemeriksaan pencabutan yang sudah ada. Kelebihannya: nol perubahan skema, nol tabel baru yang
+  harus dibersihkan, dan sejalan dengan ADR-0021 butir 6 yang memang menyebut refresh "memakai kolom
+  yang sama sebagai pemeriksaan tunggal". Batasannya jujur: rotasi tidak dapat **dideteksi** (tidak ada
+  penyimpanan), jadi refresh token yang dicuri tetap sah sampai `exp` kecuali `jti`-nya dicabut
+  eksplisit atau sesinya dimatikan lewat `tokens_invalid_before`.
+- **Opsi B — token buram (opaque) tersimpan ter-hash, dengan rotasi + deteksi pemakaian ulang.** Tabel
+  baru `refresh_tokens` (`user_id`, `token_hash`, `expires_at`, `revoked_at`, `replaced_by`), token
+  dikirim sekali dan diganti tiap kali dipakai; pemakaian token yang sudah diganti dianggap pencurian dan
+  mematikan seluruh keluarga sesi. Ini pola yang direkomendasikan OWASP untuk refresh token. Harganya:
+  migrasi `011`, ADR baru, dan satu tabel yang harus dirawat (pembersihan berkala seperti
+  `token_revocations`).
+- **Opsi C — turunkan janji: `POST /auth/refresh` dihapus dari kontrak.** Argumentasinya kuat dan
+  sederhana: token akses berlaku 24 jam (`JWT_EXPIRY`), tidak ada `FR-AUTH-*` yang menuntut refresh, dan
+  menambah kredensial berumur panjang justru memperbesar permukaan serangan untuk sistem internal
+  berjumlah pengguna kecil. Kalau dipilih, `42-API.md` §2 dan sketsa `40-TSD.md` §2.4 dibersihkan, dan
+  `T-045` ditutup sebagai `CANCELLED`.
+- **Asumsi sementara:** route `POST /auth/refresh` **tidak didaftarkan** dan kodenya tidak ditulis;
+  `42-API.md` §2 menyatakan itu apa adanya beserta alasannya, `40-TSD.md` §2.4 menandai `Refresh` belum
+  ada, dan `T-045` berada di papan `BLOCKED`. Tidak ada perilaku yang menggantung: token akses 24 jam
+  tetap berlaku, dan pencabutannya sudah jalan penuh.
+- **Dampak bila tidak dijawab:** satu-satunya efeknya `T-045` tetap terbuka. Tidak menghalangi modul
+  lain, tidak menghalangi Workflow, dan tidak membuat `change-password` setengah jalan. **Answer ini sudah
+  diberikan pada P-034**, jadi tidak ada lagi yang menggantung di sini.
+- **Terkait:** `42-API.md` §2, `44-SECURITY.md` §2.2, `40-TSD.md` §2.4/§6, ADR-0009 butir 7,
+  ADR-0021 butir 6, `70-TESTING.md` §3.12c, `TASKS.md` `T-034`/`T-045`.
 
 ### Q-009 — Izin penyiapan toolchain → **RESOLVED: DIIZINKAN** (2026-09-18, sesi P-018)
 
@@ -355,6 +577,33 @@ Penyebabnya `bindJSON` bersama (`internal/handler/project_handler.go`). Pilihann
 - **Resolusi:** diarahkan ke sumber tunggal `docs/adr/` (lihat `docs/adr/README.md`). Kedua section lama sekarang hanya menunjuk ke sana.
 
 ---
+
+
+### Q-DASH-01 — Department / organisasi unit untuk filter & chart (NON-BLOCKING, Phase 5)
+
+- **Konteks:** `Dashboard.md` §1.7/§2.7/§6 meminta `Documents by Department`, `Workflow Volume by Department`, filter `Department`. Skema `41-DATABASE.md` hanya punya `organizations` (tenant) dan `projects` — tidak ada hierarki department. MVP dashboard (`52-DASHBOARD-ANALYTICS.md` §4.1) menahan chart itu sampai struktur didefinisikan.
+- **Pertanyaan:** apakah department = subset `projects` (mis. `projects.department` ENUM), tabel baru `departments` + `project_department_id`, atau `users.department` + `documents.owner.department`? Masing-masing menambah DDL berbeda.
+- **Rekomendasi agen:** tunda sampai kebutuhan organisasi nyata ada; untuk MVP gunakan `project` sebagai proxy department, jangan menambah kolom nullable yang tidak jelas dipakai.
+- **Dampak bila ditunda:** chart by Department di Dashboard.md akan kosong di MVP, tetapi 8 chart MVP lain tetap hidup.
+- **Terkait:** `Dashboard.md` §1.7, `52-DASHBOARD-ANALYTICS.md` §4.1, task `T-074`.
+
+### Q-DASH-02 — Definisi SLA Compliance (On Time / Late / Overdue) (NON-BLOCKING)
+
+- **Konteks:** KPI `SLA Compliance Rate` dan chart `SLA Compliance`/`SLA Trend` (`Dashboard.md` §1.6, §2.4) menulis tiga bucket tanpa rumus. `workflow_steps.deadline_days` dan `workflow_instances.current_step_deadline` sudah ada (ADR-0015), tetapi kapan sebuah workflow dianggap Late? `completed_at > deadline` pertama? `current_step_deadline` lewat saat masih `running`? Butuh ADR.
+- **Opsi:** (a) `On Time = completed_at <= max(step deadines) OR still running && deadline not passed`, (b) per-step Late, (c) definisi tenant-specific via `system_settings`.
+- **Rekomendasi:** (a) sederhana + dapat dihitung dari kolom yang ada — `completed_at` vs `current_step_deadline` + `workflow_actions` — tanpa `stage_history` baru.
+- **Terkait:** `52-DASHBOARD-ANALYTICS.md` §2.1, task `T-071` (ADR-0026 akan mengikatnya).
+
+### Q-DASH-03 — `review_due_at` / `expiry_at` / `published_at` untuk Document Control (NON-BLOCKING)
+
+- **Konteks:** `Dashboard.md` §3 `Review Due / Overdue`, `Document Expiry / Review Calendar`, `Obsolete Documents` meminta field `review_due_at`, `expiry_at`, `published_at` pada `documents` yang tidak ada di `41-DATABASE.md` §2.3 (hanya `created_at`/`updated_at`/`archived_at`). MVP dashboard menggantikan "Due for Review" dengan "Revised This Month" dari `document_versions` — sisa masuk backlog.
+- **Pertanyaan:** apakah review due dihitung `created_at + N hari` (tanpa kolom) atau disimpan eksplisit? Apakah `Published` = `approved + published_at` terisi?
+- **Rekomendasi:** tunda; masuk Phase 5 dengan migrasi `012` bila keputusan ada — jangan meniru `updated_at + 30 hari` tanpa keputusan.
+
+### Q-DASH-04 — `workflow_stage_history` presisi untuk Average Time per Stage (NON-BLOCKING)
+
+- **Konteks:** `Dashboard.md` §2.2 `Average Time per Workflow Stage` butuh durasi per stage. Sumber yang ada: `workflow_instances` (satu `current_step`, satu deadline) + `workflow_actions` (aksi). Durasi stage presisi butuh `stage_started_at`/`stage_completed_at` per langkah, yang tidak ada. MVP memakai selisih dua aksi berturut (`52-*` §3.1) — estimasi, bukan ukuran.
+- **Rekomendasi:** terima estimasi untuk MVP; bila presisi diminta, buat tabel `workflow_stage_transitions` baru (Phase 5) — jangan menambah trigger history tanpa ADR.
 
 ## 2. Temuan Inkonsistensi Dokumen
 

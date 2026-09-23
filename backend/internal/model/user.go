@@ -18,8 +18,19 @@ type User struct {
 	Email          string    `json:"email"`
 	PasswordHash   string    `json:"-"`
 	IsActive       bool      `json:"is_active"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+
+	// TokensInvalidBefore adalah titik waktu yang memisahkan token sah dari yang
+	// tidak: token dengan `iat` sebelum nilai ini ditolak `401 TOKEN_REVOKED`
+	// (ADR-0021). Default `'epoch'` berarti "belum ada pencabutan massal".
+	TokensInvalidBefore time.Time `json:"tokens_invalid_before"`
+
+	// LockedUntil adalah batas lock sementara akibat percobaan login gagal
+	// berulang (ADR-0022). `nil` = tidak terkunci; lock terbuka sendiri saat
+	// waktunya lewat, tanpa pembersihan oleh siapa pun.
+	LockedUntil *time.Time `json:"locked_until,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Roles diisi hanya bila repository diminta mengambilnya (`Roles`).
 	Roles []string `json:"roles,omitempty"`

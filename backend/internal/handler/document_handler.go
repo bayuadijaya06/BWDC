@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -251,8 +252,16 @@ func (h *DocumentHandler) Download(c *gin.Context) {
 		map[string]string{"Content-Disposition": contentDisposition(download.Version.OriginalName)})
 }
 
-// Delete melayani `DELETE /documents/:id` (200, kaskade ke versi).
-func (h *DocumentHandler) Delete(c *gin.Context) {
+// Archive melayani `POST /documents/:id/archive` (200).
+//
+// Izin `document:update` (Administrator, Manager, Contributor — matriks
+// `44-SECURITY.md` §3.1.2), **bukan** `document:delete`: arsip adalah perubahan
+// keadaan, dan baris `document:delete` disediakan untuk penghapusan permanen
+// yang belum ada di MVP (ADR-0019 butir 4).
+//
+// Response memuat dokumen yang sudah terarsip, sehingga klien tidak perlu
+// memanggil `GET` lagi untuk melihat `status` dan `archived_at`-nya.
+func (h *DocumentHandler) Archive(c *gin.Context) {
 	actor, ok := actorFrom(c)
 	if !ok {
 		return
@@ -263,12 +272,13 @@ func (h *DocumentHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.documents.Delete(c.Request.Context(), actor, documentID); err != nil {
+	detail, err := h.documents.Archive(c.Request.Context(), actor, documentID)
+	if err != nil {
 		h.writeServiceError(c, err)
 		return
 	}
 
-	response.OK(c, nil)
+	h.writeDetail(c, detail, http.StatusOK)
 }
 
 // writeDetail mengirim bentuk `GET /documents/:id` dengan status yang diminta.
@@ -304,6 +314,16 @@ func (h *DocumentHandler) writeServiceError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrDocumentWorkflowRunning):
 		response.Fail(c, http.StatusConflict, response.CodeConflict,
 			"dokumen masih memiliki workflow yang berjalan")
+
+	case errors.Is(err, service.ErrDocumentAlreadyArchived):
+		// Sengaja bukan `200` idempoten: `archived_at` mencatat **kapan** arsip
+		// terjadi, dan permintaan kedua tidak boleh menggesernya (ADR-0019).
+		response.Fail(c, http.StatusConflict, response.CodeConflict,
+			"dokumen sudah diarsipkan")
+
+	case errors.Is(err, service.ErrDocumentArchived):
+		response.Fail(c, http.StatusConflict, response.CodeConflict,
+			"dokumen terarsip tidak dapat menerima versi baru")
 
 	case errors.Is(err, service.ErrDocumentCategoryInvalid):
 		response.Validation(c, []response.FieldError{{
@@ -353,7 +373,8 @@ func documentIDParam(c *gin.Context) (uuid.UUID, bool) {
 }
 
 // parseDocumentListQuery membaca dan memvalidasi query daftar dokumen
-// (`42-API.md` §4: `?project_id=&status=&page=&limit=&search=`).
+// (`42-API.md` §4:
+// `?project_id=&status=&search=&updated_from=&updated_to=&page=&limit=`).
 func parseDocumentListQuery(c *gin.Context) (service.DocumentListFilter, []response.FieldError) {
 	var fields []response.FieldError
 
@@ -390,16 +411,60 @@ func parseDocumentListQuery(c *gin.Context) (service.DocumentListFilter, []respo
 		fields = append(fields, response.FieldError{Field: "search", Error: "maksimal 255 karakter"})
 	}
 
+	// Rentang `updated_at` memakai interval **tertutup** `[updated_from,
+	// updated_to]`: kedua batas inklusif, sama semantiknya dengan
+	// `due_from`/`due_to` pada task (`42-API.md` §6, keputusan user P-028).
+	// Batasnya waktu RFC 3339 dengan offset eksplisit — tidak ada tanggal
+	// tanpa zona waktu yang harus ditebak server. Rentang terbalik ditolak
+	// `422` di field `updated_to`, bukan dikembalikan kosong diam-diam;
+	// `updated_to == updated_from` sah dan berarti satu instan.
+	var updatedFrom, updatedTo *time.Time
+	if raw := strings.TrimSpace(c.Query("updated_from")); raw != "" {
+		parsed, err := parseRFC3339Query(raw)
+		if err != nil {
+			fields = append(fields, response.FieldError{Field: "updated_from", Error: "harus waktu RFC 3339 yang sah"})
+		} else {
+			updatedFrom = &parsed
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("updated_to")); raw != "" {
+		parsed, err := parseRFC3339Query(raw)
+		if err != nil {
+			fields = append(fields, response.FieldError{Field: "updated_to", Error: "harus waktu RFC 3339 yang sah"})
+		} else {
+			updatedTo = &parsed
+		}
+	}
+	if updatedFrom != nil && updatedTo != nil && updatedTo.Before(*updatedFrom) {
+		fields = append(fields, response.FieldError{
+			Field: "updated_to",
+			Error: "harus lebih besar atau sama dengan updated_from (kedua batas inklusif)",
+		})
+	}
+
+	var categoryID *uuid.UUID
+	if raw := strings.TrimSpace(c.Query("category_id")); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			fields = append(fields, response.FieldError{Field: "category_id", Error: "harus UUID yang sah"})
+		} else {
+			categoryID = &parsed
+		}
+	}
+
 	if len(fields) > 0 {
 		return service.DocumentListFilter{}, fields
 	}
 
 	return service.DocumentListFilter{
-		ProjectID: projectID,
-		Status:    status,
-		Search:    search,
-		Page:      page,
-		Limit:     limit,
+		ProjectID:   projectID,
+		Status:      status,
+		Search:      search,
+		UpdatedFrom: updatedFrom,
+		UpdatedTo:   updatedTo,
+		CategoryID:  categoryID,
+		Page:        page,
+		Limit:       limit,
 	}, nil
 }
 

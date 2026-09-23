@@ -115,7 +115,7 @@ func Logger(logger *slog.Logger) gin.HandlerFunc
 func CORS(isProduction bool) gin.HandlerFunc
 ```
 
-Middleware mendefinisikan **interface kecil untuk dependensinya** (`TokenValidator`, `RevocationChecker`, `PermissionChecker`) dan tidak mengimpor package service/repository. Alasannya: arah dependensi tetap satu arah dan middleware dapat diuji tanpa database.
+Middleware mendefinisikan **interface kecil untuk dependensinya** (`TokenValidator`, `SessionChecker`, `PermissionChecker`) dan tidak mengimpor package service/repository. Alasannya: arah dependensi tetap satu arah dan middleware dapat diuji tanpa database.
 
 > **Tidak ada package `auth`.** Bentuk lama `*auth.PermissionChecker` adalah paket hantu — pohon struktur di §2.0 tidak pernah memuatnya (temuan **C-034**). Pemeriksa izin berada di `service.PermissionChecker`; middleware hanya melihat interface-nya.
 
@@ -123,8 +123,8 @@ Pembagian tanggung jawab rate limit (dua-duanya berlaku dan menutup hal berbeda)
 
 | Lapisan | Satuan | Isi |
 |---|---|---|
-| `RateLimitMiddleware` | alamat klien | Batas request per jendela waktu untuk satu endpoint (dipakai `POST /auth/login`) |
-| `service.LoginGuard` | username | FR-AUTH-06: 5 percobaan **gagal** per 15 menit; ambang dibaca dari `system_settings` |
+| `RateLimitMiddleware` | alamat klien | Batas request per jendela waktu untuk satu endpoint (dipakai `POST /auth/login`: 20/menit → `429`) |
+| Hitungan `login_attempts` (bukan lagi middleware) | username yang dicoba | FR-AUTH-06: 5 percobaan **gagal** per 15 menit; ambang dari `system_settings`; lampaui → lock akun → `423 LOCKED` (ADR-0022, `T-041`) |
 
 `CORS` sengaja tidak punya environment variable: di produksi header CORS tidak dipasang (frontend satu origin di belakang reverse proxy), di development hanya origin loopback yang diizinkan.
 
@@ -314,6 +314,11 @@ type Comment struct {
     Content    string    `json:"content" validate:"required,max=2000"`
     CreatedByID uuid.UUID `json:"created_by_id"`
     CreatedAt  time.Time `json:"created_at"`
+    // CreatedByUsername adalah kolom turunan (JOIN `users`), bukan kolom tabel:
+    // tampilan komentar selalu menampilkan penulis (`50-FSD.md` §7).
+    CreatedByUsername string `json:"created_by_username"`
+    // Tidak ada `UpdatedAt`: kolomnya tidak ada di tabel `comments`
+    // (`41-DATABASE.md` §2.5). Jejak penyuntingan ada di `audit_logs`.
 }
 
 type Notification struct {
@@ -350,7 +355,7 @@ package service
 // AuthService
 type AuthService interface {
     Login(username, password string) (*AuthToken, error)
-    Refresh(refreshToken string) (*AuthToken, error)
+    Refresh(refreshToken string) (*AuthToken, error) // ADR-0023: menukar refresh token bertanda `typ` dengan sepasang token baru
     Logout(token string, logoutAll bool) error        // mencabut jti; lihat ADR-0009
     RevokeAllForUser(userID uuid.UUID, reason string) error // dipakai saat password berubah/reset & akun dinonaktifkan
     CreateUser(input CreateUserInput) (*model.User, error)
@@ -394,13 +399,17 @@ type DocumentService interface {
     UploadVersion(actor Actor, docID uuid.UUID, input UploadVersionInput) (*model.DocumentVersion, error)
     Versions(actor Actor, docID uuid.UUID) ([]model.DocumentVersion, error)
     Download(actor Actor, docID, versionID uuid.UUID) (*DocumentDownload, error)
-    Delete(actor Actor, docID uuid.UUID) error
+    Archive(actor Actor, docID uuid.UUID) (*DocumentDetail, error)
 }
 
 // Aksi audit modul dokumen (FR-AUDIT-01): DOCUMENT_CREATED, DOCUMENT_VERSION_CREATED,
-// DOCUMENT_DOWNLOADED, dan DOCUMENT_DELETED. Semuanya ditulis lewat AuditService
+// DOCUMENT_DOWNLOADED, dan DOCUMENT_ARCHIVED. Semuanya ditulis lewat AuditService
 // di dalam transaksi pemanggil; `DOCUMENT_DOWNLOADED` memakai transaksi singkat
 // tersendiri karena aksinya read-only (ADR-0011 butir 4).
+//
+// `Archive` menggantikan `Delete` (ADR-0019): tidak ada operasi penghapusan
+// dokumen di MVP, sehingga tidak ada aksi audit untuknya. Arsip hanya mengubah
+// `status`/`archived_at` — baris, versi, dan berkasnya tetap ada.
 //
 // Batas berkas ditegakkan service, bukan handler: ukuran maksimal 100 MB,
 // MIME hasil deteksi isi + ekstensi dari daftar tertutup `44-SECURITY.md` §4.2,
@@ -408,19 +417,36 @@ type DocumentService interface {
 
 // WorkflowService
 type WorkflowService interface {
-    CreateDefinition(input CreateWorkflowInput) (*model.WorkflowDefinition, error)
-    GetDefinition(id uuid.UUID) (*model.WorkflowDefinition, error)
-    AddStep(defID uuid.UUID, input AddStepInput) (*model.WorkflowStep, error)
-    SubmitForReview(docID uuid.UUID, workflowDefID uuid.UUID) (*model.WorkflowInstance, error)
+    // Daftar definisi memakai izin `workflow_definition:read` dan tidak ber-cakupan
+    // project: definisi adalah konfigurasi tingkat **organisasi**
+    // (`workflow_definitions.organization_id`). Cakupan baris (§3.1.3) baru muncul
+    // pada instance, dan di sana project diturunkan dari dokumennya.
+    ListDefinitions(actor Actor) ([]model.WorkflowDefinition, error)
+    CreateDefinition(actor Actor, input CreateWorkflowInput) (*model.WorkflowDefinition, error)
+    GetDefinition(actor Actor, id uuid.UUID) (*model.WorkflowDefinition, error)
+    AddStep(actor Actor, defID uuid.UUID, input AddStepInput) (*model.WorkflowStep, error)
+    SubmitForReview(actor Actor, docID uuid.UUID, workflowDefID uuid.UUID) (instance *model.WorkflowInstance, responsible []uuid.UUID, err error)
+    // Daftar instance adalah endpoint halaman Approvals (`50-FSD.md` §5.4):
+    // penyaring `status` + `scope=assigned_to_me`, cakupan baris lewat
+    // `systemScope` (baris §3.1.3 yang sama dengan document).
+    ListInstances(actor Actor, filter WorkflowInstanceFilter) ([]model.WorkflowInstance, int, error)
+    GetInstance(actor Actor, id uuid.UUID) (*model.WorkflowInstance, error)
     // Resubmit: melanjutkan instance yang SAMA setelah revisi (ADR-0016 butir 2,
     // `42-API.md` §5, `43-WORKFLOW.md` §4.6). Prasyarat: dokumen `revision_required`,
     // instance `running`, ada versi baru sejak request_revision terakhir. Tidak membuat
     // instance baru dan tidak menulis baris workflow_actions (bukan keputusan reviewer).
-    Resubmit(instanceID uuid.UUID, version *int) (*model.WorkflowInstance, error)
+    Resubmit(actor Actor, instanceID uuid.UUID, version *int) (*model.WorkflowInstance, error)
     // ExecuteAction: satu transaksi; menerapkan guard conditional UPDATE
     // (`41-DATABASE.md` §2.4, ADR-0015) dan mengembalikan error khusus bila
     // rowsAffected = 0 supaya handler dapat membalas 409 WORKFLOW_CONFLICT.
-    ExecuteAction(instanceID uuid.UUID, input ActionInput) (*model.WorkflowInstance, error)
+    //
+    // Izin aksi diperiksa **di sini**, bukan middleware: route
+    // `POST /workflows/instances/:id/actions` hanya menuntut
+    // `workflow_instance:read` karena aksi yang diminta ada di body, sedangkan
+    // matriks §3.1.2 memisahkan `:approve`, `:reject`, dan `:request_revision`.
+    // Service memilih pasangan izinnya dari aksi yang sudah divalidasi, lalu
+    // menambahkan syarat **tambahan** penanggung jawab step (§3.3).
+    ExecuteAction(actor Actor, instanceID uuid.UUID, input ActionInput) (*model.WorkflowInstance, error)
 }
 
 // TaskService — cakupan data task **tidak sama** dengan project pada satu titik,
@@ -594,6 +620,56 @@ type TaskListFilter struct {
     Limit      int
 }
 
+// CommentService — modul pertama yang **tidak** dapat memakai `ProjectScope`
+// apa adanya untuk menemukan barisnya, karena tabel `comments` tidak menyimpan
+// `project_id`: cakupan baca hanya dapat ditegakkan dengan menurunkan project
+// dari entitas yang dikomentari (`44-SECURITY.md` §3.1.3 baris `comment:read`).
+// Penyusun cakupannya tetap satu — `systemScope`, fungsi yang sama dengan modul
+// project dan dokumen: baris dasar §3.1.3 untuk `comment` identik dengan
+// `project` (keanggotaan project, atau seluruh organisasi untuk administrator).
+// Implementasi: `internal/service/comment_service.go`.
+//
+// Aturan **kedua** modul ini kepemilikan, bukan izin: edit/hapus hanya untuk
+// `created_by_id = user`. Karena tidak ada pasangan izin `comment:update`/
+// `comment:delete` di matriks ADR-0014, kelima route dijaga `comment:read` dan
+// `comment:create`, dan pemisahan "boleh mengubah" datang dari `WHERE` kueri.
+type CommentService interface {
+    Scope(actor Actor) (repository.ProjectScope, error)
+    List(actor Actor, entityType string, entityID uuid.UUID, page, limit int) ([]model.Comment, int, error)
+    Get(actor Actor, id uuid.UUID) (*model.Comment, error)
+    Create(actor Actor, input CreateCommentInput) (*model.Comment, error)
+    Update(actor Actor, id uuid.UUID, input UpdateCommentInput) (*model.Comment, error)
+    Delete(actor Actor, id uuid.UUID) error
+}
+
+// Aksi audit modul komentar (FR-AUDIT-01): COMMENT_CREATED, COMMENT_UPDATED,
+// COMMENT_DELETED — semuanya ditulis lewat AuditService di dalam transaksi
+// pemanggil (ADR-0011). Metadata memuat `content_size` (+ `content_size_before`
+// pada perubahan), **bukan** isi komentar.
+
+// CommentRepository: cakupan ditegakkan di `WHERE`, dan pemetaan entitas →
+// project tinggal **satu** tempat (`commentEntityProjectCase`) yang dipakai
+// kueri daftar, kueri detail, dan pemeriksaan entitas saat membuat — pemetaan
+// yang disalin ke beberapa kueri adalah pemetaan yang akan berbeda diam-diam.
+type CommentRepository interface {
+    EntityProject(ctx, entityType string, entityID uuid.UUID) (*uuid.UUID, error) // (nil, nil) bila entitas tidak ada
+    List(ctx, scope ProjectScope, filter CommentListFilter) ([]model.Comment, int, error)
+    FindByID(ctx, scope ProjectScope, id uuid.UUID) (*model.Comment, error) // cakupan baca; di luar cakupan → ErrNotFound (handler: 404)
+    FindOwn(ctx, id, actorID uuid.UUID) (*model.Comment, error)             // jalur kepemilikan: tanpa JOIN `projects`
+    Create(ctx, comment *model.Comment) error
+    Update(ctx, id, actorID uuid.UUID, content string) (int64, error)       // `WHERE created_by_id = actor`
+    Delete(ctx, id, actorID uuid.UUID) (int64, error)                       // ditto
+}
+
+// CommentListFilter: `EntityType`+`EntityID` wajib (daftar komentar selalu
+// komentar satu entitas), bukan penyaring opsional.
+type CommentListFilter struct {
+    EntityType string
+    EntityID   uuid.UUID
+    Page       int
+    Limit      int
+}
+
 type PostgresRepository struct {
     DB *pgxpool.Pool
 }
@@ -650,6 +726,12 @@ dua hal yang belum ada di modul project dan berlaku untuk unggahan berikutnya:
    `Content-Type` klien: 512 byte pertama dibaca, `http.DetectContentType`
    dipanggil, lalu pembaca dikembalikan ke posisi awal (`Seek(0, 0)`) supaya isi
    berkas utuh saat ditulis. Ekstensi nama berkas diperiksa sebagai penjaga kedua.
+   Nilai yang dikembalikan detektor itu dibandingkan **setelah parameternya dibuang**
+   (`normalizeMimeType` di `internal/service/document_service_upload.go`), karena
+   `http.DetectContentType` menambahkan `; charset=utf-8` pada berkas teks sementara
+   daftar yang diterima menulis tipe medianya saja — tanpa langkah itu `.txt` dan
+   `.csv` selalu ditolak `422` (temuan **C-072**). Dua penjaga itu **tidak berpasangan**:
+   masing-masing diperiksa keanggotaannya di daftarnya sendiri.
 2. **Streaming unduhan.** Handler memakai `c.DataFromReader` dengan `mime_type`
    dan ukuran yang tersimpan, plus header `Content-Disposition` yang memuat
    `filename` (cadangan ASCII) dan `filename*=UTF-8''…` (RFC 5987). Handler tidak
@@ -763,17 +845,36 @@ func (j *JWTService) ValidateToken(tokenString string) (*JWTClaims, error)
 // RevocationStore menyimpan jti yang dicabut di tabel token_revocations.
 type RevocationStore interface {
     Revoke(jti uuid.UUID, userID uuid.UUID, reason string, expiresAt time.Time) error
-    RevokeAllForUser(userID uuid.UUID, reason string, keepJTI *uuid.UUID) error
-    IsRevoked(jti uuid.UUID) (bool, error)   // dibungkus cache in-memory TTL 30 detik
-    CleanupExpired() (int64, error)          // DELETE WHERE expires_at < NOW()
+    RevokeAllForUser(userID uuid.UUID) error   // menulis users.tokens_invalid_before, bukan tabel
+    SessionRevoked(jti, userID uuid.UUID, issuedAt time.Time) (bool, error)  // dua sebab sekaligus
+    CleanupExpired() (int64, error)            // DELETE WHERE expires_at < NOW()
 }
 ```
 
-Alur: middleware auth memvalidasi tanda tangan dan `exp`, lalu memeriksa **dua** sebab sekaligus — `IsRevoked(claims.JTI)` (ADR-0009) **dan** `claims.IssuedAt() < user.tokens_invalid_before` (**ADR-0021**). Bila salah satu benar, balas `401` dengan kode `TOKEN_REVOKED` (klien tidak diberi cara membedakan sebabnya). Kolom `users.tokens_invalid_before` dibaca bersama baris user yang sudah diambil middleware untuk izin, sehingga tidak ada query tambahan; `RevokeAllForUser` karena itu **tidak** lagi mengisi tabel, melainkan menyetel `NOW()` pada kolom itu. Pembersihan baris kedaluwarsa dijalankan saat startup dan periodik (setiap 1 jam, `cmd/server/main.go`).
+Alur: middleware auth memvalidasi tanda tangan dan `exp`, lalu memeriksa **dua** sebab sekaligus dalam **satu** panggilan (`SessionRevoked`) — `jti` ada di `token_revocations` (ADR-0009) **atau** `issuedAt < users.tokens_invalid_before` (**ADR-0021**). Bila salah satu benar, balas `401` dengan kode `TOKEN_REVOKED` (klien tidak diberi cara membedakan sebabnya).
+
+Bentuk yang benar-benar berjalan (`internal/repository/token_revocation_repository.go`, `T-040`/P-030) berbeda dari sketsa awal di dua hal, dan keduanya disengaja:
+
+- **Satu kueri untuk dua sebab.** `SessionRevoked` membaca kolom user dan `EXISTS` pada `token_revocations` sekaligus, lalu menyimpulkan hasilnya; jadi tidak ada round-trip tambahan per request seperti yang dulu dikhawatirkan ADR-0021. Hasilnya di-cache per `jti` (TTL 30 detik, `44-SECURITY.md` §2.2); baris user yang sudah tidak ada dianggap **tercabut** (gagal-tertutup).
+- **`RevokeAllForUser` menulis kolom user, bukan tabel revokasi**, dan membuang seluruh entri cache milik user itu supaya efeknya seketika di instance yang sama (instance lain tetap menunggu TTL). Nilainya `date_trunc('second', NOW())` — lihat catatan presisi di bawah.
+
+**Presisi satu detik (temuan C-053).** `iat` JWT berpresisi detik, jadi `NOW()` mentah akan menolak token yang terbit pada detik yang sama dengan pencabutan — termasuk token hasil **login ulang** tepat sesudah `logout_all`, sehingga pengguna ter-logout sendiri. Karena itu nilainya dipotong ke detik: token lain yang terbit di detik yang sama ikut selamat (jendela maksimum satu detik), dan token baru selalu sah. `logout_all` tetap mencabut `jti` request itu secara eksplisit.
+
+Pembersihan baris `token_revocations` yang kedaluwarsa dijalankan saat startup dan periodik (setiap 1 jam, `cmd/server/main.go`). `users.tokens_invalid_before` **tidak** dibersihkan siapa pun: ia satu kolom per user, bukan tabel yang tumbuh (ADR-0021 butir 1).
 
 #### 5.2.2 Batas Percobaan Login (FR-AUTH-06)
 
-**Perilaku yang berlaku setelah ADR-0022** (implementasi `T-041`): hitungan percobaan **gagal** per username dibaca dari tabel `login_attempts` (jendela geser 15 menit) dengan ambang dan durasi dari `system_settings` (`auth.max_login_attempts`, `auth.lockout_duration_minutes` — seed migrasi `002`), bukan dari environment variable, supaya daftar konfigurasi runtime tetap satu sumber di `60-DEPLOYMENT.md` §2.1. Lampaui ambang → akun terkunci sementara (`users.locked_until`) dan login dibalas **`423 LOCKED`** dengan `details.retry_after_seconds` (`42-API.md` §12); batas per alamat klien tetap `429 TOO_MANY_REQUESTS` + header `Retry-After`.
+**Perilaku yang berlaku setelah ADR-0022** (implementasi `T-041`/P-030): hitungan percobaan **gagal** per username dibaca dari tabel `login_attempts` (jendela geser 15 menit) dengan ambang dan durasi dari `system_settings` (`auth.max_login_attempts`, `auth.lockout_duration_minutes` — seed migrasi `002`), bukan dari environment variable, supaya daftar konfigurasi runtime tetap satu sumber di `60-DEPLOYMENT.md` §2.1. Lampaui ambang → akun terkunci sementara (`users.locked_until`) dan login dibalas **`423 LOCKED`** dengan `details.retry_after_seconds` (`42-API.md` §12); batas per alamat klien tetap `429 TOO_MANY_REQUESTS` + header `Retry-After`.
+
+Rincian implementasi yang mengikat (`internal/service/auth_service.go` + `internal/repository/login_attempt_repository.go`):
+
+- Jendela 15 menit adalah **konstanta kode** (`service.LoginAttemptWindow`), bukan kunci `system_settings` baru; ADR-0022 butir 3 menolak menambah konfigurasi untuk kontrak yang sudah tetap.
+- Yang dihitung dan dikunci adalah **username yang dicoba**, termasuk username yang tidak ada — sehingga ambangnya tidak dapat dilonggarkan dengan menyapu daftar username.
+- Percobaan yang **melewati** ambang itulah yang dibalas `423` (ambang 5: empat kali `401`, yang kelima `423` + `locked_until` ditulis).
+- Lock yang masih aktif **tidak diperpanjang** oleh percobaan berikutnya; yang bertambah hanya baris `login_attempts`.
+- Pencatatan percobaan **tidak boleh menggagalkan login**: kegagalan menulis telemetri dicatat di log aplikasi dan alurnya lanjut (tabel telemetri yang bermasalah bukan alasan keamanan untuk mematikan autentikasi).
+- Urutan pemeriksaan: akun nonaktif (`403`, keadaan permanen) → akun terkunci (`423`) → password (`401`) → sukses.
+- **Lock tidak mencabut sesi yang sudah berjalan** dan tidak menyentuh `tokens_invalid_before`; ia hanya menolak `POST /auth/login`.
 
 Alasan penghitungnya **tidak** lagi di memori: keadaan runtime hilang saat restart, dan pada beberapa instance batas efektifnya menjadi N kali ambang. Tabel `login_attempts` juga menjadi bukti percobaan brute force — termasuk atas username yang **tidak** ada (`user_id` boleh `NULL`).
 
@@ -834,11 +935,17 @@ Fungsi pemasangan route tinggal di `internal/handler/router.go` dan menerima dep
 func Setup(r *gin.Engine, deps RouterDeps) {
     api := r.Group("/api/v1")
 
-    // Auth publik (login tidak butuh token); logout & me butuh token.
+    // Auth publik: login dan refresh (yang dikirim refresh token di body, bukan
+    // access token di header — access token yang kedaluwarsa justru keadaan yang
+    // membuat refresh dipanggil). Logout, me, dan change-password butuh token.
+    // Kelimanya **tidak** memasang izin: aksinya atas sesi atau akun sendiri
+    // (aturan 2 di atas).
     auth := api.Group("/auth")
     auth.POST("/login", rateLimit, authHandler.Login)
     auth.POST("/logout", deps.AuthMiddleware, authHandler.Logout)
     auth.GET("/me", deps.AuthMiddleware, authHandler.Me)
+    auth.POST("/change-password", deps.AuthMiddleware, authHandler.ChangePassword)
+    auth.POST("/refresh", authHandler.Refresh) // tanpa AuthMiddleware; ADR-0023
 
     // Group terproteksi: AuthMiddleware dipasang sekali di group,
     // izin dicek per route karena resource-nya berbeda satu sama lain.
@@ -879,6 +986,25 @@ func Setup(r *gin.Engine, deps RouterDeps) {
     tasks.PATCH("/:id", perm(pc, "task", "update"), taskHandler.Update)
     tasks.POST("/:id/complete", perm(pc, "task", "complete"), taskHandler.Complete)
 
+    // Modul komentar sudah diimplementasikan (`internal/handler/router.go`,
+    // `42-API.md` §7). Lima route, tetapi hanya **dua** pasangan izin yang ada di
+    // matriks (`comment:read`, `comment:create`, keduanya semua role) — `PATCH`
+    // dan `DELETE` karena itu memakai `comment:read`, dan pemisahan "boleh
+    // mengubah" ditegakkan di kueri lewat kepemilikan (`created_by_id = actor`),
+    // bukan di middleware. Menambah `comment:update`/`comment:delete` di sini
+    // berarti mengubah matriks tanpa ADR.
+    //
+    // Daftar memakai bentuk kueri (`?entity_type=&entity_id=`) karena
+    // `GET /comments/:entityType/:entityId` tidak dapat berdampingan dengan
+    // `GET /comments/:id` — Gin menolak nama wildcard berbeda pada posisi yang
+    // sama dan gagal saat registrasi rute (temuan C-049).
+    comments := api.Group("/comments", deps.AuthMiddleware)
+    comments.GET("", perm(pc, "comment", "read"), commentHandler.List)
+    comments.POST("", perm(pc, "comment", "create"), commentHandler.Create)
+    comments.GET("/:id", perm(pc, "comment", "read"), commentHandler.Get)
+    comments.PATCH("/:id", perm(pc, "comment", "read"), commentHandler.Update)
+    comments.DELETE("/:id", perm(pc, "comment", "read"), commentHandler.Delete)
+
     workflows := api.Group("/workflows", middleware.AuthMiddleware())
     workflows.POST("/definitions", middleware.RequirePermission(pc, "workflow_definition", "manage"), workflowHandler.CreateDefinition)
     workflows.POST("/definitions/:id/steps", middleware.RequirePermission(pc, "workflow_definition", "manage"), workflowHandler.AddStep)
@@ -898,7 +1024,7 @@ func Setup(r *gin.Engine, deps RouterDeps) {
     admin.GET("/roles", middleware.RequirePermission(pc, "role", "read"), adminHandler.ListRoles)
     admin.GET("/organizations", middleware.RequirePermission(pc, "organization", "read"), adminHandler.ListOrganizations)
 
-    // Route lain (comments, notifications, audit, reports, settings, sisa endpoint
+    // Route lain (notifications, audit, reports, settings, sisa endpoint
     // documents/projects/workflows) mengikuti 42-API.md dengan pola di atas.
 }
 ```

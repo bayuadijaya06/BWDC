@@ -2,10 +2,14 @@ package migration_test
 
 import (
 	"database/sql"
+	"regexp"
+	"sort"
 	"testing"
+
+	"bwdcs/backend/internal/model"
 )
 
-// TestSchemaTablesExist membuktikan migrasi `001`-`009` lengkap: seluruh tabel
+// TestSchemaTablesExist membuktikan migrasi `001`-`010` lengkap: seluruh tabel
 // yang didefinisikan `41-DATABASE.md` §2 ada, dan tidak ada tabel tak terduga
 // di luar `goose_db_version` (tabel internal goose).
 func TestSchemaTablesExist(t *testing.T) {
@@ -26,6 +30,8 @@ func TestSchemaTablesExist(t *testing.T) {
 		"comments", "notifications", "audit_logs",
 		// 009
 		"token_revocations",
+		// 010 (ADR-0022)
+		"login_attempts",
 	}
 
 	rows, err := db.Query(`SELECT table_name FROM information_schema.tables
@@ -66,6 +72,95 @@ func TestSchemaTablesExist(t *testing.T) {
 		if !found {
 			t.Errorf("tabel %q ada di database tetapi tidak ada di 41-DATABASE.md §2", name)
 		}
+	}
+}
+
+// TestDocumentStatusVocabularyIncludesArchived menutup `70-TESTING.md` §3.12
+// baris `T-039` bagian kosakata: nilai yang dikenal kode
+// (`model.DocumentStatuses`) harus **sama** dengan `CHECK` di database.
+//
+// Daftar di test ini sengaja dibaca dari `pg_get_constraintdef`, bukan ditulis
+// ulang: kalau ditulis ulang, test hanya akan membandingkan dua salinan tangan
+// yang bisa salah bersama-sama.
+func TestDocumentStatusVocabularyIncludesArchived(t *testing.T) {
+	db := requireDB(t)
+
+	var definition string
+	if err := db.QueryRow(`
+		SELECT pg_get_constraintdef(con.oid)
+		FROM pg_constraint con
+		JOIN pg_class rel ON rel.oid = con.conrelid
+		JOIN pg_namespace n ON n.oid = rel.relnamespace
+		WHERE n.nspname = current_schema()
+		  AND rel.relname = 'documents'
+		  AND con.conname = 'documents_status_check'`).Scan(&definition); err != nil {
+		t.Fatalf("baca CHECK documents.status: %v", err)
+	}
+
+	matches := regexp.MustCompile(`'([a-z_]+)'::`).FindAllStringSubmatch(definition, -1)
+	got := make([]string, 0, len(matches))
+	for _, match := range matches {
+		got = append(got, match[1])
+	}
+
+	want := append([]string(nil), model.DocumentStatuses()...)
+	sort.Strings(got)
+	sort.Strings(want)
+
+	if len(got) != len(want) {
+		t.Fatalf("CHECK documents.status memuat %d nilai (%v), model memuat %d (%v)", len(got), got, len(want), want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("nilai status ke-%d: database %q vs model %q", i, got[i], want[i])
+		}
+	}
+
+	if !model.IsDocumentStatus(model.DocumentStatusArchived) {
+		t.Error("model tidak mengenal status archived (ADR-0019)")
+	}
+
+	// Kolom arsipnya sendiri juga bagian dari kontrak ADR-0019.
+	var columnType string
+	if err := db.QueryRow(`
+		SELECT data_type FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'documents' AND column_name = 'archived_at'`).Scan(&columnType); err != nil {
+		t.Fatalf("kolom documents.archived_at tidak ada: %v", err)
+	}
+	if columnType != "timestamp with time zone" {
+		t.Errorf("tipe archived_at %q, diharapkan timestamp with time zone", columnType)
+	}
+}
+
+// TestLoginAttemptsSchemaExists menutup bagian skema ADR-0022 yang dipasang
+// migrasi `010`: kolomnya, tabel telemetrinya, dan sifat "tidak ber-FK" pada
+// `username_attempted` yang menjadi inti temuan C-035.
+func TestLoginAttemptsSchemaExists(t *testing.T) {
+	db := requireDB(t)
+
+	for _, column := range []string{"tokens_invalid_before", "locked_until"} {
+		var exists bool
+		if err := db.QueryRow(`
+			SELECT EXISTS (SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = $1)`,
+			column).Scan(&exists); err != nil {
+			t.Fatalf("periksa kolom users.%s: %v", column, err)
+		}
+		if !exists {
+			t.Errorf("kolom users.%s tidak ada setelah migrasi 010", column)
+		}
+	}
+
+	var fkCount int
+	if err := db.QueryRow(`
+		SELECT count(*) FROM pg_constraint con
+		JOIN pg_class rel ON rel.oid = con.conrelid
+		JOIN pg_namespace n ON n.oid = rel.relnamespace
+		WHERE n.nspname = current_schema() AND rel.relname = 'login_attempts' AND con.contype = 'f'`).Scan(&fkCount); err != nil {
+		t.Fatalf("periksa FK login_attempts: %v", err)
+	}
+	if fkCount != 1 {
+		t.Errorf("login_attempts punya %d foreign key, diharapkan 1 (hanya ke users.id; username_attempted sengaja bebas)", fkCount)
 	}
 }
 
@@ -246,6 +341,142 @@ func TestSeedNoDuplicatePermissions(t *testing.T) {
 	}
 	if duplicates != 0 {
 		t.Errorf("ada %d kombinasi (role, resource, action) kembar", duplicates)
+	}
+}
+
+// TestLoginTelemetrySchemaMatchesAdr0022 menguji skema yang menjadi **dasar**
+// implementasi `T-041` (ADR-0022): tabel `login_attempts` dan dua kolom baru di
+// `users`. Test ini sengaja membaca `information_schema`/`pg_catalog`, bukan
+// percaya pada berkas migrasi: yang membuat perilaku berjalan adalah objek yang
+// benar-benar terpasang di database.
+//
+// Dua hal yang paling mudah salah dan karena itu diuji eksplisit:
+//
+//   - `user_id` **boleh NULL** — percobaan atas username yang tidak ada justru
+//     yang paling perlu tercatat (inti temuan C-035);
+//   - FK `user_id` memakai `ON DELETE SET NULL`, sehingga menghapus user tidak
+//     menghalangi maupun menghapus telemetrinya.
+func TestLoginTelemetrySchemaMatchesAdr0022(t *testing.T) {
+	db := requireDB(t)
+
+	wantColumns := map[string]struct{ dataType, nullable string }{
+		"id":                 {"uuid", "NO"},
+		"username_attempted": {"character varying", "NO"},
+		"user_id":            {"uuid", "YES"},
+		"ip_address":         {"inet", "YES"},
+		"user_agent":         {"text", "YES"},
+		"succeeded":          {"boolean", "NO"},
+		"correlation_id":     {"character varying", "YES"},
+		"created_at":         {"timestamp with time zone", "NO"},
+	}
+
+	rows, err := db.Query(`
+		SELECT column_name, data_type, is_nullable, column_default
+		FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'login_attempts'`)
+	if err != nil {
+		t.Fatalf("baca kolom login_attempts: %v", err)
+	}
+	defer rows.Close()
+
+	gotColumns := map[string]string{}
+	withDefault := map[string]bool{}
+	for rows.Next() {
+		var name, dataType, nullable string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&name, &dataType, &nullable, &defaultValue); err != nil {
+			t.Fatalf("scan kolom login_attempts: %v", err)
+		}
+		gotColumns[name] = dataType + "/" + nullable
+		withDefault[name] = defaultValue.Valid
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterasi kolom login_attempts: %v", err)
+	}
+
+	for name, want := range wantColumns {
+		got, ok := gotColumns[name]
+		if !ok {
+			t.Errorf("kolom login_attempts.%s tidak ada", name)
+			continue
+		}
+		if got != want.dataType+"/"+want.nullable {
+			t.Errorf("kolom login_attempts.%s = %s, diharapkan %s/%s", name, got, want.dataType, want.nullable)
+		}
+	}
+	if len(gotColumns) != len(wantColumns) {
+		t.Errorf("login_attempts punya %d kolom, ADR-0022 menyebut %d", len(gotColumns), len(wantColumns))
+	}
+
+	// `id` dan `created_at` dibangkitkan database, bukan dikirim klien.
+	for _, name := range []string{"id", "created_at"} {
+		if !withDefault[name] {
+			t.Errorf("kolom login_attempts.%s tidak punya default", name)
+		}
+	}
+
+	var deleteRule string
+	if err := db.QueryRow(`
+		SELECT confdeltype::text
+		FROM pg_constraint
+		WHERE conname = 'login_attempts_user_id_fkey'`).Scan(&deleteRule); err != nil {
+		t.Fatalf("baca FK login_attempts.user_id: %v", err)
+	}
+	if deleteRule != "n" {
+		t.Errorf("FK login_attempts.user_id punya confdeltype %q, diharapkan 'n' (ON DELETE SET NULL)", deleteRule)
+	}
+
+	// Indeks yang dijanjikan `41-DATABASE.md` §3: satu untuk hitungan ambang,
+	// satu untuk pemangkasan retensi.
+	for _, index := range []string{"idx_login_attempts_username", "idx_login_attempts_created"} {
+		var count int
+		if err := db.QueryRow(`
+			SELECT count(*) FROM pg_indexes
+			WHERE schemaname = current_schema() AND tablename = 'login_attempts' AND indexname = $1`, index).Scan(&count); err != nil {
+			t.Fatalf("periksa indeks %s: %v", index, err)
+		}
+		if count != 1 {
+			t.Errorf("indeks %s tidak ada pada login_attempts", index)
+		}
+	}
+
+	// Kolom penanda di `users`: penanda pencabutan massal (ADR-0021) dan lock
+	// sementara (ADR-0022). Default `'epoch'` penting: token yang sudah terbit
+	// saat migrasi berjalan tidak boleh ikut mati.
+	var tokensNullable, lockNullable string
+	if err := db.QueryRow(`
+		SELECT is_nullable FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'tokens_invalid_before'`).Scan(&tokensNullable); err != nil {
+		t.Fatalf("baca kolom users.tokens_invalid_before: %v", err)
+	}
+	if err := db.QueryRow(`
+		SELECT is_nullable FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'locked_until'`).Scan(&lockNullable); err != nil {
+		t.Fatalf("baca kolom users.locked_until: %v", err)
+	}
+	// Default-nya dinilai sebagai **nilai**, bukan dicocokkan ke teks: PostgreSQL
+	// menormalkan `'epoch'` menjadi literal waktunya sendiri
+	// (`'1970-01-01 07:00:00+07'::timestamp with time zone`), sehingga mencocokkan
+	// string "epoch" akan gagal walaupun nilainya benar. Cast tipe di ujung teks
+	// dibuang lebih dulu supaya literalnya dapat dinilai.
+	var defaultIsEpoch bool
+	if err := db.QueryRow(`
+		SELECT regexp_replace(
+		           (SELECT column_default FROM information_schema.columns
+		            WHERE table_schema = current_schema() AND table_name = 'users'
+		              AND column_name = 'tokens_invalid_before'),
+		           '::.*$', '')::timestamptz = 'epoch'::timestamptz`).Scan(&defaultIsEpoch); err != nil {
+		t.Fatalf("nilai default users.tokens_invalid_before: %v", err)
+	}
+
+	if tokensNullable != "NO" {
+		t.Errorf("users.tokens_invalid_before is_nullable = %s, diharapkan NO (NULL akan mematikan semua token)", tokensNullable)
+	}
+	if lockNullable != "YES" {
+		t.Errorf("users.locked_until is_nullable = %s, diharapkan YES (NULL = tidak terkunci, ADR-0022 butir 4)", lockNullable)
+	}
+	if !defaultIsEpoch {
+		t.Error("default users.tokens_invalid_before bukan epoch: token yang sudah terbit saat migrasi berjalan akan ikut mati (ADR-0021)")
 	}
 }
 

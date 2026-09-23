@@ -43,6 +43,7 @@ Sistem untuk mengelola proyek, dokumen (dengan versioning), alur kerja persetuju
 | 44 | Security Specification | `44-SECURITY.md` | AuthN/AuthZ, enkripsi, audit, compliance |
 | 50 | FSD — Functional Specification Document | `50-FSD.md` | Spesifikasi fungsional tiap modul |
 | 51 | UX/UI Specification | `51-UX.md` | Navigasi, komponen, flow user |
+| 52 | Dashboard & Analytics | `52-DASHBOARD-ANALYTICS.md` | Metrik, chart, filter, drill-down — telaah `Dashboard.md` (R-17 tanpa angka karangan) |
 | 60 | Deployment & Operations | `60-DEPLOYMENT.md` | Deployment, env, backup, monitoring |
 | 70 | Testing Strategy | `70-TESTING.md` | Unit, integrasi, E2E, keamanan |
 | 80 | Roadmap & MVP Scope | `80-ROADMAP.md` | Fase pengembangan, prioritas, fitur masa depan |
@@ -54,7 +55,7 @@ Sistem untuk mengelola proyek, dokumen (dengan versioning), alur kerja persetuju
 |---|---|
 | `CONTINUE.md` | **Titik masuk resume**: baca ini dulu saat melanjutkan pekerjaan dari sesi/agen/model lain |
 | `AGENTS.md` | Entry file: routing agen + kewajiban update progress |
-| `DESIGN.md` | Arah desain final. **Status: belum diisi (lihat ADR-0007)** |
+| `DESIGN.md` | Arah desain final. **Status: TERISI** sejak P-037 (jalur 2 ADR-0007): identitas, palet + alasan, tipografi, dials (1/2/1), motif, tema, Design Read. Nilainya dikunci di `frontend/src/styles/tokens.css` dan diperiksa test kontras |
 | `docs/adr/` | Architecture Decision Records, sumber tunggal keputusan teknis |
 | `docs/progress/` | Ledger progress: `STATE.md`, `SESSION-LOG.md`, `CHANGELOG.md`, `TASKS.md`, `TRACEABILITY.md`, `OPEN-QUESTIONS.md`, `prompts/` |
 

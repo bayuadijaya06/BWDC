@@ -89,6 +89,15 @@ Cermin yang dapat dieksekusi: **`.env.example`** di root repo (`cp .env.example 
 | `LOG_LEVEL` | Tidak | `debug`, `info`, `warn`, `error` |
 | `STORAGE_TYPE` | Tidak | `local` untuk MVP (ADR-0005) |
 | `STORAGE_PATH` | Tidak | `/app/storage` di container, path lokal saat dev di host |
+
+**Variabel frontend (`frontend/.env`)** — berkas terpisah, karena Vite hanya mengekspos variabel berawalan `VITE_` dan **membakukannya ke bundel saat build**. Karena itu jangan pernah menaruh sandi atau kunci rahasia di sini. Cermin yang dapat dieksekusi: **`frontend/.env.example`** (disalin menjadi `.env.local`, yang tidak dikomit — bukan `.env`).
+
+| Variabel | Wajib | Default | Keterangan |
+|---|---|---|---|
+| `VITE_API_BASE_URL` | Tidak | `/api/v1` | Basis URL API. Defaultnya **relatif** agar permintaan lewat proxy dev server dan bebas CORS; di produksi biarkan juga relatif supaya web server yang mem-proxy. Dibaca satu kali di `src/services/http.ts` |
+| `VITE_API_PROXY_TARGET` | Tidak | `http://localhost:8081` | Sasaran proxy `/api` milik dev server Vite. Mesin development ini memakai `8081` (`APP_HOST_PORT`) sedangkan dokumen menyebut `8080` |
+| `VITE_DEV_PORT` | Tidak | `5173` | Port dev server |
+| `VITE_PREVIEW_PORT` | Tidak | `4173` | Port `vite preview` sesudah build |
 | `REDIS_URL` | Tidak | Kosong = nonaktif. Invalidasi token memakai tabel `token_revocations` (ADR-0009), bukan Redis |
 | `APP_HOST_PORT` | Compose | Port host untuk app (`8081` di mesin development ini) |
 | `POSTGRES_HOST_PORT` | Compose | Port host untuk container PostgreSQL (`5433` di mesin development ini) |
@@ -121,17 +130,39 @@ Target yang dipakai sehari-hari, semuanya membaca `.env` di root repo (`§2.1`):
 ### 3.2 Frontend Build
 
 ```bash
-# frontend/package.json scripts
+# frontend/package.json scripts — salinan yang dapat diperiksa; sumbernya berkas itu sendiri
 {
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc --noEmit && vite build",   # tsc DULU: type error harus menggagalkan build
     "preview": "vite preview",
-    "lint": "eslint src --ext .ts,.tsx",
-    "test": "vitest"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest",                        # mode watch
+    "test:run": "vitest run",                # sekali jalan, dipakai CI
+    "test:coverage": "vitest run --coverage"
   }
 }
 ```
+
+Alur build dan jalannya di lokal:
+
+```bash
+cd frontend
+npm ci                    # package-lock.json adalah kuncinya; jangan `npm install` di CI
+npm run typecheck && npm run lint && npm run test:run
+npm run build             # keluaran ke frontend/dist/ (statis, disajikan web server)
+npm run dev               # dev server Vite; backend dev ada di 8081, jadi tidak bentrok
+```
+
+Catatan yang mengikat:
+
+1. **Tailwind v4 tanpa berkas konfigurasi.** Token ada di `src/styles/tokens.css` (`@theme` + lapisan semantik). Jangan membuat `tailwind.config.js` (ADR-0024).
+2. **`dist/` adalah artefak**, bukan sumber: ia tidak pernah dikomit dan tidak pernah disunting tangan.
+3. **Hasil build statis.** Tidak ada Node di produksi: `dist/` disajikan web server yang juga mem-proxy `/api/v1` ke backend (`60-DEPLOYMENT.md` §5).
+4. **Verifikasi frontend sebelum serah terima:** `npm run typecheck && npm run lint && npm run test:run && npm run build` — keempatnya wajib hijau, dan halaman yang baru disentuh harus benar-benar dibuka di dev server (`preview`), bukan hanya lulus test.
 
 ---
 

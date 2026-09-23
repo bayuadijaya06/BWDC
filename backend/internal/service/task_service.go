@@ -76,12 +76,15 @@ type TaskListFilter struct {
 	AssigneeID *uuid.UUID
 	Overdue    *bool
 
-	// DueFrom/DueTo adalah rentang `due_date` dengan interval **setengah terbuka**
-	// `[DueFrom, DueTo)`: batas bawah inklusif, batas atas eksklusif. Pilihan itu
-	// disengaja supaya rentang yang bersebelahan (mis. per bulan) tidak tumpang
-	// tindih dan tidak ada baris yang terlewat, dan supaya batasnya berupa instan
-	// RFC 3339 yang eksplisit dari klien — bukan tanggal yang harus ditebak
-	// zona waktunya di server.
+	// DueFrom/DueTo adalah rentang `due_date` dengan interval **tertutup**
+	// `[DueFrom, DueTo]`: kedua batas inklusif, dan `DueTo == DueFrom` berarti satu
+	// instan. Batasnya berupa instan RFC 3339 yang eksplisit dari klien — bukan
+	// tanggal yang harus ditebak zona waktunya di server.
+	//
+	// Pilihan inklusif-inklusif ditetapkan user (2026-09-19, P-028), menggantikan
+	// usulan agen yang setengah terbuka: "dari A sampai B" lebih jarang
+	// mengejutkan pembaca API, dengan konsekuensi yang dicatat di `42-API.md` §6
+	// (rentang bersebelahan dapat tumpang tindih).
 	DueFrom *time.Time
 	DueTo   *time.Time
 

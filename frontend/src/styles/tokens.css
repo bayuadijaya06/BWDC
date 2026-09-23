@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+/* =========================================================================
+   Token BWDCS. Sumbernya `DESIGN.md` (palet, tipografi, radius, tema).
+   Aturan: komponen TIDAK PERNAH menulis warna/radius/bayangan langsung.
+   Setiap nilai primitif di bawah punya alasan tertulis di `DESIGN.md` §2-§3.
+   Test `tokens.contrast.test.ts` membaca berkas ini dan menuntut setiap
+   pasangan teks/latar memenuhi WCAG AA, jadi mengubah nilai tanpa mengubah
+   test akan gagal.
+   ========================================================================= */
+
+/* Dark mode dikendalikan atribut `data-theme` di <html>, bukan hanya
+   prefers-color-scheme, supaya preferensi pengguna bisa menang. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+  /* --- Core 1: Paper (latar) -------------------------------------------- */
+  --color-paper-000: #ffffff; /* permukaan panel/tabel */
+  --color-paper-100: #f6f5f2; /* latar aplikasi: netral hangat */
+  --color-paper-200: #edebe6; /* hover baris, area tenggelam */
+
+  /* --- Core 2: Ink (teks) ----------------------------------------------- */
+  --color-ink-900: #15181c; /* teks utama, tombol primer */
+  --color-ink-700: #454b54; /* teks sekunder, judul kolom */
+  --color-ink-500: #63696f; /* teks bantu (5,09:1 di paper-100) */
+  --color-ink-300: #c7cacf; /* garis pemisah dekoratif */
+
+  /* --- Core 3: Signal (accent tunggal) ---------------------------------- */
+  --color-signal-700: #0e5b63; /* teks aksen, tautan (7,15:1) */
+  --color-signal-600: #11707a; /* focus ring, penanda posisi */
+  --color-signal-100: #dcedef; /* latar baris aktif */
+
+  /* --- Warna status (50-FSD.md §11, ADR-0012) --------------------------- */
+  --color-status-draft-surface: #ecebe8;
+  --color-status-draft-ink: #43464a;
+  --color-status-review-surface: #e4ebf6;
+  --color-status-review-ink: #1d4e89;
+  --color-status-revision-surface: #fbeedc;
+  --color-status-revision-ink: #8a5410;
+  --color-status-approved-surface: #e3f0e6;
+  --color-status-approved-ink: #1f6b3c;
+  --color-status-rejected-surface: #fbe7e5;
+  --color-status-rejected-ink: #9b2c22;
+  --color-status-archived-surface: #e2e1de;
+  --color-status-archived-ink: #3a3b3d;
+
+  /* --- Tipografi (DESIGN.md §3) ----------------------------------------- */
+  --font-sans:
+    ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --text-12: 0.75rem;
+  --text-13: 0.8125rem;
+  --text-14: 0.875rem; /* body */
+  --text-16: 1rem;
+  --text-20: 1.25rem;
+  --text-26: 1.625rem; /* plafon: judul halaman, bukan hero */
+
+  /* --- Radius: arsip, bukan pil (R-11) --------------------------------- */
+  --radius-control: 2px;
+  --radius-panel: 3px;
+
+  /* --- Bayangan: batas dibuat garis, bukan bayangan (R-12) -------------- */
+  --shadow-none: none;
+  --shadow-lift: 0 1px 0 rgb(21 24 28 / 0.04);
+
+  /* --- Gerak: MOTION 1, transisi status dan hover saja ------------------ */
+  --ease-line: cubic-bezier(0.2, 0, 0.2, 1);
+  --animate-none: none;
+}
+
+/* Lapisan semantik. `inline` membuat utility membaca CSS variable, sehingga
+   satu blok override di bawah dapat membalik seluruh tema. */
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-hover: var(--surface-hover);
+  --color-text: var(--text);
+  --color-text-soft: var(--text-soft);
+  --color-text-muted: var(--text-muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-focus: var(--focus);
+  --color-danger: var(--danger);
+}
+
+/* --- Tema terang (default): ruang arsip ------------------------------- */
+:root,
+[data-theme="light"] {
+  --surface: var(--color-paper-100);
+  --surface-raised: var(--color-paper-000);
+  --surface-sunken: var(--color-paper-200);
+  --surface-hover: var(--color-paper-200);
+  --text: var(--color-ink-900);
+  --text-soft: var(--color-ink-700);
+  --text-muted: var(--color-ink-500);
+  --line: var(--color-ink-300);
+  --line-strong: var(--color-ink-500);
+  --accent: var(--color-signal-700);
+  --accent-strong: var(--color-signal-600);
+  --accent-soft: var(--color-signal-100);
+  --focus: var(--color-signal-600);
+  --danger: var(--color-status-rejected-ink);
+
+  color-scheme: light;
+}
+
+/* --- Tema gelap: malam arsip ------------------------------------------ */
+[data-theme="dark"] {
+  --surface: #14161a;
+  --surface-raised: #1c1f24;
+  --surface-sunken: #101215;
+  --surface-hover: #23272d;
+  --text: #ecedef; /* 15,46:1 */
+  --text-soft: #c3c8ce;
+  --text-muted: #9aa1a8; /* 6,93:1 */
+  --line: #333941;
+  --line-strong: #7a828a; /* 4,65:1 */
+  --accent: #7fd1d9; /* 10,37:1 */
+  --accent-strong: #6fc6ce; /* 9,18:1 */
+  --accent-soft: #1d3238;
+  --focus: #6fc6ce;
+  --danger: #f5c3bc;
+
+  color-scheme: dark;
+}
+
+/* Warna status versi gelap: pasangan surface/ink dibalik, kontras >= 9,4:1 */
+[data-theme="dark"] {
+  --color-status-draft-surface: #26282b;
+  --color-status-draft-ink: #d6d7d4;
+  --color-status-review-surface: #1b2733;
+  --color-status-review-ink: #bbd1f0;
+  --color-status-revision-surface: #312616;
+  --color-status-revision-ink: #f2d6a8;
+  --color-status-approved-surface: #16281c;
+  --color-status-approved-ink: #b7e3c4;
+  --color-status-rejected-surface: #31201e;
+  --color-status-rejected-ink: #f5c3bc;
+  --color-status-archived-surface: #282a2c;
+  --color-status-archived-ink: #cfd1d3;
+}
+
+/* Target sentuh. 44x44px adalah syarat `51-UX.md` §9 (dan R-03), sedangkan
+   kepadatan alat kerja `DESIGN.md` §4 memang lebih rapat. Keduanya dipenuhi
+   sekaligus: 44px di layar sentuh (<1024px), 36px di desktop. Dipakai sebagai
+   utility supaya tidak ada satu kontrol pun yang lupa memasangnya.
+
+   **Kedua sisi, bukan hanya tingginya.** Utility ini semula hanya menetapkan
+   `min-height`, dan itu cukup untuk kontrol yang lebarnya datang dari isian
+   panjang — tetapi tidak untuk kontrol berlabel pendek: tab sub-halaman "Tim"
+   terukur 43x44px, satu piksel di bawah ambangnya, dan ia satu-satunya yang
+   setipis itu sehingga cacatnya menunggu sampai ada label yang cukup pendek.
+   Ambang sentuh adalah kotak, jadi keduanya ditetapkan di sini; tinggi saja
+   berarti ambangnya berlaku atau tidak tergantung panjang kata. */
+@utility tap-target {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+
+  @media (min-width: 64rem) {
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+  }
+}
+
+/* Judul kolom tabel: huruf kapital kecil dengan tracking tipis. Dipakai
+   HANYA di sana (alasan tertulis di `DESIGN.md` §3, R-06). */
+@utility index-label {
+  font-size: var(--text-12);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}

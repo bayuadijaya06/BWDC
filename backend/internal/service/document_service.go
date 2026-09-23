@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,11 +20,14 @@ import (
 // "upload doc", "create version", dan "download doc" termasuk aksi kritis.
 // `DOCUMENT_CREATED` dan `DOCUMENT_VERSION_CREATED` sudah dipakai contoh di
 // `30-ARCHITECTURE.md` §4.1 dan `42-API.md` §9.
+//
+// `DOCUMENT_ARCHIVED` menggantikan `DOCUMENT_DELETED` (ADR-0019): tidak ada lagi
+// operasi yang menghapus dokumen di MVP, jadi tidak ada aksi audit untuknya.
 const (
 	ActionDocumentCreated        = "DOCUMENT_CREATED"
 	ActionDocumentVersionCreated = "DOCUMENT_VERSION_CREATED"
 	ActionDocumentDownloaded     = "DOCUMENT_DOWNLOADED"
-	ActionDocumentDeleted        = "DOCUMENT_DELETED"
+	ActionDocumentArchived       = "DOCUMENT_ARCHIVED"
 )
 
 // EntityDocument adalah nilai kolom `audit_logs.entity` untuk semua aksi di atas.
@@ -57,8 +61,20 @@ var (
 	ErrDocumentFileTooLarge = errors.New("ukuran berkas melebihi batas 100 MB")
 
 	// ErrDocumentWorkflowRunning → `409 CONFLICT`: `50-FSD.md` §4.3 membatasi
-	// hapus ke keadaan "no workflow running".
+	// arsip ke keadaan "no workflow running".
 	ErrDocumentWorkflowRunning = errors.New("dokumen masih memiliki workflow yang berjalan")
+
+	// ErrDocumentArchived → `409 CONFLICT`: dokumen terarsip menerima pembacaan
+	// dan unduhan, tetapi **tidak** menerima versi baru maupun submit ke workflow
+	// (ADR-0019 butir 5). Diperiksa di service, bukan hanya disembunyikan dari
+	// daftar: arsip adalah keadaan, bukan izin.
+	ErrDocumentArchived = errors.New("dokumen terarsip tidak dapat menerima versi baru")
+
+	// ErrDocumentAlreadyArchived → `409 CONFLICT`: arsip sengaja **tidak**
+	// idempoten, berbeda dari `POST /projects/:id/archive`. `archived_at`
+	// mencatat **kapan** arsip terjadi, sehingga permintaan kedua yang dibalas
+	// `200` akan menggeser waktu itu tanpa jejak perubahan (`42-API.md` §4).
+	ErrDocumentAlreadyArchived = errors.New("dokumen sudah diarsipkan")
 
 	// ErrDocumentFileMissing → `500 INTERNAL_ERROR`: baris versi ada di
 	// database, tetapi berkasnya tidak ada di storage. Ini ketidakcocokan di
@@ -72,8 +88,19 @@ type DocumentListFilter struct {
 	ProjectID *uuid.UUID
 	Status    string
 	Search    string
-	Page      int
-	Limit     int
+	// UpdatedFrom/UpdatedTo membatasi `documents.updated_at` dengan **interval
+	// tertutup** `[UpdatedFrom, UpdatedTo]`, sama seperti `due_from`/`due_to`
+	// pada task (ditetapkan user, P-028): kedua batas inklusif, `to == from`
+	// sah (satu instan), rentang terbalik ditolak handler. `nil` = tidak
+	// disaring. Sumbernya waktu RFC 3339 ber-offset dari klien, jadi tidak ada
+	// tafsir zona waktu yang disembunyikan. Dokumen tanpa perubahan tetap
+	// punya `updated_at` (nilainya sama dengan `created_at` saat lahir), jadi
+	// tidak ada baris yang menghilang begitu salah satu batas dikirim.
+	UpdatedFrom *time.Time
+	UpdatedTo   *time.Time
+	CategoryID  *uuid.UUID
+	Page        int
+	Limit       int
 }
 
 // CreateDocumentInput adalah input `POST /documents` yang sudah dinormalisasi.
@@ -154,11 +181,14 @@ func (s *DocumentService) List(ctx context.Context, actor Actor, filter Document
 		return nil, 0, err
 	}
 	return s.documents.List(ctx, scope, repository.DocumentListFilter{
-		ProjectID: filter.ProjectID,
-		Status:    filter.Status,
-		Search:    filter.Search,
-		Page:      filter.Page,
-		Limit:     filter.Limit,
+		ProjectID:   filter.ProjectID,
+		Status:      filter.Status,
+		Search:      filter.Search,
+		UpdatedFrom: filter.UpdatedFrom,
+		UpdatedTo:   filter.UpdatedTo,
+		CategoryID:  filter.CategoryID,
+		Page:        filter.Page,
+		Limit:       filter.Limit,
 	})
 }
 
@@ -272,84 +302,86 @@ func (s *DocumentService) Create(ctx context.Context, actor Actor, input CreateD
 	return s.Get(ctx, actor, document.ID)
 }
 
-// Delete menghapus dokumen beserta seluruh versinya (`42-API.md` §4: "cascade
-// to versions").
+// Archive mengarsipkan dokumen (ADR-0019): `documents.archived_at` diisi dan
+// `documents.status` menjadi `archived`.
 //
-// Dokumen yang masih punya workflow `running` ditolak `409 CONFLICT`
-// (`50-FSD.md` §4.3). Berkas di storage dihapus setelah commit, dan kegagalan
-// penghapusan berkas **tidak** membatalkan penghapusan barisnya: metadata dan
-// berkas tidak dapat dijadikan satu transaksi, sehingga yang dilaporkan ke log
-// adalah sisa berkas, bukan kegagalan permintaan yang sebenarnya berhasil.
-func (s *DocumentService) Delete(ctx context.Context, actor Actor, documentID uuid.UUID) error {
+// Yang **tidak** dilakukan fungsi ini sama pentingnya dengan yang dilakukan:
+// tidak ada baris yang dihapus, tidak ada berkas yang dihapus dari storage, dan
+// tidak ada baris `document_versions` yang disentuh. Karena itu tidak ada
+// langkah pasca-commit seperti pada penghapusan berkaskade yang dulu: satu-satunya
+// hal yang menyeberang keluar transaksi di sini adalah entri audit, dan ia ikut
+// di dalamnya (ADR-0011).
+//
+// Dokumen yang masih punya instance workflow `running` ditolak `409 CONFLICT`
+// (`50-FSD.md` §4.3: "no workflow running"), dan arsip ulang juga `409` supaya
+// waktu arsip pertama tidak bergeser.
+func (s *DocumentService) Archive(ctx context.Context, actor Actor, documentID uuid.UUID) (*DocumentDetail, error) {
 	scope, err := s.Scope(ctx, actor)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	document, err := s.documents.FindByID(ctx, scope, documentID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return ErrDocumentNotFound
+			return nil, ErrDocumentNotFound
 		}
-		return err
+		return nil, err
+	}
+	if document.Status == model.DocumentStatusArchived {
+		return nil, ErrDocumentAlreadyArchived
 	}
 
 	running, err := s.documents.HasRunningWorkflow(ctx, documentID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if running {
-		return ErrDocumentWorkflowRunning
-	}
-
-	keys, err := s.documents.VersionKeys(ctx, documentID)
-	if err != nil {
-		return err
+		return nil, ErrDocumentWorkflowRunning
 	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("mulai transaksi penghapusan dokumen: %w", err)
+		return nil, fmt.Errorf("mulai transaksi arsip dokumen: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	documents := s.documents.WithTx(tx)
-	affected, err := documents.Delete(ctx, scope, documentID)
+	affected, err := documents.Archive(ctx, scope, documentID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if affected == 0 {
-		return ErrDocumentNotFound
+		// Baris hilang di antara pemeriksaan dan UPDATE, atau permintaan lain
+		// mengarsipkannya lebih dulu. Keduanya dijawab sama seperti pemeriksaan di
+		// atas; yang penting `archived_at` tidak tergeser.
+		return nil, ErrDocumentAlreadyArchived
 	}
 
-	if err := NewAuditService(tx).Log(ctx, actor.ID, ActionDocumentDeleted, EntityDocument, document.DocumentNumber,
-		"Dokumen "+document.DocumentNumber+" dihapus", map[string]any{
+	if err := NewAuditService(tx).Log(ctx, actor.ID, ActionDocumentArchived, EntityDocument, document.DocumentNumber,
+		"Dokumen "+document.DocumentNumber+" diarsipkan", map[string]any{
 			"document_id":     document.ID.String(),
 			"document_number": document.DocumentNumber,
 			"project_id":      document.ProjectID.String(),
-			"versions":        len(keys),
+			"status_before":   document.Status,
+			"status_after":    model.DocumentStatusArchived,
+			"current_version": document.CurrentVersion,
 		}); err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit penghapusan dokumen: %w", err)
+		return nil, fmt.Errorf("commit arsip dokumen: %w", err)
 	}
 
-	for _, key := range keys {
-		if err := s.storage.Delete(key); err != nil {
-			s.logger.Warn("berkas versi gagal dihapus dari storage",
-				"document_id", documentID.String(), "file_key", key, "error", err.Error())
-		}
-	}
-
-	s.logger.Info("dokumen dihapus",
+	s.logger.Info("dokumen diarsipkan",
 		"document_id", documentID.String(),
 		"document_number", document.DocumentNumber,
-		"versi_dihapus", len(keys),
+		"status_before", document.Status,
 		"actor_id", actor.ID.String(),
 	)
-	return nil
+
+	return s.Get(ctx, actor, documentID)
 }
 
 // formatDocumentNumber menyusun nomor dokumen `{PROJECT_CODE}-{NNN}` (ADR-0017).

@@ -26,19 +26,23 @@ type CreateDocumentRequest struct {
 // `CurrentVersion` adalah jumlah versi yang tersimpan; label versinya dikirim
 // terpisah sebagai `latest_version` (`major.minor`, FR-VER-02).
 type DocumentResponse struct {
-	ID                 uuid.UUID  `json:"id"`
-	ProjectID          uuid.UUID  `json:"project_id"`
-	ProjectCode        string     `json:"project_code,omitempty"`
-	ProjectName        string     `json:"project_name,omitempty"`
-	ProjectArchived    bool       `json:"project_archived"`
-	DocumentNumber     string     `json:"document_number"`
-	Title              string     `json:"title"`
-	CategoryID         *uuid.UUID `json:"category_id,omitempty"`
-	CategoryName       string     `json:"category_name,omitempty"`
-	Description        string     `json:"description"`
-	OwnerID            uuid.UUID  `json:"owner_id"`
-	OwnerUsername      string     `json:"owner_username,omitempty"`
-	Status             string     `json:"status"`
+	ID              uuid.UUID  `json:"id"`
+	ProjectID       uuid.UUID  `json:"project_id"`
+	ProjectCode     string     `json:"project_code,omitempty"`
+	ProjectName     string     `json:"project_name,omitempty"`
+	ProjectArchived bool       `json:"project_archived"`
+	DocumentNumber  string     `json:"document_number"`
+	Title           string     `json:"title"`
+	CategoryID      *uuid.UUID `json:"category_id,omitempty"`
+	CategoryName    string     `json:"category_name,omitempty"`
+	Description     string     `json:"description"`
+	OwnerID         uuid.UUID  `json:"owner_id"`
+	OwnerUsername   string     `json:"owner_username,omitempty"`
+	Status          string     `json:"status"`
+	// ArchivedAt hanya terisi pada dokumen terarsip (ADR-0019). Dikirim ke klien
+	// karena waktu arsip tidak dapat dihitung dari kolom lain: `updated_at`
+	// berubah karena sebab lain juga.
+	ArchivedAt         *time.Time `json:"archived_at,omitempty"`
 	CurrentVersion     int        `json:"current_version"`
 	LatestVersion      string     `json:"latest_version,omitempty"`
 	WorkflowInstanceID *uuid.UUID `json:"workflow_instance_id,omitempty"`
@@ -80,19 +84,19 @@ type DocumentDetailResponse struct {
 // NewDocumentResponse memetakan model dokumen ke bentuk response.
 func NewDocumentResponse(document *model.Document) DocumentResponse {
 	return DocumentResponse{
-		ID:                 document.ID,
-		ProjectID:          document.ProjectID,
-		ProjectCode:        document.ProjectCode,
-		ProjectName:        document.ProjectName,
-		ProjectArchived:    document.ProjectArchived,
-		DocumentNumber:     document.DocumentNumber,
-		Title:              document.Title,
-		CategoryID:         document.CategoryID,
-		CategoryName:       document.CategoryName,
-		Description:        document.Description,
-		OwnerID:            document.OwnerID,
-		OwnerUsername:      document.OwnerUsername,
-		Status:             document.Status,
+		ID:              document.ID,
+		ProjectID:       document.ProjectID,
+		ProjectCode:     document.ProjectCode,
+		ProjectName:     document.ProjectName,
+		ProjectArchived: document.ProjectArchived,
+		DocumentNumber:  document.DocumentNumber,
+		Title:           document.Title,
+		CategoryID:      document.CategoryID,
+		CategoryName:    document.CategoryName,
+		Description:     document.Description,
+		OwnerID:         document.OwnerID,
+		OwnerUsername:   document.OwnerUsername, Status: document.Status,
+		ArchivedAt:         document.ArchivedAt,
 		CurrentVersion:     document.CurrentVersion,
 		LatestVersion:      document.LatestVersion,
 		WorkflowInstanceID: document.WorkflowInstanceID,

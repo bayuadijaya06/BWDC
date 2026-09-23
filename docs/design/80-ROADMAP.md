@@ -83,14 +83,14 @@
 | Task CRUD | Create, update, complete |
 | Task assignment | Assign to user |
 | Overdue detection | Turunan `due_date` + status (ADR-0012); cron hanya mengirim notifikasi |
-| Comment system | Threaded comments |
+| Comment system | Komentar datar pada project/document/task/workflow instance (lima endpoint `42-API.md` §7); **threading belum didukung** — tabel `comments` tidak punya kolom induk (temuan C-050, Q-019) |
 | Task-document relation | Link task to document |
 
 **Exit Criteria:**
-- [ ] Manager dapat create & assign task
-- [ ] Task status transition works
-- [ ] Comment pada document/task/project
-- [ ] Overdue tasks terdeteksi sebagai turunan (tanpa menambah nilai status)
+- [x] Manager dapat create & assign task (`T-038`, P-025)
+- [x] Task status transition works (`T-038`)
+- [x] Comment pada document/task/project (`T-042`, P-027 — juga pada workflow instance; threading belum, C-050)
+- [x] Overdue tasks terdeteksi sebagai turunan (tanpa menambah nilai status) (`T-038`, ADR-0012)
 
 ---
 
@@ -100,14 +100,14 @@
 
 | Task | Deliverable |
 |---|---|
-| Layout & navigation | Sidebar, header, routing |
-| Dashboard page | Stats, widgets, recent activity |
-| Project pages | List, create, detail |
-| Document pages | List, upload, detail, versions |
-| Workflow pages | Definition management, approval panel |
-| Task pages | List, create, detail |
-| Admin pages | User, role, settings management |
-| Notification center | Dropdown + page |
+| Layout & navigation | Sidebar, header, routing (done P-037, 51-UX §2.1) |
+| Dashboard page | KPI 6 + chart 8 MVP dari `52-DASHBOARD-ANALYTICS.md` — filter global & drill-down (planned P-054) |
+| Project pages | List, create, detail (done P-041 T-053) |
+| Document pages | List, upload, detail, versions (done P-044 T-059, arsip T-039) |
+| Workflow pages | Definition management, approval panel (Approvals done P-053 T-070) |
+| Task pages | List, create, detail (done P-046 T-062) |
+| Admin pages | User, role, settings management (planned) |
+| Notification center | Dropdown + page (planned) |
 
 **Exit Criteria:**
 - [ ] Semua page dapat diakses
@@ -183,12 +183,12 @@ Roadmap ini adalah rencana, bukan laporan progres. Angka progress lama (semua fa
 | Fase | Cakupan | Status | Bukti / Catatan |
 |---|---|---|---|
 | Pra-fase | Dokumentasi: aturan kerja agen, protokol progress, ADR, alur pengembangan | Selesai | Log prompt `P-001`, `docs/progress/CHANGELOG.md` |
-| Phase 0 | Foundation: struktur, config, migrasi, auth | **Selesai** | Skeleton + migrasi `001`-`009` + bootstrap admin (`T-003`/`T-004`, P-018/P-020) + auth/JWT/RBAC (`T-005`, P-021): 4 endpoint auth hidup, 22 tabel, 104 baris `role_permissions` |
-| Phase 1 | Core Domain: project, document, version, storage | **Sebagian besar selesai** | Project (`T-035`, P-022) dan document + versi + storage + unduh + pencarian (`T-037`, P-023) hidup: 15 endpoint. Sisa exit criteria yang belum diverifikasi: filter kategori/owner/rentang tanggal pada dokumen (`OPEN-QUESTIONS` Q-016 butir 8) |
-| Phase 2 | Workflow engine | Belum dimulai | `43-WORKFLOW.md` sudah terkunci lewat ADR-0015/ADR-0016, belum ada kode |
-| Phase 3 | Task & comment | **Sebagian** — Task selesai lebih awal | Task (`T-038`, P-025/P-026): 5 endpoint dengan cakupan baris kedua dan penyaring server-side. **Comment belum.** Catatan urutan: Task (fase ini) dikerjakan sebelum Phase 2 karena mandiri, murah, dan sudah menutup pola cakupan §3.1.3; urutan sisanya diputuskan di `OPEN-QUESTIONS.md` **Q-018** |
-| Phase 4 | UI frontend | Diblokir | Menunggu isi `DESIGN.md` dan pilihan mode antislop (Q-001, Q-002) |
-| Phase 5 | Polish & deployment | Belum dimulai | |
+| Phase 0 | Foundation: struktur, config, migrasi, auth | **Selesai** | Skeleton + migrasi `001`-`011` + bootstrap admin (`T-003`/`T-004`, P-018/P-020) + auth/JWT/RBAC (`T-005`, P-021) + session revocation & auto-lock (`T-040`/`T-041`, P-030): 11 migrasi, 23 tabel |
+| Phase 1 | Core Domain: project, document, version, storage | **Selesai untuk MVP** | Project (`T-035`, P-022), document+versi+storage+unduh+pencarian+arsip (`T-037` P-023, `T-039` P-029, `T-061` C-072 txt/csv). Filter `updated_from`/`updated_to` hidup P-052 T-069; sisa Q-016 `category` (no migrasi) dan `owner` (menunggu Q-024) |
+| Phase 2 | Workflow engine | **Selesai** | Definisi + instance + actions + re-submit 9 endpoint (`T-064`, P-048, 29 test) — guard ADR-0015, jeda revisi ADR-0016 |
+| Phase 3 | Task & comment | **Selesai** (dikerjakan lebih awal dari urutan) | Task (`T-038`, P-025/P-026): 5 endpoint dengan cakupan baris kedua dan penyaring server-side. Comment (`T-042`, P-027): 5 endpoint dengan cakupan yang diturunkan dari entitas dan edit/hapus berbasis kepemilikan; keempat Exit Criteria fase ini terpenuhi, kecuali **threading** yang dicatat sebagai temuan C-050/Q-019. Catatan urutan: Task (fase ini) dikerjakan sebelum Phase 2 karena mandiri, murah, dan sudah menutup pola cakupan §3.1.3; urutan sisanya diputuskan di `OPEN-QUESTIONS.md` **Q-018** |
+| Phase 4 | UI frontend | **Berjalan** | Shell + Login + Projects (T-053 P-041) + Documents (T-059 P-044) + Tasks (T-062 P-046) + Approvals (T-070 P-053) hidup; Dashboard MVP direncanakan `52-DASHBOARD-ANALYTICS.md` (telaah Dashboard.md P-054, tanpa angka karangan). Blokir hilang P-037 (Q-001 `during`, Q-002 jalur 2 ADR-0007, DESIGN.md terisi) |
+| Phase 5 | Polish & deployment | Belum dimulai — **Dashboard Analytics MVP** direncanakan di sini | Analytics API `GET /analytics/dashboard` (42-API §13, `report:read`) + frontend KPI 6/chart 8 (`50-FSD` §9, `52-*` §7). Backlog penuh (department/SLA/expiry) menunggu Q-DASH-01..04 |
 
 **Total Estimated Timeline:** 16 weeks (4 months)
 

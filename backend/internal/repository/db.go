@@ -40,6 +40,14 @@ var ErrNoUpdateFields = errors.New("tidak ada field yang dapat diperbarui")
 // daftar user.
 var ErrNotFound = errors.New("baris tidak ditemukan")
 
+// ErrConflict dikembalikan repository saat operasi bersyarat tidak menyentuh
+// satu baris pun — yaitu ketika keadaan barisnya sudah berubah sejak dibaca.
+// Pemakai pertamanya adalah transisi workflow: `UPDATE` ber-guard
+// (`WHERE ... AND status = <asal>`) yang `rowsAffected = 0` adalah konflik
+// state, bukan baris yang hilang (`42-API.md` §12 membedakan `CONFLICT` dari
+// `NOT_FOUND`).
+var ErrConflict = errors.New("keadaan baris sudah berubah")
+
 // wrapNotFound menyeragamkan `pgx.ErrNoRows` menjadi ErrNotFound.
 func wrapNotFound(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {

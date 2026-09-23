@@ -14,10 +14,11 @@ import (
 // RateLimitConfig mengatur throttle satu endpoint.
 //
 // `KeyFunc` menentukan satuan yang dibatasi. Untuk `POST /auth/login` kuncinya
-// adalah alamat klien: batas per username ada di `service.LoginGuard`
-// (FR-AUTH-06); keduanya sengaja terpisah karena menutup hal yang berbeda —
-// rate limit per IP menahan percobaan menyapu banyak username, sementara batas
-// per username menahan tebak-tebakan password pada satu akun.
+// adalah alamat klien: batas **per username** ditangani jalur lain, yaitu
+// hitungan `login_attempts` yang berujung pada lock sementara `423 LOCKED`
+// (FR-AUTH-06, ADR-0022). Keduanya sengaja terpisah karena menutup hal berbeda —
+// batas per alamat klien menahan penyapuan banyak username dari satu host,
+// sedangkan ambang per username menahan tebak-tebakan password pada satu akun.
 type RateLimitConfig struct {
 	Limit   int
 	Window  time.Duration

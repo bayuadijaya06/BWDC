@@ -53,53 +53,63 @@ BWDCS menggunakan arsitektur **Modular Monolith** dengan pemisahan frontend dan 
 
 ### 2.1 Teknologi
 
-| Concern | Teknologi | Alasan |
-|---|---|---|
-| Framework | React 18 | Komponen-based, ecosystem luas |
-| Language | TypeScript | Type safety, maintainability |
-| Build Tool | Vite | Fast HMR, bundling optimal |
-| Styling | TailwindCSS | Utility-first, konsistensi design |
-| State | Zustand | Lightweight, no boilerplate |
-| HTTP Client | Axios | Interceptor untuk auth token |
-| Routing | React Router v6 | Declarative routing |
-| UI Components | Custom (built-in) | Sesuai antislop原则, tidak pakai library generik |
+Versi yang **benar-benar terpasang** dikunci di **ADR-0024**; tabel ini ringkasannya. Jangan menaikkan versi tanpa ADR baru (ADR-0002 tetap berlaku untuk pilihan teknologinya).
+
+| Concern | Teknologi | Versi | Alasan |
+|---|---|---|---|
+| Framework | React | **19** | Komponen berbasis fungsi; `startTransition`/`useOptimistic` tersedia untuk antrean approval tanpa state library tambahan |
+| Language | TypeScript | 5.9 (`strict`) | Type safety, `noUncheckedIndexedAccess` menahan kelas bug indeks |
+| Build Tool | Vite | 8 | HMR cepat, build produksi kecil, satu berkas konfigurasi |
+| Styling | **Tailwind CSS v4** | 4.3 (plugin `@tailwindcss/vite`) | v4 bersifat **CSS-first**: token hidup di `@theme` dalam `tokens.css`, **tidak ada `tailwind.config.js`**. Satu sumber token untuk utility dan CSS biasa |
+| State | Zustand | 5 | Ringan, tanpa boilerplate; hanya untuk keadaan klien (sesi, tema) |
+| Server state | **TanStack Query v5** (menyusul di task halaman pertama) | — | Cache/refetch/invalidasi data server tidak ditulis tangan; Zustand **bukan** tempat menyimpan hasil API |
+| HTTP Client | Axios | 1.20 | Interceptor untuk access token, refresh satu kali, dan pemetaan galat `42-API.md` §12 |
+| Routing | React Router | **7** | Declarative routing; dipakai **library mode** (bukan framework mode), sesuai SPA tanpa SSR |
+| Test | Vitest + Testing Library + `axe-core` | 5 | Satu runner dengan Vite; aksesibilitas diperiksa test, bukan diklaim |
+| Lint/format | ESLint 10 (flat config) + Prettier | — | Konfigurasi tunggal di akar `frontend/` |
+| UI Components | Custom (built-in) | — | Sesuai prinsip antislop (`DESIGN.md` §1), tidak memakai library komponen generik |
+
+**Catatan React 19 vs ADR-0002:** ADR-0002 menyebut "React 18". Versi yang dipakai dan alasannya diputuskan ulang di **ADR-0024**; ADR-0002 tetap berlaku untuk *pilihan teknologi*-nya (React + TypeScript + Vite + Tailwind), bukan untuk angka versinya.
 
 ### 2.2 Struktur Folder Frontend
 
 ```
 frontend/
 ├── src/
-│   ├── components/        # Reusable UI components
-│   │   ├── common/        # Button, Input, Modal, Table, Badge
-│   │   ├── layout/        # Sidebar, Header, Layout
-│   │   ├── document/      # DocumentCard, VersionHistory, DocumentViewer
-│   │   ├── workflow/      # WorkflowTimeline, ApprovalPanel
-│   │   └── task/          # TaskCard, TaskList
-│   ├── pages/             # Route-level pages
+│   ├── components/        # Komponen yang dipakai lebih dari satu halaman
+│   │   ├── common/        # Button, Field, Panel, DataTable, StatusBadge, States, tones
+│   │   └── layout/        # AppShell, Header, Sidebar, PageHeader
+│   ├── config/navigation.ts  # Daftar menu sidebar + izin yang dibutuhkan (cermin 51-UX.md §2.1)
+│   ├── hooks/             # Custom React hooks (mis. useDocumentTitle)
+│   ├── pages/             # Halaman per rute; satu folder per menu
 │   │   ├── Login/
 │   │   ├── Dashboard/
-│   │   ├── Projects/
-│   │   ├── Documents/
-│   │   ├── Tasks/
-│   │   ├── Approvals/
-│   │   ├── Reports/
-│   │   └── Admin/
-│   ├── hooks/             # Custom React hooks
-│   ├── services/          # API client layer
-│   ├── store/             # Zustand stores
-│   ├── types/             # TypeScript interfaces
-│   ├── utils/             # Helpers, formatters
-│   └── App.tsx
+│   │   ├── ModulePending.tsx   # Halaman "modul belum dibangun" untuk menu yang belum ada
+│   │   └── NotFound.tsx
+│   ├── services/          # Lapisan API: http.ts (axios + interceptor), auth.ts, session.ts
+│   ├── store/             # Zustand: auth.ts (sesi), theme.ts (tema)
+│   ├── styles/            # tokens.css (token + @theme), base.css
+│   ├── test/              # setup vitest, helper aksesibilitas
+│   ├── types/             # Tipe bersama: api.ts (amplop respons), status.ts (pemetaan status)
+│   ├── utils/             # Formatter: tanggal, ukuran berkas, label
+│   ├── App.tsx            # Definisi rute
+│   └── main.tsx           # Titik masuk
+├── index.html
 ├── package.json
-├── vite.config.ts
 ├── tsconfig.json
-└── tailwind.config.js
+├── vite.config.ts         # Plugin React + Tailwind + konfigurasi test
+└── eslint.config.js
 ```
 
+**Yang sengaja tidak ada:** `tailwind.config.js` (Tailwind v4 CSS-first — token di `src/styles/tokens.css`), dan folder kosong per modul (`document/`, `workflow/`, `task/`). Komponen domain **dibuat saat halamannya benar-benar dibangun**, bukan disiapkan lebih dulu: folder kosong mengundang komponen karangan yang tidak pernah dipakai.
+
 ### 2.3 Frontend Principles (antislop)
-- Setiap teknik visual harus memiliki purpose yang jelas
-- Hindari AI slop patterns: generic gradient, excessive glassmorphism, bento grid tanpa tujuan
-- Warna dan typography mengikuti design system yang akan didefinisikan di `DESIGN.md`
+
+- Setiap teknik visual harus memiliki purpose yang jelas.
+- Hindari pola AI slop: gradien generik, glassmorphism berlebihan, grid bento tanpa tujuan.
+- **Warna, tipografi, radius, bayangan, dan dials mengikuti `DESIGN.md`** (ADR-0007); nilainya dikunci di `frontend/src/styles/tokens.css` dan diperiksa test kontras. Komponen tidak pernah menulis warna langsung.
+- Yang wajib ada di setiap halaman: keadaan **loading**, **kosong**, dan **galat**; semua tombol/tautan berperilaku nyata (R-26); fokus terlihat; navigasi keyboard.
+- **Tidak ada data karangan.** Angka, tren, atau metrik hanya boleh tampil bila ada endpoint sumbernya; selebihnya tulis keadaan kosong yang jujur (R-18/R-36).
 
 ---
 
@@ -123,6 +133,10 @@ frontend/
 ### 3.2 Struktur Folder Backend
 
 Pohon struktur folder backend **tidak ditulis di sini**. Sumber tunggalnya adalah `40-TSD.md` §2.0 (ADR-0013), supaya tidak ada tiga versi struktur yang saling bertentangan seperti sebelumnya.
+
+### 3.3 Dashboard Analytics (baru P-054)
+
+Telaah `Dashboard.md` (R-17 tanpa angka karangan) → `52-DASHBOARD-ANALYTICS.md`. Dashboard bukan modul baru, melainkan view agregat atas `documents`/`workflow_instances`/`workflow_actions`/`document_versions`/`tasks`/`audit_logs` — tanpa tabel baru untuk MVP, dengan filter global `?from=&to=&project_id=&status=` yang hidup di URL dan drill-down ke daftar yang sudah ada. Sumber metrik satu: endpoint `GET /analytics/dashboard` (rencana, `42-API.md` §14, izin `report:read`, cakupan `44-SECURITY.md` §3.1.3 di kueri).
 
 Ringkas: `cmd/server/` untuk entry point; `internal/` berisi `bootstrap`, `config`, `middleware`, `model`, `dto`, `repository`, `service`, `handler`, `migration`, dan `pkg` — **satu folder = satu package Go, tanpa subfolder per modul**. Modul dipisahkan oleh nama berkas (`document_handler.go`, `document_service.go`).
 

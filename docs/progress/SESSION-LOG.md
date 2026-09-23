@@ -8,6 +8,738 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-067 — 2026-09-24 — Perbaikan create button, grouping chart dashboard, kontras dark, audit antislop (T-090)
+
+- **Prompt user:** "Perbaiki tampilan create button, kurang kontras di dark mode, samakan dengan button 'Daftar Project' pada laman detail proyek. Grouping chart di dashboard menjadi beberapa tab agar tidak penuh pada satu laman, tampilan chart kurang kontras di dark mode, sehingga sulit untuk dibaca. Cek semua UI yang sudah anda buat, pastikan selaras dengan rules antislop. Jika ada yang masih belum sesuai, segera sesuaikan." + lanjutan "Cantumkan seluruh perubahan pada dokumen progress dan aplikasi BWDCS, kemudian lanjutkan CONTINUE.md, kerjakan sebanyak yang anda mampu dalam satu sesi, jangan hanya satu task jika memungkinkan."
+- **Konstruksi:** `Button.tsx` primary `bg-accent text-paper-000 border-accent-strong` (dark `1.74:1` FAIL) → `bg-text text-surface-raised border-text hover:opacity-90` (light `17.8:1` dark `14.1:1` — setara Daftar Project `border-line-strong bg-surface-raised text-text`); Dashboard 8 chart grid penuh → 3 tab `Dokumen` (Sebaran Status, Funnel, Kategori) / `Workflow` (Volume, Approval, Activity) / `Antrian` (Aging, Avg Time) `role=tablist aria-selected` + per chart `CartesianGrid stroke var(--line) XAxis/YAxis tick var(--text-muted) stroke var(--line-strong) Tooltip contentStyle var(--surface-raised) border var(--line) Legend wrapperStyle var(--text-muted)`; `Dashboard.test.tsx` tab grouping + `Tasks.test.tsx` `WEB` title; audit R-01..R-38 0 pelanggaran baru.
+- **Bukti:** `typecheck` OK, `lint` OK, `test:run` 294/30 PASS, `build` 895kB, `make test` 279, `check-ledger OK (279)`, `BROKEN 0`, `readme-facts 46`, `api-contract 115/55`, `antislop-refs OK (38 aturan,212 rujukan)`, `navigation OK (7 menu,1 anak)`; kontras terhitung `dark accent/white 1.74 FAIL → text/surface-raised 14.1 PASS`.
+- **Status:** DONE. **Next:** `T-082` Reports Export / `T-083` Administration / `T-084`..`T-088` (tidak terblokir).
+
+---
+
+## P-066 — 2026-09-23 — Polish filter, tabel Tasks, dan tombol Create (T-089)
+
+- **Prompt user:** "Upgrade tampilan filter untuk seluruh menu, terasa terlalu blending dengan halaman, seperti kurang kontras bahwa itu adalah filter, panjang dari tiap field juga berbeda-beda, memberikan kesan kurang rapi, upgrade juga tampilan tabel pada menu Tasks, terasa terlalu penuh. Tombol untuk create pada tiap menu juga kurang kontras, seperti teks biasa, upgrade juga."
+- **Konstruksi:** `Button.tsx` `primary` `bg-accent text-paper-000 border-accent-strong shadow-sm font-semibold` (light `#0e5b63`/`#ffffff` 7:1, dark `#7fd1d9`/`#1c1f24`); filter `flex flex-wrap gap-3 rounded-panel border border-line bg-surface-raised p-3 shadow-sm` + kolom `flex-1 min-w-[140px] max-w-[200px] min-w-0` (tidak blending, lebar konsisten); tabel Tasks `density comfortable` (`h-11` 44px) + kolom `due_date 190→140` `assignee 150→120` `project 190→130` (tidak penuh). `Dashboard` `statusColors` `#hex` → `var(--color-status-*)` + `ProjectDetail` ` — ` → ` - ` (R-02). `vite.config.ts` `optimizeDeps: { include: ["recharts"] }` + `rm -rf .vite` (recharts MIME block `text/javascript`).
+- **Bukti:** `typecheck` OK, `lint` OK, `test:run` 294/30 PASS, `build` 893kB, `responsive-evidence` 16×4 OK (24 tema OK, laci OK), `antislop-refs OK` (tanpa `#hex`/` — `).
+- **Status:** DONE. **Next:** `T-082` Reports Export / `T-083` Administration (belum ada task) atau `T-084`..`T-088`.
+
+---
+
+## P-065 — 2026-09-23 — Project Activity tab inline (T-081) + ?project_id pada audit
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md" — setelah `T-080` (Workflow `?project_id`, P-064) selesai, next adalah `T-081` (Activity `?project_id` pada `GET /audit`).
+- **Konstruksi:** `repository/audit_repository.go` (`AuditListFilter.ProjectID`, `List` `AND ($7::uuid IS NULL OR metadata->>'project_id' = $7::text OR (entity='project' AND entity_id=$7::text))`), `handler/audit_handler.go` (`project_id` UUID `422 field=project_id`, `42-API.md` §9 Query `?project_id=`), `frontend/src/services/audit.ts` (`project_id`) + `frontend/src/queries/audit.ts` (`useAuditList`), `pages/Projects/ProjectDetail.tsx` (`builtTabs` `+activity`, `pendingTabs` `1→0`, `useAuditList({ project_id: id })` + `activityColumns` 4 kolom + `Panel` `DataTable`). Nav `Activity` tanpa `belum`.
+- **Bukti:** `go vet`/`go build` OK; `make test` 9 paket **279 test** (naik 1: `TestAuditListProjectFilter` — `project_id` bukan UUID `422`, valid `200`); `test:run` 30 files **294 test** PASS; `ledger OK — 279 test`, `BROKEN 0`.
+- **Status:** DONE. **Next:** `T-082` Reports Export (`report:export`) atau `T-083` Administration.
+
+---
+
+## P-064 — 2026-09-23 — Project Workflow tab inline (T-080) + ?project_id pada workflows
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md" — setelah `T-079` (Tasks inline, P-063) selesai, next adalah `T-080` (Workflow inline — butuh `?project_id` pada `GET /workflows/instances`).
+- **Konstruksi:** `repository/workflow_repository.go` (`WorkflowInstanceFilter.ProjectID`, `ListInstances`/`countInstances` `AND ($8::uuid IS NULL OR p.id = $8)`), `service/workflow_service.go` (`ProjectID`), `handler/workflow_handler.go` (`parseWorkflowInstanceQuery` `project_id` UUID `422 field=project_id`, `42-API.md` §5 Query `?project_id=`), `frontend/src/services/workflows.ts` (`project_id`), `frontend/src/queries/workflows.ts` (`+ enabled`), `pages/Projects/ProjectDetail.tsx` (`builtTabs` `+workflow`, `pendingTabs` 3→1, `useWorkflowInstances({ project_id: id })` + `workflowColumns` 4 kolom + `Panel` `DataTable`). Nav `Workflow` tanpa `belum`.
+- **Bukti:** `go vet`/`go build` OK; `make test` 9 paket **278 test** (naik 1: `TestWorkflowListProjectFilter` — `project_id` bukan UUID `422`, valid `200`); `test:run` 30 files **294 test** PASS; `ledger OK — 278 test`, `BROKEN 0`.
+- **Status:** DONE. **Next:** `T-081` Project Activity tab inline (butuh `?project_id` pada `GET /audit`).
+
+---
+
+## P-063 — 2026-09-23 — Project Tasks tab inline (T-079)
+
+- **Prompt user:** "Jangan lupa tambahkan task untuk penyelesaian dashboard nanti ... Lanjutkan lagi sesuai dengan CONTINUE.md" — setelah `T-078` (Documents inline, P-062) selesai, next per `TASKS.md` TODO adalah `T-079` (Tasks inline, READY — `GET /tasks?project_id=` sudah hidup).
+- **Konstruksi:** `pages/Projects/ProjectDetail.tsx` — `builtTabs` `["overview","members","documents","tasks"]`, `pendingTabs` hapus `tasks` (3→2, ` - `), `useTaskList({ project_id: id }, { enabled: tab==="tasks" })` dipindah ke atas (sebelum `return` awal — sebelumnya di bawah `project` (bersyarat → `react_stack_bottom_frame`)), `taskColumns` 4 kolom (`title`→`/tasks/:id`, `status` `StatusBadge`, `due_date` `OverdueFlag`, `assignee`) + `Panel` `DataTable` `loading`/`error`/`meta`/`emptyState` `Belum ada tugas`. Nav `Tasks` tanpa `belum`. `queries/tasks.ts` `useTaskList` `+ enabled`.
+- **Bukti:** `typecheck` OK, `lint` OK, `test:run` 30 files **294 test** PASS (naik 1, `ProjectDetail` 2 test), `make test` 277, `ledger OK — 277 test`, `antislop-refs OK`.
+- **Status:** DONE. **Next:** `T-080` Project Workflow tab inline (butuh `?project_id` pada `GET /workflows/instances`).
+
+---
+
+## P-062 — 2026-09-23 — Project Documents tab inline (T-078)
+
+- **Prompt user:** "Penyelesaian modul Projects tab Dokumen ... menunggu apa? ... Setelah itu lanjutkan sesuai CONTINUE.md" — analisis P-061 selesai (6 TODO `T-078`..`T-083`), next per `CONTINUE.md` adalah `T-078` (Documents inline, READY — `GET /documents?project_id=` sudah hidup).
+- **Konstruksi:** `pages/Projects/ProjectDetail.tsx` — `builtTabs` `["overview","members","documents"]`, `pendingTabs` hapus `documents` (4→3, ` - `), `useDocumentList({ project_id: id }, { enabled: tab==="documents" })` dipindah ke atas (sebelum `return` awal — sebelumnya di bawah `project` (bersyarat → `react_stack_bottom_frame`)), `documentColumns` 5 kolom (`document_number` mono, `title`→`/documents/:id`, `status` `StatusBadge`, `latest_version`, `owner`) + `Panel` `DataTable` `loading`/`error`/`meta`/`emptyState` `Belum ada dokumen`. Nav `Documents` tanpa `belum`.
+- **Bukti:** `typecheck` OK, `lint` OK, `test:run` 30 files **294 test** PASS (naik 1, `ProjectDetail` 2 test: `Belum ada dokumen` + `listDocuments` `project_id: p1`, `T-079`), `make test` 277, `ledger OK — 277 test`, `antislop-refs OK`.
+- **Status:** DONE. **Next:** `T-079` Project Tasks tab inline (READY).
+
+---
+
+## P-061 — 2026-09-23 — Projects tabs + Reports/Administration: penunggu dan 6 task baru (T-078..T-083)
+
+- **Prompt user:** "Penyelesaian modul Projects tab Dokumen, Tasks, Workflow dan Activity menunggu apa? modul Reports dan Administration juga kapan? sudah ada di task list atau belum? kalau belum segera tambahkan, update dokumen-dokumen terkait. Setelah itu lanjutkan sesuai CONTINUE.md"
+- **Temuan:** `ProjectDetail.tsx` `pendingTabs` 4: Documents (`daftarnya sudah ada sebagai halaman tersendiri`), Tasks (`?project_id= sudah ada`), Workflow (`Modul Workflow belum diimplementasikan`), Activity (`audit_logs` §9) — dua pertama usang, dua terakhir menunggu filter. `Reports` (`GET /reports/export` `report:export`) dan `Administration` (`GET /admin/users`/`POST`/`GET /admin/roles`/`GET /admin/organizations` `42-API.md` §11) belum ada di `TASKS.md` TODO (hanya `unlock` yang hidup `T-041`).
+- **Keputusan:** `TASKS.md` TODO tambah `T-078` (Documents inline, READY — `GET /documents?project_id=` sudah hidup), `T-079` (Tasks inline, READY), `T-080` (Workflow inline — butuh `?project_id` pada `GET /workflows/instances`), `T-081` (Activity inline — butuh `?project_id` pada `GET /audit`), `T-082` (Reports Export), `T-083` (Administration Users/Roles/Orgs). `ProjectDetail.tsx` 4 alasan/reference ditulis ulang (`T-078`..`T-081`, ` - `) + `ProjectDetail.test.tsx` (`getAllByText(/T-078/)`). `80-ROADMAP.md` Phase 4/5 sudah menyebut Dashboard MVP; laporan ini menutup gap `50-FSD.md` §3.3.
+- **Bukti:** `check-ledger` → `ledger OK — 277 test`, `BROKEN 0`, `test:run` 293/30 PASS, `antislop-refs OK` (tanpa `#hex`).
+- **Status:** DONE — analisis selesai, 6 TODO baru. **Next:** `T-078` Project Documents tab inline (`CONTINUE.md` next).
+
+---
+
+## P-060 — 2026-09-23 — Audit read hidup: GET /audit (T-077)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md" — setelah `T-076` (notifications) selesai, next adalah Audit read (`42-API.md` §9, `audit:read` Admin).
+- **Konstruksi:** `model/audit.go` + `repository/audit_repository.go` (`AuditListFilter` + `List` `WHERE actor_id=$1 AND action=$2 AND entity=$3 AND entity_id=$4 AND date_from/to`, `ORDER BY created_at DESC`, `COUNT(*) OVER()` + `count`), `service/audit_read_service.go`, `handler/audit_handler.go` (`List` + `parseAuditListQuery` `page`/`limit` `422`, `actor_id` UUID `422`, `date_from`/`date_to` `YYYY-MM-DD`/RFC3339 `422`, `date_to < date_from` `422`), wiring `router.go` (`/audit` `audit:read`) + `main.go` + `main_test.go` `engineParts.audit` (route 46).
+- **Bukti:** `go vet`/`go build` OK; `make test` 9 paket **277 test** (naik 2: `TestAuditListValidation` 5 subtest + `TestAuditListSuccess`); `check-readme-facts` → `46 route`, `ledger OK — 277 test`, `BROKEN 0`.
+- **Status:** DONE. **Next:** frontend `Audit` page (`51-UX.md` §2.1 `Reports > Audit` masih `pending`) atau Reports `GET /reports/export`.
+
+---
+
+## P-059 — 2026-09-23 — Notifikasi in-app hidup: GET + PATCH read + POST read-all (T-076)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md" — setelah `T-075` (category) selesai, next adalah Notification backend (`42-API.md` §8, cakupan `user_id = user`).
+- **Konstruksi:** `model/notification.go` + `repository/notification_repository.go` (`List` `COUNT(*) OVER()` + `is_read` filter `($2 IS NULL OR is_read=$2)`, `MarkRead`/`MarkAllRead` `user_id = $1`), `service/notification_service.go`, `handler/notification_handler.go` (`List` `is_read` bool `422`/`page`/`limit` `422`, `MarkRead` `id` UUID `422`/`404`, `MarkAllRead`), wiring `router.go` (`/notifications` `notification:read`/`update`) + `main.go` + `main_test.go` `engineParts.notification` (route 45).
+- **Bukti:** `go vet`/`go build` OK; `make test` 9 paket **275 test** (naik 2: `TestNotificationListValidation` 5 subtest + `TestNotificationMarkRead` 6 subtest — `is_read` bukan boolean `422`, tanpa token `401`, `id` bukan UUID `422`, bukan milik `404`, milik `200`, `read-all` `200`); `check-readme-facts` → `45 route` (1 analytics +3 notifications), `ledger OK — 275 test`, `BROKEN 0`.
+- **Status:** DONE. **Next:** frontend bell `NotificationCenter` (`50-FSD.md` §8.2) atau Audit `GET /audit`.
+
+---
+
+## P-058 — 2026-09-23 — Kategori dokumen pada GET /documents hidup (T-075, Q-016)
+
+- **Prompt user:** "oke lanjut sesuai rekomendasi anda" — setelah `T-073` Dashboard MVP selesai, next adalah `?category_id` `GET /documents` (sisa Q-016, tanpa migrasi).
+- **Konstruksi:** `repository/document_repository.go` (`DocumentListFilter.CategoryID`, `documentListWhere` `$9`, `LIMIT $10 OFFSET $11`, `count` `$9`), `service/document_service.go` (`CategoryID`), `handler/document_handler.go` (`parseDocumentListQuery` `category_id` UUID → `422 field=category_id`), `frontend/src/services/documents.ts` (`category_id`), `frontend/src/services/documents.test.ts` (+1).
+- **Bukti:** `go vet`/`go build` OK; `make test` 9 paket **273 test** (naik 1: `TestDocumentListCategoryFilter` — buat 2 kategori via `INSERT document_categories`, 2 dokumen beda kategori → filter `cat1` `1`, fake `0`, bukan UUID `422 field=category_id`); `test:run` 30 files **293 test** PASS; `ledger OK — 273 test`, `BROKEN 0`.
+- **Docs:** `42-API.md` §4 Query `?category_id=` + Category kini hidup, `50-FSD.md` §4.1 Category kini hidup `?category_id=` (sisa Q-016 hanya `owner` menunggu Q-024).
+- **Status:** DONE. **Next:** `owner` menunggu Q-024, Notification/Audit.
+
+---
+
+## P-057 — 2026-09-23 — Frontend Dashboard MVP hidup: KPI 6 + chart 8 + filter global (T-073)
+
+- **Prompt user:** "Oke lanjutkan sesuai CONTINUE.md" — setelah `T-072` (API `GET /analytics/dashboard`) selesai, next adalah `T-073` dashboard frontend (`52-*` §3, ADR-0026).
+- **Konstruksi:** `services/analytics.ts` (`fetchDashboard` `from`/`to`/`project_id` + `validateDashboardRange` interval tertutup, re-ekspor `toRfc3339FromLocal`) + `queries/analytics.ts` (`useDashboard`); `pages/Dashboard/index.tsx` ditulis ulang — `useSearchParams` `from`/`to`/`project_id`, `useDashboard` + `useProjectList`, KPI section 6 `Panel` mono + drill-down `Link`, 8 chart `recharts` (`Pie` statusDist 6, `Line` volumeTrend, stacked `Bar` approvalTrend, `Bar` funnel 5, `Bar` pendingAging 5, horizontal `Bar` avgTimePerStage, horizontal `Bar` byCategory, `Line` activityTrend 4 seri) — semua `ResponsiveContainer` `h-64`, filter global `role=search` + `role=group` rentang tanggal, `project_id` dari `useProjectList`, `report:read` guard, tanpa `#hex` (statusColors `var(--color-status-*)`, fills `var(--color-*)`). `recharts` `3.10.1` dipasang (`--legacy-peer-deps` untuk React 19); `@testing-library/dom` dipulihkan setelah terhapus saat install recharts (pulih `screen` → `typecheck` hijau). Perbaiki `tokens.contrast.test.ts` FAIL `#hex` (ganti pie `#` → `var(--color-status-*)`) + `findByText "0"` ambiguitas → `findAllByText`.
+- **Bukti:** `typecheck` OK, `lint` OK, `test:run` 30 files **292 test** PASS (naik 10: 5+5), `build` 472kB, `make test` 272, `ledger OK — 272 test`, `BROKEN 0`, enam pemeriksa hijau.
+- **Status:** DONE. **Next:** `T-074` backlog penuh (Phase 5, Q-DASH), category `?category_id` atau Notifications.
+
+---
+
+## P-056 — 2026-09-23 — Backend Analytics API GET /analytics/dashboard hidup (T-072)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md" — setelah `T-071` (ADR-0026) selesai, next adalah `T-072` backend analytics (`42-API.md` §13).
+- **Konstruksi:** `dto/analytics_dto.go` (Query `from`/`to`/`project_id` + `DashboardResponse` KPI 6 + chart 8), `repository/analytics_repository.go` (10 agregat scoped via `projectScopePredicate` + `from`/`to`/`project_id`, `monthStart`, `LAG` untuk `avgTimePerStage`, 5 bucket `CASE` untuk `pendingAging`), `service/analytics_service.go` (`Dashboard` via `systemScope`), `handler/analytics_handler.go` (`Dashboard` + `parseAnalyticsQuery` → `422 field=from`/`to`/`project_id`, `to < from` → `422 field=to`), wiring `router.go` (`RouterDeps.Analytics`, group `/analytics` `report:read`) + `main.go`, `handler/main_test.go` (`engineParts.analytics`).
+- **Bukti:** `go vet`/`go build` OK; `make test` 9 paket **272 test** (naik 2: `TestAnalyticsDashboardValidation` 5 subtest + `TestAnalyticsDashboardSuccess`); curl manager `200` dengan `kpis`+`charts` array (tidak nil), viewer `403`, tanpa token `401`, `from` tidak RFC3339 `422`, `project_id` bukan UUID `422`, `to < from` `422`; `check-api-contract` → `49/56` (`AGENTS.md` diselaraskan), `ledger OK — 272 test`, enam pemeriksa hijau.
+- **Status:** DONE. **Next:** `T-073` Frontend Dashboard MVP (KPI cards + charts `recharts` + filter `?from=&to=`), `T-074` backlog Phase 5.
+
+---
+
+## P-055 — 2026-09-23 — ADR-0026 Dashboard MVP diikat (T-071)
+
+- **Prompt user:** "Lanjut T-071"
+- **Konteks:** P-054 menghasilkan `52-DASHBOARD-ANALYTICS.md` PROPOSED (telaah 60% READY / 40% ditahan, MVP KPI 6 + chart 8 tanpa `012`, metric dictionary 16) dan papan +4 TODO (`T-071` ADR-0026, `T-072` API, `T-073` frontend, `T-074` backlog). Q-DASH-01..04 tetap OPEN.
+- **Keputusan:** `docs/adr/0026-dashboard-mvp-metric-dictionary.md` **ACCEPTED** — Konteks `Dashboard.md` 30+ metrik vs data existing, Keputusan MVP (6 KPI: total/active/pending/overdue/avg time/revised + 8 chart: Status Dist/Volume Trend/Approval Trend/Funnel 4 tahap/Pending Aging/Avg Time per Stage/By Category/Activity Trend) tanpa `012`, Yang ditahan (Due for Review, SLA, by Department/Type, Expiry Calendar, Obsolete, stage history presisi) di `52-*` §4 / Q-DASH-01..04. Kontrak satu endpoint agregat `GET /analytics/dashboard` (`42-API.md` §13, `report:read`, interval tertutup, cakupan di kueri) — alternatif 8 endpoint ditolak, hardcode ditolak.
+- **Bukti:** `52-*` header v0.2.0 — diikat ADR-0026, `docs/adr/README.md` 26 baris, `TASKS.md` `T-071` TODO → DONE, `check-ledger` → `ledger OK — 270 test`, `check-doc-links` → `BROKEN 0`.
+- **Status:** DONE. **Next:** `T-072` API (tanpa tabel baru) → `T-073` frontend Dashboard MVP (keduanya TODO, tidak menghalangi Notifications/category).
+
+---
+
+## P-054 — 2026-09-23 — Telaah Dashboard.md: MVP tanpa migrasi, analitik penuh ditahan (T-071..T-074)
+
+- **Prompt user:** "Sebelum lanjut ke progress berikutnya, baca dan pelajari Dashboard.md, analisis apakah dapat diterapkan ke dalam sistem, masukkan ke dalam list task jika possible. Update seluruh dokumen design, jangan dieksekusi dulu, fokus ke analisis, desain dan lanjutkan progress yang lain"
+- **Temuan:** `Dashboard.md` 434 baris (Executive KPI 8 + chart 8, Workflow 7, Document Control 8, Approval 4, Activity, Filter 9, Drill-down, MVP §9 8+8, Design Principles). 30+ metrik dipetakan ke DDL: 60% **READY** dari `documents`/`workflow_instances`/`workflow_actions`/`document_versions`/`tasks`/`audit_logs` (tanpa migrasi), 40% **BUTUH FIELD/DEFINISI** — `department` (`by Department`), `review_due_at`/`expiry`/`published_at` (`Due/Obsolete`), SLA (`On Time/Late`), `Published` vs `approved`, `stage_history` presisi (`Average Time per Stage` butuh `stage_started_at`).
+- **Dokumen baru:** `52-DASHBOARD-ANALYTICS.md` (9 bab, status PROPOSED) — §1 ringkasan, §2 pemetaan READY/BUTUH+ tabel kosakata, §3 MVP KPI 6 + chart 8 (Status Dist, Volume Trend, Approval Trend, Funnel BWDCS 4 tahap, Pending Aging 5 bucket, Avg Time per Stage estimasi, By Category, Activity Trend), §4 field backlog, §5 kontrak `GET /analytics/dashboard` (satu endpoint agregat, `from`/`to` RFC3339 interval tertutup, `report:read`, cakupan di kueri — alternatif 8 endpoint ditolak), §6 tata letak `51-UX.md` §6.1 (KPI grid 4→2→1, filter global `?from=&to=&project_id=&status=` di URL), §7 metric dictionary 16 metrik, §8 urutan 4 langkah (ADR-0026 → API → frontend → backlog), §9 risiko department/SLA/published.
+- **Desain diperbarui (tanpa mengeksekusi widget):** `50-FSD.md` §9 (widget 7 → KPI 6+chart 8, 2 KPI ditahan), `51-UX.md` §6.1 (layout baru), `42-API.md` §13 (rencana GET), `41-DATABASE.md` §2.7 (MVP tanpa kolom baru), `30-ARCHITECTURE.md` §3.3, `00-README.md` baris 52, `20-SRS.md` FR-DASH-03/04, `80-ROADMAP.md` Phase 4/5 (Dashboard MVP planned).
+- **Papan kerja:** +4 TODO — `T-071` ADR-0026 metric dictionary, `T-072` backend `GET /analytics/dashboard` (tanpa tabel baru), `T-073` frontend KPI+chart + filter + drill-down, `T-074` backlog penuh (`department`, SLA, `review_due_at`, stage history). Q-DASH-01..04 tercatat (department, SLA, review_due/published, stage_history) — tidak menghalangi T-071..073.
+- **Verifikasi:** `check-doc-links` → `BROKEN 0`, `check-ledger` → `ledger OK — 270 test`, `check-api-contract` → `115`, `check-navigation` → OK, `check-readme-facts` → 46, `check-antislop` → OK (tanpa eksekusi kode — R-17 selamat karena Dashboard tetap `Panel` kosong).
+- **Status:** DONE — analisis selesai, seluruh peta desain selaras. **Next:** `T-071` ADR-0026 (butuh persetujuan), `T-072` API setelah ADR `ACCEPTED`, progress lain `T-072` Notifications / category `GET /documents` tidak menunggu Dashboard.
+
+---
+
+## P-053 — 2026-09-23 — Halaman Approvals berdiri: antrean, riwayat, aksi (T-070)
+
+- **Prompt user:** "Oke lanjutkan" — melanjutkan proses terpotong dari P-052 sesuai `CONTINUE.md` §0 Next: halaman Approvals.
+- **Yang sudah berdiri tetapi tanpa test/ledger:** `navigation.ts` Approvals `ready` (`T-070`), `App.tsx` routes `/approvals` + `/approvals/:id`, `services/workflows.ts` + `queries/workflows.ts` mengikuti `42-API.md` §5 apa adanya, `pages/Approvals/index.tsx` + `Detail.tsx` (worktree terpotong) — ditemukan saat audit awal sesi ini.
+- **Lapisan data:** `services/workflows.test.ts` 8 test (`list` status/scope + `fetch` encode + `act` version/comment + `resubmit` body kosong/berisi, meta fallback) — tanpa menebak cakupan (di server).
+- **Halaman daftar Approvals:** `Approvals.test.tsx` 9 test — tab Pending=`running&assigned_to_me` (kecualikan `revision_required` di klien, karena jeda revisi tidak dapat ditindak sampai re-submit), Approved=`completed`, Rejected=`rejected`; link ke detail `/approvals/:id`, meta/total, empty pending vs approved, 500 dengan muat ulang, axe.
+- **Halaman detail Approvals:** `ApprovalDetail.test.tsx` 7 test — loading, penanda overdue, jeda revisi (tombol hilang), instance `completed` (tidak ada aksi), `approve` mengirim `version`+`comment` terpangkas dan `409 WORKFLOW_CONFLICT`→alert+refetch, riwayat `actions`.
+- **Bukti:** `tsc --noEmit` OK, `eslint .` OK, frontend **282 test / 28 berkas** hijau (naik 25: 8+9+7+1), `vite build` 472kB, backend `make test` 9 paket 270 test, enam pemeriksa hijau (`ledger OK`, `BROKEN 0`, `readme-facts 46`, `api-contract 115`, `antislop-refs OK`, `navigation OK`).
+- **File:** `services/workflows.test.ts`, `pages/Approvals/Approvals.test.tsx`, `pages/Approvals/ApprovalDetail.test.tsx`, `prompts/P-053-...md`, ledger (TASKS T-070, STATE, SESSION-LOG, CHANGELOG, TRACEABILITY, CONTINUE).
+- **Status:** DONE. **Next:** sisa Q-016 category (owner menunggu Q-024), modul Notification (`42-API.md` §8) / Audit (§9) / Reports (§10) / Administration (§11) — backend maupun halaman.
+
+---
+
+## P-052 — 2026-09-23 — Rentang tanggal Documents: satu kelompok, satu semantik (T-069)
+
+- **Prompt user:** "Terapkan pola kelompok berlabel yang sama pada penyaring tanggal di halaman Documents, lalu buktikan dengan pengukuran di peramban."
+- **Kontrak backend baru (sisi tanggal Q-016):** `GET /documents` menerima `updated_from`/`updated_to` — interval tertutup, instan RFC 3339 ber-offset, rentang terbalik `422 field=updated_to` — semantik sama persis dengan `due_from`/`due_to` tasks. Tiga lapis: handler, service, repository (parameter yang sama mengalir ke tambalan `COUNT(*) OVER()` C-048). `42-API.md` §4 dan `50-FSD.md` §4.1 diselaraskan; sisa Q-016 kini hanya category dan owner.
+- **Halaman Documents:** kelompok `role="group"` berlabel "Rentang pembaruan" (pola P-049), berdampingan dari `sm:`, menumpuk dalam kelompok yang sama di layar sempit; **satu aksi terapkan** untuk pencarian dan rentang (Enter pada form memicu submit tombol pertama — dua aksi terpisah membuang draft rentangnya); konverter dipinjam dari modul task, validator terpisah `validateUpdatedAtRange` karena kunci kontraknya `updated_*`.
+- **Pemeriksa baris berhenti milik Tasks:** `measureTaskFilters` → `measureFilterRow(formLabel)` untuk ketiga halaman pada setiap lebar; kelompok dicari lewat struktur + `expectedRanges` per halaman (Projects 0, Tasks 1, Documents 1). Kunci laporan JSON berganti `taskFilters` → `filterRows`.
+- **Dua cacat alat ukur lahir dan ditutup di sesi yang sama:** (1) tombol bersebelahan kelompok ber-label dituduh melanjutkan kolomnya — ekornya bahasa tata letak `items-end`, kini dibedakan dengan alasan tertulis; (2) test batas gagal lagi pada sapuan penuh karena fixture memotong `created_at` ke detik — diperbaiki `RFC3339Nano` plus koreksi kasus `2027`→`2020`.
+- **Bukti:** service + HTTP test (11 kasus + 3 kasus 422 + terbalik) — `make test` **270 test** / 9 paket hijau; server nyata: `422` dua bentuk pada binari terkini (probe pertama memakai binari lama dan membalas 200 — pelajaran run.md §3); peramban: `sameGroup`+`sameLine` di 768/1024/1440px, menumpuk dalam kelompok di 375px, `overflowX 0` semua lebar; gigi: hapus `role="group"` → `FAIL` di keempat lebar, dipulihkan byte-sama. Frontend **257 test / 25 berkas**, `tsc`/`eslint`/`vite build` bersih, `responsive-evidence OK`, enam pemeriksa hijau.
+- **File:** `document_handler.go`/`document_service.go`/`document_repository.go` + dua test backend; `services/documents.ts`, `pages/Documents/index.tsx`, `Documents.test.tsx`; `scripts/responsive-evidence.mjs`; `42-API.md` §4, `50-FSD.md` §4.1, `70-TESTING.md` §3.14i; ledger (TASKS/STATE/SESSION-LOG/CHANGELOG/TRACEABILITY/CONTINUE) + log ini.
+- **Status:** DONE. **Next:** sisa Q-016 (category, owner — owner menunggu Q-024), halaman Approvals (`50-FSD.md` §5.4), modul Notification/Audit/Report/admin (`42-API.md` §8–§11).
+
+## P-051 — 2026-09-23 — Penegak mesin untuk batas sidebar, dan tiga cacat yang lahir dari membuatnya (T-067/T-068)
+
+- **Prompt user:** "Buat pemeriksa yang menolak item sidebar baru yang membawa kueri penyaring atau menunjuk sub-halaman, supaya aturan 51-UX.md §2.1 tidak dapat dilanggar diam-diam."
+- **Satu keputusan diminta ke user lebih dulu:** halaman **Audit** (di bawah Reports) punya rute dan izin, tetapi tidak punya jalan masuk kalau ia tidak boleh menjadi entri sidebar. Pilihan yang diambil: daftarkan sebagai **halaman anak** di baru `subPages` (`parent`) yang muncul di baris sub-navigasi modul induknya — bukan mengembalikannya ke sidebar, bukan membiarkannya tanpa jalan masuk. Itulah `T-067`.
+- **Yang diminta bukan "tambah satu test klien"**, dan alasannya penting: CI repo ini **tidak punya job frontend** (hanya `ledger` dan `backend`), sehingga test klien tidak pernah berjalan di sana. Karena itu penegaknya dibuat sebagai **skrip shell** yang menghitung dari berkasnya sendiri, seperti lima pemeriksa lain — dan karena ia membaca **teks**, bentuk berkas yang tidak dikenali **wajib gagal**.
+- **`scripts/check-navigation.sh` (`T-068`) menolak:** entri sidebar berkueri/berfragmen; entri sidebar lebih dari satu segmen (menunjuk sub-halaman); label menu bergaya remah (`X > Y`); halaman anak tanpa induk/berinduk hantu/di luar induknya; path atau label ganda; **himpunan menu yang menyimpang dari tabel §2.1 dua arah**; teks §2.1 yang tidak lagi menyatakan "modul saja"; dan objek tanpa label/path/induk (penjaga bentuk). Keluarannya `navigation OK — 7 menu sidebar (tanpa kueri, satu segmen), 1 halaman anak ber-induk, 8 baris §2.1 cocok`.
+- **Gigi dibuktikan dengan tujuh cacat disuntikkan sementara, dan ketujuhnya tertangkap** (rinciannya `70-TESTING.md` §3.14h); berkasnya dipulihkan **byte-identik** (`diff -q`) sebelum sesi ditutup. Cacat ketujuh **bukan** pelanggaran aturan melainkan kerusakan bentuk berkas, dan dialah yang menemukan **C-080**: penjaga hampa yang hanya menghitung jumlah menu tidak menyala saat kunci `label:` diganti nama, sehingga parser memancarkan tujuh objek berisi kosong dan skrip melaporkan **25 kegagalan yang semuanya menyesatkan** — kini penjaga bentuk berhenti dengan satu sebab yang benar.
+- **Temuan pertama justru tentang ketiadaan penegaknya (C-079).** Aturan §2.1 hanya dijaga test klien yang **tidak berjalan di CI**, dan satu-satunya pemeriksa yang menyentuh bentuk menu (`responsive-evidence.mjs`) hanya mencari item yang membawa **kueri** — path bersarang luput. Jadi halaman anak dapat masuk sidebar tanpa ada yang gagal: kelas cacat yang tidak dapat ditangkap apa pun, karena yang tidak ada bukan pemeriksaan yang lemah melainkan **pemeriksaan yang tidak pernah diadakan**.
+- **Temuan ketiga lahir dari menyunting paragrafnya sendiri (C-081).** Saat menyambung rantai "... menjadi **N**" di §1 laporan audit, angka ujungnya **75** sementara markernya **78**. Ketahuan bahwa aturan prosa `check-ledger.sh` hanya membaca baris yang menyebut `AUDIT-001`, sedangkan paragraf itu berada di berkas audit itu sendiri — jadi satu-satunya tempat yang menyatakan total "secara keseluruhan" adalah satu-satunya tempat yang tidak diperiksa mesin, dan ia tertinggal tiga sesi. Ditutup dengan aturan baru: ringkasan §1 laporan audit wajib sama dengan markernya; gigi dibuktikan dengan **empat** cacat (kedua tempat ringkasan dikembalikan ke angka lama, dan keduanya juga diuji saat berubah bentuk), lalu berkasnya dipulihkan byte-identik. **Versi pertama aturannya sendiri mengulang cacat C-080 di sesi yang sama:** regexnya dikirim ke `awk` lewat `-v`, yang memproses escape sehingga `\*` menjadi `*` — polanya tidak pernah cocok, perbandingannya tidak berjalan sekali pun, dan `check-ledger.sh` melaporkan **OK**; ketahuan hanya karena giginya diuji, bukan karena skripnya dibaca.
+- **Temuan keempat dari verifikasi rutin, dan bentuknya paling menyesatkan (C-082).** Suite frontend **gagal berpindah-pindah antar-berkas pada kode yang sama**: tiga dari lima kali `npm run test:run` gagal (berkas yang gagal berbeda tiap kali), sementara `--maxWorkers=2` dan `--maxWorkers=1` **hijau penuh 25/25** pada kode yang sama. Dom yang dicetak kegagalan menunjukkan halaman berhenti di **kerangka pemuatan** padahal service-nya di-mock `mockResolvedValue`, yaitu anggaran waktunya yang habis, bukan datanya yang tidak datang: jendela bawaan `findBy*`/`waitFor` adalah **1000ms**, dan angka itu adalah klaim tentang **kecepatan mesin**. Penyembuh yang tersedia bagi pembacanya adalah **mengulang**, dan itulah bahayanya: kebiasaan itu menghapus kemampuan repo mendeteksi regresi. Dinaikkan `asyncUtilTimeout: 5000` + `testTimeout: 20000` **tanpa melonggarkan satu asersi pun**, dan tiga kali jalannya hijau berturut-turut (jumlah testnya tetap 254 / 25 berkas).
+- **Bukti:** `tsc --noEmit` + `eslint .` bersih, frontend **254 test / 25 berkas** hijau tiga kali berturut-turut, `vite build` 456,31 kB js / 23,43 kB css; enam pemeriksa hijau (`ledger OK — 0 peringatan, 268 test di backend`, `BROKEN referensi dokumen: 0`, `readme-facts OK — 46 fakta`, `api-contract OK — 115 pemeriksaan`, `antislop-refs OK`, `navigation OK`). **Backend tidak disentuh** — tanpa perubahan kode, kontrak, izin, atau skema.
+- **Artefak:** `T-067`/`T-068` di `TASKS.md`; `70-TESTING.md` §3.14h; audit `C-079`..`C-082` (hitungan **82/80/0/2** di lima dokumen); `02-AGENT-PROGRESS-PROTOCOL.md` §6.5; log `prompts/P-051-2026-09-23-pemeriksa-batas-sidebar.md`.
+- **Next action:** halaman **Approvals** (`50-FSD.md` §5.4) — endpointnya sudah hidup sejak P-048, halamannya belum dibangun. Saat itu dikerjakan: halaman itu **wajib** masuk daftar `pages` di `responsive-evidence.mjs`, dan entri barunya wajib tetap berupa **modul** menurut pemeriksa yang baru (tab antreannya hidup di halamannya sendiri).
+
+---
+
+## P-050 — 2026-09-23 — Sapuan per lebar untuk setiap halaman, dan tiga temuan yang lahir darinya (T-066)
+
+- **Prompt user (ringkas):** "Jalankan pengukuran tata letak per lebar untuk halaman Tasks dan Documents, bukan hanya Projects."
+- **Yang diubah bukan dua baris di dokumen, melainkan cakupan sapuannya.** Sejak P-043 sapuan per lebar hanya mengunjungi `/projects`; halaman lain diukur **hanya di dua ujung** lebar, sehingga cacat yang hanya muncul di lebar tengah tidak terlihat dari keduanya. Kini `projects`/`tasks`/`documents` diukur pada `375/640/768/1024/1440` (15 pengukuran tata letak, 18 pengukuran tema), dan pada **setiap** lebar ikut diperiksa sidebar, bilah tab Documents, dan baris penyaring Task.
+- **C-076 — kolom penyaring tidak dapat menyusut, dan cacatnya bergantung pada data.** `#penyaring-project-dokumen` terukur **403px** pada viewport 375px, sehingga halaman menggulir mendatar **44px**. Sebabnya bukan penataan yang salah: kolom penyaring adalah item flex, dan min-width otomatisnya adalah **min-content** anaknya — untuk `<select>`, min-content ditentukan **teks pilihan terpanjang**, yaitu data pengguna. Pada database yang lebih sepi cacatnya hilang sendiri. Halaman **Projects** menyimpan cacat yang sama meski pilihannya pendek; probe pilihan panjang mengukurnya **65px**, dan ia menemukannya di halaman yang sudah disapu penuh sejak P-043.
+- **C-077 — ambang sentuh hanya berlaku pada tingginya.** `@utility tap-target` hanya menetapkan `min-height`, sehingga tab sub-halaman **"Tim"** terukur **43x44px**: tinggi memenuhi ambang, lebarnya tidak. Ia satu-satunya kontrol setipis itu karena labelnya terpendek — cacat yang menunggu sampai ada label yang cukup pendek. Utility kini menetapkan **kedua sisi**.
+- **C-078 — lima cacat pada alat ukurnya sendiri, dan tiga di antaranya mengurangi pemeriksaan tanpa suara.** (1) cakupan yang tidak pernah meluas; (2) argumen berspasi `--widths 375,768` **diam-diam diabaikan** parser, padahal bentuk itulah yang tertulis di komentar pemakaian berkasnya sendiri — pengukuran berjalan pada lebar bawaan sementara hasilnya terlihat sah; (3) jeda tetap 1500ms yang kalah balapan dengan font/route malas/kueri data, dan itu pernah menghasilkan **positif palsu** "gulir mendatar 44px"; (4) pemeriksaan "kolom melanjutkan di bawah kontrolnya" menandai kendali majemuk yang sah (isian pertama dari dua isian yang menumpuk); (5) probe stres melaporkan **luas** halaman alih-alih **pertambahannya**, sehingga menuduh kontrol yang salah pada halaman yang sudah melebar.
+- **Perbaikannya, dan apa yang membuatnya berbeda:** `min-w-0` pada setiap kolom ber-`select` di ketiga halaman (kolom rentang tenggat sengaja **tidak** — dua `datetime-local` memang tidak dapat menyusut, dan memaksa kolomnya menyusut hanya memindahkan luapannya ke dalam kelompoknya); ukuran menunggu **tata letak berhenti berubah** alih-alih jeda tetap; ampas diperiksa dengan **pilihan sengaja panjang** yang disisipkan ke setiap `select` penyaring, sehingga aturannya tidak lagi bergantung pada data yang kebetulan ada; dan satu fase yang hampa pada masukan tertentu dilewati **dengan alasan tertulis**, bukan dijalankan hampa maupun dilewati diam-diam.
+- **Gigi dibuktikan.** Dua cacat dipasang kembali sekaligus → `responsive-evidence` **FAIL enam butir**, termasuk `halaman tasks @ 375px: 1 kontrol di bawah 44px (Tim=43x44)`, `halaman documents @ 375px: gulir mendatar 44px (…#penyaring-project-dokumen…)`, dan `pilihan penyaring yang panjang melebarkan halaman 21px`. Keduanya dipulihkan lalu hijau.
+- **Bukti:** `tsc --noEmit` + `eslint .` bersih, frontend **247 test / 25 berkas** hijau (naik dari 241/24), `vite build` 455,5 kB js / 23,4 kB css, `responsive-evidence OK` — **0px** gulir mendatar di kelimabelas pengukuran, **0** kontrol di bawah ambang, **0** pertambahan dari stres pilihan panjang; lima pemeriksa dokumen hijau; audit **78/76/0/2**.
+- **Artefak:** `T-066` di `TASKS.md`; `70-TESTING.md` §3.14g (+ catatan di §3.14b/§3.14f); `51-UX.md` §2.1; audit **C-076/C-077/C-078** beserta hitungan di enam dokumen; log `prompts/P-050-2026-09-23-sapuan-per-lebar-setiap-halaman.md`. **Tanpa perubahan backend, kontrak, izin, atau skema.**
+- **Catatan lingkungan:** laporan dijalankan dengan `ADMIN_PASSWORD` dari lingkungan, bukan dari `.env`, karena `.env` di checkout ini diubah pada 2026-09-23 14:05 menjadi nilai yang tidak cocok dengan password admin di database (baris `users` tidak berubah sejak 2026-09-19). Skrip bukti membaca `process.env.ADMIN_PASSWORD` lebih dulu, sehingga pengukuran tetap berjalan tanpa menyentuh kredensial siapa pun.
+
+---
+
+## P-049 — 2026-09-23 — Rentang tenggat jadi satu kendali, dan ukurannya menemukan cacat sendiri (T-065)
+
+- **Prompt user (ringkas):** "Rapikan pengelompokan penyaring rentang tenggat di halaman Tasks supaya kedua batasnya tidak terpisah baris."
+- **Kekurangannya sudah dinyatakan sesi sebelumnya, dan sebabnya kini terukur.** `70-TESTING.md` §3.14e mencatat bahwa baris penyaring **melipat** sehingga dua kolom dapat jatuh ke garis berbeda; bentuk lamanya mencatat batas awal di `top 220px` dan batas akhir di `289px` pada 1440px. Angka yang semula dugaan itu kini diukur ulang dari bentuk lamanya sendiri, bukan dikutip.
+- **Yang dikerjakan bukan sekadar "sebaris".** Kedua isian disatukan ke **satu kelompok ber-peran `group` berlabel "Rentang tenggat"**: berdampingan pada lebar lebar, **menumpuk di dalam kelompok yang sama** pada lebar sempit. Pemisah "sampai" dibiarkan `aria-hidden` karena kedua isian sudah bernama sendiri lewat `aria-label`.
+- **Ukurannya menemukan cacat yang baru saja saya buat.** Percobaan pertama menempatkan keduanya berdampingan di semua lebar; pada 375px pasangan itu menuntut ~400px dan mendorong halaman menggulir mendatar **71px**. Yang dipilih bukan memotong lebar isian (nilainya terpotong) atau kembali ke dua kolom (kekurangannya kembali), melainkan menumpuknya di dalam kelompok — sehingga yang dipertahankan **hubungan** kedua batas, sedangkan posisinya menyesuaikan lebar.
+- **Satu cacat pada alat ukur itu sendiri ketahuan dari percobaan gigi.** Butir baru di `scripts/responsive-evidence.mjs` semula mencari isiannya lewat `aria-label`; pada bentuk lama labelnya berbeda, sehingga butir itu berbunyi "tidak ditemukan" — berhenti **mengukur** tepat pada bentuk yang harus ditangkapnya, kelas yang sama dengan **C-075**. Pencariannya dipindah ke **`id`** yang stabil, pesan kegagalannya dikoreksi menyebut `id`, dan sesudah itu cacatnya tertangkap karena alasan yang benar.
+- **Gigi dibuktikan.** Bentuk lama (dua kolom terpisah) dipasang kembali → `responsive-evidence` **FAIL tiga butir sekaligus**: `tidak berada di satu kelompok ber-label` pada 1440px **dan** 375px, plus `terpisah baris (atas 220px vs 289px)`. Bentuk lamanya dipulihkan lalu hijau lagi.
+- **Bukti:** `tsc --noEmit` + `eslint .` bersih, frontend **241 test / 24 berkas** hijau (naik dari 240/24), `responsive-evidence OK` (375/768/1024/1440px, gulir mendatar 0 di keempat lebar); 1440px `fromTop == toTop == 289` + `sameLine` + `sameGroup`, 375px `sameGroup` + `overflowX = 0` + tinggi kontrol 44px seragam.
+- **Artefak:** `T-065` di `TASKS.md`; `70-TESTING.md` §3.14f; `51-UX.md` §2.1 (aturan "dua kendali yang membentuk satu nilai berdiri sebagai satu kelompok"); log `prompts/P-049-2026-09-23-rentang-tenggat-satu-kelompok.md`. **Tanpa perubahan backend, kontrak, izin, atau skema**; tidak ada temuan audit baru.
+
+---
+
+## P-048 — 2026-09-23 — Modul Workflow hidup: sembilan endpoint, 29 test, dan 46 asersi pada server nyata (T-064)
+
+- **Prompt user (ringkas):** "Kerjakan modul Workflow di backend sesuai 43-WORKFLOW.md dan ADR-0015/0016, mulai dari definisi workflow sampai instance yang berjalan."
+- **Sesi dibuka dengan membaca sumber desain berurutan** (`43-WORKFLOW.md`, `42-API.md` §5, `41-DATABASE.md` §2.4, migrasi `005`/`007`, ADR-0014/0015/0016) lalu membandingkannya dengan pola yang sudah terbukti di modul project/document/task/comment — sehingga tidak ada mekanisme kedua yang dikarang: cakupan tetap lewat `systemScope`, audit tetap lewat `AuditService.Log(ctx, tx)`, izin tetap dari `PermissionChecker`, dan transisi tetap conditional `UPDATE` ber-guard.
+- **Modul yang paling lama tinggal sebagai kontrak akhirnya berjalan.** `43-WORKFLOW.md` sudah ada sejak P-007 dan kontraknya di `42-API.md` §5 sejak P-013/P-017, tetapi tidak ada satu baris kode pun sampai sesi ini. Sembilan endpoint hidup: definisi + step, submit, aksi `approve`/`reject`/`request_revision`, re-submit setelah revisi, dan daftar/detail instance ber-cakupan. Las lengkap `model`/`dto`/`repository`/`service`/`handler` + wiring `router.go`/`main.go`.
+- **Tiga aturan yang paling mudah dikarang justru yang ditegakkan paling ketat.** (1) Guard ADR-0015: `ApplyTransition` menuntut **empat** kondisi `WHERE` (id, `version`, `status = running`, `current_step`) — `rowsAffected = 0` → rollback + `409 WORKFLOW_CONFLICT` ber-`details` objek keadaan terkini, bukan `500` dan bukan pesan sukses. (2) **Jeda revisi dibaca dari status dokumen, bukan status instance**: selama `revision_required` instance tetap `running`, jadi bila yang diperiksa hanya `status` instance, seluruh aksi tetap akan diterima — probe membuktikannya (`409` walau `running`). (3) **Urutan pemeriksaan `ExecuteAction`** membuat setiap penolakan tidak meninggalkan jejak: izin dari isi body → cakupan → baca instance → tolak dini `version` → status instance → status dokumen → role penanggung jawab → belum-bertindak-dalam-siklus → baru `ApplyTransition`.
+- **Tiga temuan audit ditutup dari modul ini, dan ketiganya kelas yang tidak dapat ditangkap pemeriksa yang ada.** **C-073**: pseudokode `43-WORKFLOW.md` §4.1 memuat `Actor must have the responsible_role OR be admin` — jalan pintas yang tidak ada di `44-SECURITY.md` §3.1/§3.3, `50-FSD.md` §5.4, maupun `51-UX.md` §2.1, yang semuanya menetapkan izin **dan** penunjukan step sebagai syarat **bersamaan**. Akibatnya bukan kosmetik: dengan aturan `OR`, Administrator dapat menyetujui step milik Manager dan `403` "bukan penanggung jawab step" tidak akan pernah terjadi bagi role tertinggi. Ia lolos dari `check-api-contract.sh` (114 pemeriksaan) karena penunjukan step **bukan** pasangan resource/action sehingga tidak punya baris di matriks. **C-074**: `42-API.md` §5 menyebut "**satu-satunya** route di sistem yang izinnya bergantung pada isi body", sedangkan `42-API.md` §6 dan `40-TSD.md` §6 aturan 3 menyebut himpunan yang sama berisi **dua** — kalimat yang benar saat ditulis (P-013) dan menjadi salah pada P-026, dengan dua tempat diperbarui dan yang ketiga tertinggal.
+- **Temuan ketiga justru tentang alat pemeriksanya sendiri.** Saat angka `STATE.md` §3 dihitung ulang satu per satu untuk baris modul Workflow, ternyata `scripts/check-ledger.sh` hanya mengenali dua bentuk penulisan klaim hitungan test per berkas — sehingga dua klaim yang ditulis `(N test: …)` **tidak pernah diperiksa** (`bootstrap_test.go` tertulis 10, sebenarnya 8; `audit_append_only_test.go` 14, sebenarnya 15) sementara skripnya melaporkan **OK**; klaim versi skema yang menunjuk keadaan sekarang juga masih menulis `10` padahal `11` di `STATE.md` §3 dan `CONTINUE.md` §2 (bagian bukti yang sengaja merekam versi saat dijalankan tidak diubah), dan `AGENTS.md` masih menulis anotasi izin **40/51** padahal **48/55** — angka yang memang dihitung `check-api-contract.sh` tiap kali ia jalan, tetapi tidak pernah dibandingkan dengan kalimat siapa pun. Dicatat sebagai **C-075**: polanya diperluas ke bentuk ketiga, keempat angka dikoreksi, dan `check-api-contract.sh` mendapat **butir baru** yang membandingkan klaim `AGENTS.md` dengan hitungannya sendiri. Gigi dibuktikan dua kali dengan memasang kembali nilai lama: `ledger GAGAL — bootstrap_test.go ditulis 10 test, sebenarnya 8`, lalu `api-contract GAGAL: 2 temuan` ketika `48/55` dikembalikan menjadi `40/51`. Pelajarannya sama dengan C-074: pola yang tidak mengenali sebuah klaim adalah cara paling sunyi mematikan pemeriksaan.
+- **Test konkurensi diperbaiki karena lulus hampa.** `TestWorkflowConcurrentApprovalAcceptsExactlyOne` memakai definisi dua step ber-penanggung jawab berbeda, sehingga tepat satu approval diterima apa pun urutan eksekusinya — ia akan tetap hijau walau guard `version`-nya dicabut. Test itu kini menyatakan apa yang sebenarnya ia buktikan (**guard secara keseluruhan**), sedangkan kondisi `version` dikunci `TestWorkflowTransitionGuardIsOptimistic`.
+- **Gigi dibuktikan mutasi, dan hasilnya mengoreksi klaim saya sendiri.** Kondisi `version` di `ApplyTransition` diganti sementara menjadi selalu-benar (`version = $2 OR $2 >= 0`) → `TestWorkflowTransitionGuardIsOptimistic` **gagal** tepat pada `transisi dengan version basi menyentuh 1 baris, diharapkan 0 (ADR-0015 §6)`; guard dipulihkan lalu hijau. Mutasi yang sama **tidak** menggagalkan test konkurensi — dan itu memang tertulis di testnya (kondisi `current_step` sudah cukup). Klaim awal saya di `70-TESTING.md` §3.15 sempat atribut gigi itu kepada test yang salah; diperbaiki sebelum sesi ditutup, dan pembagian peran kedua test itu kini dinyatakan eksplisit.
+- **Bukti server nyata (`python3 scripts/probe-workflow-module.py` → 46/46 asersi PASS, 0 FAIL):** lima aktor login sungguhan (admin, manager, contributor, viewer, non-anggota). Definisi: tanpa step `422 field=steps`, `order` duplikat `422 steps[1].order` (dan `409` bila menabrak `UNIQUE`), role di luar empat role sistem `422`, semua role boleh membaca, contributor mengubah `403`. Submit: instance `running` step 1 **version 0**, dokumen `in_review`, deadline terisi, notifikasi `APPROVAL_REQUIRED` ke **semua** pemegang role step, submit kedua `409`. Aksi: contributor `403` walau route hanya menuntut `workflow_instance:read`; **administrator yang bukan penanggung jawab step juga `403`** (C-073); `version` basi `409 WORKFLOW_CONFLICT` ber-`details`; approve tengah → step 2 + `version` naik; approve terakhir → instance `completed` + dokumen `approved` + deadline dikosongkan; aksi atas instance selesai `409`. Revisi: dari step 3 mundur ke **step 2** (bukan step 1), instance tetap `running`, seluruh aksi ditolak selama jeda, `resubmit` melanjutkan instance yang sama **tanpa** baris `workflow_actions` baru dan **tanpa** memindahkan step, siklus aksi terbuka kembali (C-025), audit membedakan `DOCUMENT_SUBMITTED` dari `DOCUMENT_RESUBMITTED`. Cakupan: non-anggota `total 0` (bukan `404` yang membocorkan) dan detail di luar cakupan `404`. Baseline pulih: instance 0, definisi 0, audit 49/49, **skema tetap 11**.
+- **Verifikasi:** `cd backend && make test` → sembilan paket `ok`, **268 test** (naik dari 239); `gofmt -l`/`go vet` bersih; `ledger OK — 0 peringatan, 268 test`; `api-contract OK — 115 pemeriksaan, 55 endpoint`; `readme-facts OK — 44 fakta` (setelah ember route `workflows` ditambahkan — pemeriksa itu **gagal pada percobaan pertama** sesi ini, tepat seperti fungsinya); `check-doc-links` → `BROKEN: 0`; `check-antislop-refs OK`. **Tidak ada perubahan skema, endpoint baru di luar §5, izin baru, atau migrasi** — tabel dan `notifications.type` bebas sudah cukup.
+- **Artefak:** `T-064` di `TASKS.md`; `70-TESTING.md` §3.15; `TRACEABILITY.md` (tujuh baris `FR-WF-*` → `DONE`); audit `C-073`/`C-074`/`C-075` (hitungan 75/73 di enam dokumen); `AGENTS.md` (blok aturan modul workflow); log `prompts/P-048-2026-09-23-modul-workflow-dan-probe-46-pass.md`.
+- **Next action:** halaman **Approvals** di frontend (`50-FSD.md` §5.4 — endpointnya kini hidup), lalu modul **Notification** di backend (tabelnya sudah dipakai workflow, handler-nya belum).
+
+## P-047 — 2026-09-23 — Sidebar kembali menjadi daftar modul, dan penyaring Task kembali sebaris (T-063)
+
+- **Prompt user (ringkas):** "Pada modul Tasks, perbaiki filter Penanggung Jawab, tingginya beda dengan filter lain karena ada text di bawah selection. Optimize juga menu sidebar, terlalu banyak item padahal hanya filter atau pindah tab pada halaman sesungguhnya. Lanjutkan ke progress berikutnya."
+- **Turn sebelumnya dihentikan sebelum bertindak, jadi sesi dibuka dengan membaca ulang disk** (`pages/Tasks/index.tsx`, `config/navigation.ts`, `components/layout/Sidebar.tsx`, `pages/Documents/index.tsx`, `pages/ModulePending.tsx`, `AppShell.test.tsx`, `navigation.test.ts`, `scripts/responsive-evidence.mjs`) alih-alih mengulang atau mengandaikan.
+- **Dua keluhan itu ternyata dua kelas sebab yang berbeda, dan keduanya bukan yang terlihat di layar.** (1) Penyaring **Penanggung jawab** lebih tinggi **bukan** karena warna atau ukuran kontrol, melainkan karena **kolomnya** yang lebih tinggi: kolom itu memuat `<p>` catatan di bawah `<select>`-nya, sehingga kontrolnya terangkat sendiri dari baris ber-`items-end`; catatannya dipindah ke blok catatan di bawah baris penyaring (batas C-063 tetap dinyatakan) sehingga ketujuh kontrol pertama kembali berbagi `bottom 256`. (2) **Sidebar** bukan terlalu banyak halaman, melainkan **redundansi**: `subItems` mendaftarkan penyaring yang sudah ada di halaman, sehingga delapan menu menghasilkan **lima belas** tautan; `subItems` dibuang dan sub-navigasi pindah ke halaman yang memiliki daftarnya.
+- **Yang „tidak boleh hilang” bukan item menunya, melainkan kemampuannya.** Karena itu **Documents** mendapat baris tab (`Semua`, `Milik saya`, `Pending Review`, `Revision Required`, `Approved`) **lebih dulu** — tanpa itu, penyaring `?view=mine` kehilangan satu-satunya jalan masuk dari antarmuka dan penjelasan **Q-016** ikut tenggelam. **Projects** tidak diberi tab: "List" adalah halaman itu sendiri dan "Create" adalah tombol aksi di header. `51-UX.md` §2.1 ditulis ulang (kolom `Sub-items` → kolom halaman + sub-navigasinya).
+- **Cacat ketiga ketahuan dari penurunan aturan, bukan dari keluhan:** penanda menu aktif memakai `NavLink` dengan pencocokan **awalan**, sehingga `/reports` dan `/reports/audit` sama-sama memasang `aria-current="page"`. Aturannya kini **diturunkan dari daftar path** (`requiresExactMatch`), bukan dipelihara sebagai daftar `end` yang pasti ketinggalan saat menu baru ditambahkan.
+- **Tiga klaim diubah menjadi ukuran, dan itu menemukan kelemahannya sendiri.** `scripts/responsive-evidence.mjs` diperluas dengan bagian `navigation`: pemeriksaan pertama saya ("semua kontrol sebaris") **salah rancang** — ia membandingkan seluruh form padahal barisnya memang melipat, dan percobaan berikutnya (mengelompokkan per `top`) **lulus hampa** karena kontrol yang terangkat punya `top` unik sehingga ia dianggap garisnya sendiri. Ukuran yang benar adalah **jarak tepi bawah kolom ke tepi bawah kontrolnya**: kontrol harus menjadi elemen terakhir di kolomnya. Sesudah itu barulah gigi-nya terbukti.
+- **Gigi dibuktikan dua kali, bukan diklaim:** cacat (1) dipasang kembali → skrip bukti **FAIL** tepat pada `kolom "Penanggung jawab" melanjutkan 23px di bawah kontrolnya`; aturan awalan lama dipasang kembali → test AppShell **gagal** pada `Reports` yang ikut `aria-current="page"`. Keduanya dipulihkan, lalu hijau.
+- **Bukti peramban nyata (`node scripts/responsive-evidence.mjs` → `OK`):** sidebar `[Dashboard, Projects, Documents, Tasks, Approvals, Reports, Reports > Audit, Administration]` dengan **0** tautan berkueri, **0** tautan sub-halaman, dan **1** menu bertanda aktif; baris penyaring Task **2 garis** dengan **0** kontrol terangkat dan tinggi seragam 36px; tab Documents **5 tautan** dengan satu penanda, dan klik sungguhan pada `Milik saya` memindahkan penanda **sekaligus** memunculkan alasan Q-016; gulir mendatar **0** di 375/768/1024/1440px; 6 pengukuran tema; laci 375px membereskan dirinya.
+- **Verifikasi:** `tsc --noEmit` bersih, `eslint .` bersih, **240 test / 24 berkas** hijau (naik dari 234/24), `vite build` 455,3 kB js / 23,3 kB css; lima pemeriksa dokumen hijau; MySQL/PostgreSQL tidak disentuh — **tidak ada perubahan backend, kontrak, izin, atau skema** pada sesi ini.
+- **Artefak:** `T-063` di `TASKS.md`; `51-UX.md` §2.1; `70-TESTING.md` §3.14e; log `prompts/P-047-2026-09-23-sidebar-modul-dan-penyaring-sebaris.md`; `.freebuff/run.md` (baseline versi skema dikoreksi ke **11**).
+- **Next action:** modul **Workflow** backend (Phase 2 — satu-satunya fase yang belum disentuh, dan halaman Approvals menunggu `GET /workflows/instances`-nya).
+
+## P-046 — 2026-09-22 — Halaman bisnis ketiga berdiri: Tasks, dengan dua klaim yang dibuktikan paling keras (T-062)
+
+- **Prompt user (ringkas):** "Bangun halaman Tasks di frontend dengan pola yang sudah terbukti di Projects dan Documents, termasuk penyaring tri-state overdue dan transisi statusnya." (dilanjutkan dari sesi yang terputus dan dari permintaan cross-check dokumen desain)
+- **Sesi dibuka dengan verifikasi kondisi disk, bukan mengulang pekerjaan.** Seluruh berkas Tasks (`services/tasks.ts`, `queries/tasks.ts`, `pages/Tasks/{index,CreateTaskDialog,TaskDetail}.tsx`, tiga berkas test, `scripts/probe-task-module.py`) sudah tertulis dengan waktu modifikasi sesi terputus; dibaca ulang kedua halaman dan lapisan kuerinya, lalu diperiksa terhadap dokumen desain sebelum satu baris pun ditambah.
+- **Dua perilaku yang paling mudah dikarang justru yang dibuktikan paling keras.** (a) **Tri-state overdue** dikirim tiga keadaannya (`""`/`"true"`/`"false"`) dengan tiga pilihan yang menerangkan ketiga keadaannya, termasuk yang paling sering keliru: `?overdue=false` **memuat** task tanpa tenggat, karena task tanpa tenggat tidak pernah overdue — halaman detail menerangkan hal itu secara eksplisit. (b) **Tabel transisi** §6.3 dirender di detail (aksi → transisi → endpoint → izin) dan tombolnya dipilih menurut status berjalan: `Complete` tidak pernah ditawarkan pada task `open` karena server membalas `409`.
+- **Verifikasi frontend:** `tsc --noEmit` dan `eslint .` bersih; **234 test / 24 berkas** hijau (naik dari 188/21); `vite build` 455,8 kB js / 23,5 kB css. Test mengunci perilakunya: `Tasks.test.tsx` punya test eksplisit "membedakan tiga keadaan penyaring overdue, bukan dua" yang memeriksa nilai kueri yang dikirim (`""` → `"false"` → `"true"` → `""`); `TaskDetail.test.tsx` menguji ketiga transisi, ketidakhadiran tombol yang tidak sah menurut status, pesan izin, dan penjelasan `409`.
+- **Bukti server nyata: 41/41 PASS** (`scripts/probe-task-module.py`, 16 kelompok langkah, binari dari kode sesi ini, `versi_skema 11`, aktor kedua ber-role viewer). Tri-state (`total=4` → `true total=2` → `false total=2` → nilai asing `422 field=overdue`); rentang inklusif (kedua batas termasuk, `due_to==due_from` sah, terbalik `422 field=due_to`); halaman di luar rentang `total` tetap 4 (tambalan C-048/T-043 terbukti hidup); ketiga transisi + `409` Complete-dari-Open + `409` PATCH status + `409` pindah project + `422` POST dengan status (task selalu lahir `open`); penanda overdue hilang saat selesai; cakupan tulis (viewer non-anggota `total 0`/`404`/`403` → `200` sesudah jadi anggota); jejak audit task; baseline pulih otomatis oleh probe itu sendiri (`users 1`, `audit_logs 43`, `login_attempts 0`, skema 11).
+- **Tidak ada temuan baru** — berbeda dari P-045, tidak ada satu pun langkah probe yang gagal dan tidak ada klaim dokumen yang perlu ditepati; kontrak `42-API.md` §6 diikuti apa adanya.
+- **Berkas:** `services/tasks.ts`, `queries/tasks.ts`, `pages/Tasks/{index,CreateTaskDialog,TaskDetail}.tsx` + tiga test, `scripts/probe-task-module.py`, navigasi/rute Tasks, log `prompts/P-046-2026-09-22-halaman-tasks-dan-probe-41-pass.md`, dan ledger (TASKS `T-062`, STATE, CONTINUE, TRACEABILITY, `70-TESTING.md` §3.14d, CHANGELOG, README).
+- **Verifikasi lima pemeriksa:** `ledger OK — 0 peringatan, 239 test di backend`, `BROKEN referensi dokumen: 0`, `readme-facts OK`, `api-contract OK`, `antislop-refs OK`.
+- **Status:** selesai. **Next action:** modul Workflow backend (halaman Approvals menunggu `GET /workflows/instances`), atau mengukur tata letak Tasks/Documents dengan `responsive-evidence.mjs`.
+
+---
+
+## P-045 — 2026-09-22 — Dua dari delapan jenis berkas tidak pernah dapat diunggah, dan ledger sesi Documents diselesaikan (T-061)
+
+- **Prompt user (ringkas):** "Silakan lanjutan kembali, jangan lupa untuk selalu cross check dengan dokumen desain, dan dokumentasikan segala bentuk progress, gap dan temuan yang ada." (lanjutan dari sesi yang terpotong)
+- **Verifikasi dulu, dan ia menemukan tiga hal sebelum satu baris ditulis.** `check-ledger.sh` gagal dengan **sembilan temuan**: marker audit di empat berkas status masih `69/67` sementara tabel auditnya sudah `71/69`, dan `STATE.md` §3 masih menulis 236 test. Lebih dari itu: baris audit **C-070** mengklaim `42-API.md` §4 "menyebut amplop arsip secara eksplisit" padahal **kalimat itu tidak ada di berkasnya** — hanya kodenya yang berubah; dan `AGENTS.md` masih menulis "migrasi `001`-`010`, versi goose 10" sementara dev dan test sudah versi **11**.
+- **Server yang bertahan, bukan yang mati di tengah bukti.** `nohup … & disown` tetap di-`SIGTERM` proses induk saat perintah tool selesai (log: "sinyal berhenti diterima" 0,4 detik sesudah start), sehingga probe pertama tidak pernah mencapai server. Server lalu dijalankan lewat `launchctl submit` dengan skrip pembungkus di `/tmp` dan hidup stabil di 8081 berdampingan dengan Vite di 5173; temuan ini masuk `.freebuff/run.md` supaya agen berikutnya tidak mengulanginya.
+- **Cacat yang seluruh test tidak melihatnya (C-072, `T-061`).** Satu unggahan `.txt` sungguhan ke server yang sedang berjalan dibalas `422 VALIDATION_ERROR file` — padahal pesan `422`-nya sendiri menyebut `.txt` sebagai diterima; `.csv` juga `422` sedangkan `.pdf` `201`. Sebabnya bukan validasinya: handler mengirim hasil `http.DetectContentType`, dan Go mengembalikan **`text/plain; charset=utf-8`** untuk berkas teks, sementara daftar tertutup `44-SECURITY.md` §4.2 memuat `text/plain`. Jadi **dua dari delapan jenis berkas di `50-FSD.md` §4.2 tidak pernah dapat dipakai**, dan seluruh test hijau karena semuanya menulis `MimeType: "text/plain"` dengan tangan — nilai yang diuji tidak pernah sama dengan nilai produksi. Satu kasus test HTTP bahkan menuntut `422` untuk `palsu.pdf` berisi teks, dan ia lulus **hanya** karena parameter itu: test yang mengunci perilaku salah.
+- **Perbaikan yang tidak mengubah kebijakan.** `normalizeMimeType` membuang parameter header sebelum pencocokan (RFC 7231) — hanya tipe media yang dibandingkan — sementara daftar ekstensi tetap tertutup. Dua test baru memakai MIME **hasil deteksi byte**: `TestDocumentUploadAcceptsDetectedMimeWithParameters` (lima golongan berkas) dan `TestUploadAcceptsDocumentedTextTypesHTTP` (multipart `.txt`/`.csv` sungguhan, memeriksa `mime_type`, `Content-Type` unduhan, dan isi yang kembali). Kasus `palsu.pdf` berisi teks **diganti** `.pdf` berisi ZIP plus `.sh` beserta alasan penggantiannya di komentar, karena desain memakai dua penjaga yang berdiri sendiri tanpa aturan pasangan.
+- **Giginya dibuktikan, bukan diklaim.** `normalizeMimeType` dikembalikan sementara ke bentuk lama → **enam subtest gagal** tepat pada nilai `text/plain; charset=utf-8`; perbaikan dipulihkan, test hijau kembali.
+- **Bukti segar di server nyata.** Unggah `.txt` 39 byte → `201` dengan `mime_type` `text/plain; charset=utf-8`; unduh **byte-identik** (`sha256 c25e7b6e…`, `cmp IDENTIK`, `Content-Length: 39`); arsip `200` dengan `keys(data)=['current_version','document']` dan `status=archived`; daftar default `total 0` / `?status=archived` `total 1`; unggahan sesudah arsip `409`; viewer non-anggota `404` + `total 0` dan `200` sesudah ditambahkan sebagai anggota; jejak audit `DOCUMENT_CREATED`/`DOCUMENT_VERSION_CREATED`/`DOCUMENT_DOWNLOADED`/`DOCUMENT_ARCHIVED`/`PROJECT_CREATED` masing-masing satu.
+- **Bukti UI di peramban sungguhan.** `/documents` menampilkan `0 dokumen dalam cakupan Anda` dengan penyaring status (enam nilai kanonik + "Semua kecuali terarsip") dan penyaring project yang terisi dari server; `?status=archived` menampilkan `PROBE044-001 · 1.0 · Archived`; halaman detail menampilkan banner arsip, metadata, tabel versi berisi checksum, dan empat bagian "belum dibangun" beserta alasannya. Jejak jaringan mengukuhkan alur sesi juga dari sisi klien: `/auth/me 401` → `POST /auth/refresh 200` → `/auth/me 200` → empat permintaan data `200`.
+- **Ledger P-044 diselesaikan, bukan diulang.** `T-059` (halaman Documents), `T-060` (C-070/C-071), dan `T-061` (C-072) masuk papan; baris C-070 ditepati dengan menuliskan bentuk amplop arsip di `42-API.md` §4; marker dan prosa keempat berkas status dihitung **dari tabel auditnya** menjadi **72 temuan / 70 FIXED / 0 APPROVED / 2 OPEN**; log prompt P-044 ditulis menyusul dengan catatan provenansnya (sesi itu terpotong, jadi isinya diambil dari berkas di disk dan bukti yang dijalankan ulang, bukan dari ingatan).
+- **Bukti verifikasi akhir:** backend `make test` hijau (**239 test**, naik dari 237 karena dua test baru), `gofmt`/`go vet` bersih; frontend `typecheck` + `lint` bersih, **188 test / 21 berkas** hijau, `vite build` 426,03 kB js / 22,79 kB css; database dev dikembalikan persis ke baseline (`users 1`, `projects 0`, `documents 0`, `audit_logs 43`, `login_attempts 0`, `versi_skema 11`, **0** berkas yatim di `storage/`).
+- **Status:** DONE untuk `T-061` (dan `T-059`/`T-060` dari P-044); audit **72 temuan / 70 FIXED / 0 APPROVED / 2 OPEN**; log `prompts/P-045-2026-09-22-mime-berkas-dan-ledger-p044.md`.
+- **Next action:** halaman **Tasks** dengan pola yang kini terbukti dua kali, lalu **Approvals** — dan itu berarti modul **Workflow** (`43-WORKFLOW.md`, Phase 2, ADR-0015/0016 `ACCEPTED`), satu-satunya fase backend yang belum disentuh.
+
+## P-044 — 2026-09-22 — Halaman bisnis kedua berdiri, dan dua cacat ketahuan dari menjalankannya (T-059, T-060)
+
+- **Prompt user (ringkas):** "Lanjutkan sesuai progress. Lanjutkan progress frontend yang tertunda."
+- **Halaman Documents berdiri dengan pola yang sama seperti Projects.** `services/documents.ts` menjadi satu tempat yang tahu bentuk `42-API.md` §4 (`Content-Type` multipart **sengaja tidak diset** agar boundary ditulis peramban; unduhan sebagai blob karena endpointnya menuntut `Authorization`), `queries/documents.ts` memakai kunci kueri terpusat, dan halamannya memakai primitives yang sudah ada. Daftar: penyaring status/project/search **hidup di URL**, keadaan memuat/kosong/gagal dibedakan, kolom mengikuti `50-FSD.md` §4.1, nilai kosong ditulis sebagai kalimat (`Belum diisi`) alih-alih tanda pisah. Dialog unggah **dua langkah** (metadata dulu, nomor dokumen `read-only` sesudah server membangkitkannya — ADR-0017, lalu berkas). Detail: metadata, daftar versi terbaru lebih dulu + unduh per versi, unggah versi baru, arsip, dan empat bagian "belum dibangun" yang menyebut **alasan**nya masing-masing, bukan tabel kosong.
+- **C-070: kontrak yang terlalu pendek untuk diperiksa.** `42-API.md` §4 menulis arsip sebagai "Response 200: dokumen terarsip" — menyebut **isi**, bukan **bentuk**. Klien mengetik `ApiSuccess<DocumentRecord>` (datar) sementara server mengirim `data.document`, sehingga `archiveDocument()` mengembalikan `undefined` pada panggilan nyata dan cache React Query menyimpan `document: undefined`: halaman detail akan meledak pada render berikutnya, bukan menampilkan kesalahan. **Seluruh test hijau** karena mock-nya menebak bentuk yang sama dengan kodenya. Kontrak kini memuat amplopnya beserta contoh JSON dan perbandingan dengan dua endpoint dokumen lain (unggahan membalas objek versi **telanjang** di `data`).
+- **C-071: satu penjaga, tiga tabel, satu pesan yang salah.** `prevent_audit_modification()` dipakai `audit_logs`, `document_versions`, dan `documents`, tetapi pesannya tetap `'audit_logs bersifat append-only'` — `DELETE FROM document_versions` menjawab tentang tabel yang tidak tersentuh, dan itu menyesatkan operator yang membersihkan data. Test tidak akan pernah menangkapnya karena semuanya memeriksa SQLSTATE `23001`, yang memang tidak berubah. Migrasi **`011`** menulis ulang fungsi memakai `TG_TABLE_NAME` (tanpa memasang ulang trigger, jadi tidak ada jendela tanpa penjaga) dan `TestAppendOnlyMessageNamesTheOffendingTable` menguncinya — giginya dibuktikan dengan memasang fungsi versi lama di `bwdcs_test`: test gagal dengan pesan yang salah.
+- **Bukti:** frontend **188 test / 21 berkas** hijau, `typecheck` + `lint` bersih, `vite build` 426,03 kB js / 22,79 kB css; bukti HTTP dijalankan ulang dan dilengkapi pada **P-045** (unggah sungguhan → unduh byte-identik → arsip → `409` → cakupan `404`/`200`, `versi_skema 11`).
+- **Status:** DONE untuk `T-059` dan `T-060`; log `prompts/P-044-2026-09-22-halaman-documents-dan-lapisan-data.md` (ditulis menyusul pada P-045 karena sesi ini terpotong sebelum ledger-nya ditulis).
+- **Next action:** sesi P-045 menyelesaikan ledger ini, lalu menemukan **C-072** pada jalur unggah yang baru dibangun.
+
+## P-043 — 2026-09-22 — Aturan antislop diterapkan pada frontend, laci menu diperbaiki, dan klaim tata letak kini diukur mesin (T-056, T-057, T-058)
+
+- **Prompt user (ringkas):** "Terapkan skills dan rules antislop pada frontend yang sudah anda buat. Perbaiki juga tampilan menu pada saat resolusi layar lebih kecil. Lanjutkan penulisan kode sesuai dengan progress saat ini. Utamakan perbaikan dan pemenuhan gap sebelum melanjutkan progress."
+- **Gap yang ditemukan lebih dulu, bukan halaman baru:** verifikasi menyeluruh dijalankan sebelum menyentuh apa pun dan menemukan tiga hal merah dari pekerjaan yang belum selesai di worktree — satu error `tsc` (`panelRef` bertipe `HTMLElement` dipasang ke `<div>`) dan dua error `eslint` (`setState` di dalam effect: pembacaan media query dan reset laci). Backend hijau (sembilan paket / 236 test) dan lima pemeriksa dokumen hijau. Ketiganya diperbaiki lebih dulu; yang pertama diganti `useSyncExternalStore`, yang kedua dipindah ke callback langganan (`useMediaQueryEnter`).
+- **Laci menu benar-benar menjadi lapisan modal.** Sebelumnya panel hidup di dalam baris flex, sehingga membuka menu **menyempitkan** halaman, tanpa latar penutup, tanpa kunci gulir, dan tanpa pengembalian fokus. Sekarang: `fixed` selebar `min(18rem, 85vw)`, latar penutup ber-penanda `data-drawer-backdrop`, konten di belakangnya `inert`, gulir terkunci, fokus masuk ke item pertama lalu **kembali** ke tombol Menu (Escape, tombol Tutup, atau klik latar), dan permintaan membukanya **dilupakan** saat jendela melewati titik henti — kalau hanya disembunyikan, menu akan muncul sendiri beserta gulir terkunci begitu jendela dipersempit lagi. Perilaku modal itu ditulis **sekali** di `hooks/useModalLayer.ts` dan dipakai bersama `Dialog`.
+- **Tiga state lebar yang nyata** (bukan dua): laci < 768px, kolom kompak **berlabel** 12rem pada 768-1023px, kolom penuh 15rem ≥ 1024px. State tengah ditulis dokumen sebagai "icon-only" — implementasinya berlabel, dan penyimpangan itu kini **tercatat** (C-067) beserta alasannya (ikon generik dilarang `DESIGN.md` §1/R-04), bukan dibiarkan hidup hanya di komentar kode.
+- **Klaim tata letak kini diukur, bukan diklaim.** jsdom menghitung nol piksel, jadi tiga klaim paling mudah berbohong — "tanpa gulir mendatar", "target sentuh 44px", "laci menutupi konten" — tidak dapat diperiksa test jenis apa pun. `scripts/responsive-evidence.mjs` (baru) menjalankan Chrome yang sudah terpasang lewat protokol DevTools (tanpa dependensi, tanpa unduhan), login lewat form yang sama dengan pengguna, lalu mengukur pada 375/768/1024/1440px **dengan satu project nyata di database** sehingga baris tabel ikut terukur: **0px gulir mendatar di keempat lebar** (tabel 615px di viewport 375px bergulir di dalam wadahnya), **0 kontrol di bawah ambang** (10/38/38/38 diperiksa; ambang 44px < 1024px, 36px ≥ 1024px), sidebar laci/192px/240px/240px, perilaku laci lengkap, dan **enam pengukuran tema** (terang + gelap di 375px dan 1440px) yang semuanya tanpa gulir mendatar.
+- **Giginya dibuktikan, dan dari situ lahir temuan kedua.** Enam cacat disuntikkan sementara dan keenamnya tertangkap (`overflow-x-auto` dicabut → 240px gulir mendatar; `tap-target` dicabut → 8 kontrol 175x19px; `fixed` dicabut → konten terdorong; `inert` dicabut; `useMediaQueryEnter` dicabut → menu muncul sendiri + gulir terkunci lagi; kunci gulir dicabut). Tetapi **dua di antaranya lolos pada percobaan pertama** — dan itu tercatat sebagai **C-068**, bukan disenyapkan: test "menutup laci saat jendela dilebarkan" lulus tanpa `useMediaQueryEnter` (yang diuji hanya penyembunyian, bukan melupakan permintaan), latar penutup diuji lewat posisi DOM sehingga `aria-hidden` yang diubah tetap lulus, dan dua pemeriksaan di skrip baru itu pun lulus hampa (mengukur **tetangga** panel sebagai "konten", serta menutup laci **sebelum** melebarkan jendela). Ketiganya diperbaiki lebih dulu, lalu seluruh cacat disuntikkan ulang dan semuanya tertangkap.
+- **R-02 kini ditegakkan mesin (C-069).** Keputusan proyek di `01-AGENT-WORKFRAME.md` §3.2 menulis "semua teks UI **dan dokumentasi baru** bebas em dash", tetapi tidak ada pemeriksa yang membacanya — dan tiga tempat di layar memang masih memakainya sebagai pengganti nilai kosong atau pemisah. `check-antislop-refs.sh` mendapat **butir 8** yang memindai `frontend/src` tanpa komentar (blok dibuang mode slurp, lalu `//` yang berdiri sebagai awal komentar supaya `https://` tidak memotong baris), teksnya diganti kalimat yang menerangkan keadaan (`EMPTY_VALUE`/`EMPTY_DATE`), dan baris §3.2 **dipersempit** ke apa yang benar-benar diperiksa. Gigi: em dash di string UI → `FAIL`; di komentar → lolos; sesudah `https://` → tetap `FAIL`.
+- **C-067 ditutup** dengan menyelaraskan `51-UX.md` §8 (tiga state + perilaku laci + alasan penyimpangan) dan §9 (dua register target sentuh beserta pemeriksanya). `check-readme-facts.sh` juga diperluas ke **semua** berkas `scripts/` — bukan hanya `*.sh` — supaya pemeriksa berbasis Node tidak menjadi lubang baru kelas C-066 (gigi dibuktikan dengan mengganti nama berkas di pohon README → 2 temuan `FAIL`).
+- **Bukti verifikasi akhir:** backend `make test` hijau (sembilan paket, 236 test); frontend `typecheck` + `lint` bersih, **137 test / 16 berkas** hijau, `vite build` 397 kB js / 21,9 kB css; `ledger OK`, `BROKEN: 0`, `readme-facts OK — 39 fakta`, `api-contract OK`, `antislop-refs OK — 8 pemeriksaan`, dan `responsive-evidence OK`; database dev dikembalikan persis ke baseline (`audit_logs` 43, `login_attempts` 0, `projects` 0, `users` 1, versi skema 10) dan `bwdcs_test` kosong.
+- **Status:** DONE untuk `T-056`, `T-057`, `T-058`; audit menjadi **69 temuan / 67 FIXED / 0 APPROVED / 2 OPEN**; `OPEN-QUESTIONS.md` bertambah **Q-025** (sejauh mana em dash disapu) dan **Q-026** (36px desktop vs 44px). Laporan Delivery Gate empat blok ada di log sesi (`docs/progress/prompts/P-043-…md` §7), tanpa butir `FAIL`.
+- **Next action:** halaman bisnis berikutnya (**Documents**, `50-FSD.md` §4) memakai pola P-041 yang kini juga terukur tata letaknya; jalur backend (Workflow, Phase 2) tetap terbuka. Keputusan pemilik yang menunggu: Q-019/C-050, Q-023, Q-024/C-063, Q-025, Q-026.
+
+## P-042 — 2026-09-22 — Skill antislop terpasang dipin ke tag rilis; daftar aturan tidak lagi disalin (T-054)
+
+- **Prompt user (ringkas):** "Terkait antislop skills yang ada pada OPEN-QUESTIONS.md, saya mengambil dari repository https://github.com/miqdadbadjuber/anti-slop; saya ambil satu file dan letakkan di root (antislop.md). Coba anda akses directory tersebut, dan coba terapkan dengan proper pada project ini, terutama jika memang harus ada skills yang terdaftar. Jika sudah, sesuaikan dokumen terkait desain dengan rules dari repository tersebut." Dua keputusan diminta lewat pertanyaan berganda, dan pemilik menjawab: **pasang kelima skill** dan **izinkan agen mengunduhnya langsung** dari repo itu.
+- **Yang ditemukan saat "menerapkan dengan proper" ternyata bukan menambah bacaan, melainkan menghapus ketidakbenaran.** Dua cacat kelas baru, keduanya tidak terlihat dari membaca: **C-064** — `AGENTS.md` mendaftarkan lima skill (`skills/antislop-ui/SKILL.md` dan empat lainnya) yang **tidak ada di disk**, dan lolos dari `check-doc-links.sh` karena rujukan `skills/...` diklasifikasikan `PLANNED` (jalur kode yang belum dibuat); dan **C-065** — `antislop.md` di root adalah **varian lama** (686 baris, tanpa penanda `[ ]` pada Gate, tanpa butir *scope* R-02) yang berbeda dari salinan Delivery Gate di `01-AGENT-WORKFRAME.md` §5.3, sehingga **dua versi core beredar** di satu repo, ditambah dua salinan isi aturan (tabel 23 aturan di §3.2, blok Gate di §5.3) yang dapat menyimpang tanpa ketahuan. Keduanya `FIXED` di sesi yang sama.
+- **Yang dipasang:** core `antislop.md` (root) + lima skill + `contrast-check.py` + salinan `LICENSE`, semuanya **byte-identik** dari **tag rilis `v3.2.12`** (bukan `main`), dengan `sha256` tiap berkas dicatat di `skills/README.md` §1 beserta cara memperbaruinya (§2). Keputusannya **ADR-0025** `ACCEPTED`: pin ke tag, lisensi MIT, sumber aturan tunggal `antislop.md`, larangan menyalin daftar aturan ke dokumen proyek, dan **amandemen butir 2 ADR-0006** — izin unduh itu **satu kali untuk sesi ini**, bukan aturan tetap; agen setelah ini tetap dilarang mengunduh atas inisiatif sendiri.
+- **Dokumen desain diselaraskan dengan cara menunjuk, bukan mengutip:** §3.2 `01-AGENT-WORKFRAME.md` kini memuat **keputusan proyek per nomor aturan** (R-02 bebas em dash, R-06 system stack, R-09 badge hanya untuk status kanonik, R-21 dua tema, R-25 ambang WCAG 2.2 AA, R-26/R-27 tiga keadaan, R-31 alasan tertulis, R-35 bukti di dev server) tanpa menyalin teks aturannya, dan §5.3 hanya menetapkan **bentuk laporan** Gate (butir per butir, `PASS`/`FAIL` berisi bukti konkret, satu `FAIL` = jangan serahkan, laporan masuk log prompt) — butir Gate-nya dibaca di `antislop.md`.
+- **Pemeriksa baru: `scripts/check-antislop-refs.sh`** (tanpa jaringan, 7 pemeriksaan). Yang membuatnya bukan formalitas: ia menahan **enam** kelas cacat sekaligus, termasuk `sha256` berkas pihak ketiga (salinan yang membusuk tertangkap seperti angka yang basi) dan salinan core di `skills/antislop/SKILL.md` yang **wajib identik** dengan core di root. Hasil `antislop-refs OK — 38 aturan (R-01..R-38), 93 rujukan, 7 berkas skill, 7 pemeriksaan`.
+- **Bukti:** enam cacat disuntikkan sementara — nomor aturan yang tidak ada, path skill hantu, `sha256` skill UI diubah, salinan core diubah, kalimat Gate disalin ke `01-AGENT-WORKFRAME.md`, dan klaim rentang aturan yang ujungnya berhenti sebelum aturan terakhir — **keenamnya tertangkap** beserta nomor baris, lalu dipulihkan dan hijau kembali. Pemeriksa kontras **upstream** dijalankan atas 10 pasangan token proyek dan angkanya sama dengan komentar di `tokens.css` (5,09 / 7,15 / 15,46 / 6,93 / 10,37 / 4,65) — alat pihak ketiga mengesahkan angka yang selama ini hanya dipegang test sendiri. Pemeriksa kelima masuk CI dan ke `README.md` §12.3, `12-DEVELOPMENT-WORKFLOW.md` §8, `90-AGENT-GUIDE.md`, `02-AGENT-PROGRESS-PROTOCOL.md` §6.4/§8, `AGENTS.md`.
+- **Temuan ketiga (kelas baru): C-066 (`FIXED`).** Saat pohon folder `README.md` §4 dibuka untuk menambahkan `skills/`, terlihat blok `scripts/` masih menyebut **dua dari lima** skrip yang sudah berjalan di CI — README menyembunyikan tiga perintah verifikasi yang justru wajib dijalankan kontributor. `check-readme-facts.sh` tidak menangkapnya karena ia membandingkan **angka & versi**, bukan **daftar**; dua sesi menambah skrip tanpa menyentuh pohonnya. Perbaikannya dua arah: pohon diperbarui, dan pemeriksa diperluas dengan **§6** yang membandingkan daftar di README dengan isi `scripts/`/`skills/` (25 → **37 fakta**), dengan gigi dibuktikan dua cacat sementara. `check-doc-links.sh` juga mendapat dua klasifikasi baru (`guide.md` → `ABSENT_DOCS`; isi `skills/` selain `README.md` dilewati sebagai berkas pihak ketiga ber-`sha256`), bukan ditambal dengan menyunting salinannya.
+- **Tidak ada kode, migrasi, atau konfigurasi runtime yang diubah** — sesi ini murni sistem kerja dan dokumen. `check-ledger.sh` → `ledger OK — 0 peringatan, 236 test di backend`; `check-doc-links.sh` → `BROKEN: 0`; `check-readme-facts.sh` → `readme-facts OK — 37 fakta`; `check-api-contract.sh` → `api-contract OK`.
+- **Status:** DONE untuk `T-054` dan `T-055`; audit menjadi **66 temuan / 64 FIXED / 0 APPROVED / 2 OPEN** (C-050 dan C-063 tetap `OPEN`, keduanya keputusan pemilik).
+- **Next action:** kembali ke pekerjaan produk — halaman bisnis berikutnya (**Documents**) dengan pola yang terbukti di P-041; sementara itu **Q-024** (endpoint daftar pengguna untuk pemilih `Owner`) adalah keputusan pemilik yang menahan halaman anggota project.
+
+## P-041 — 2026-09-21 (ledger ditutup 2026-09-22) — Halaman Projects: halaman bisnis pertama + lapisan data TanStack Query (T-053)
+
+- **Prompt user (ringkas):** "Lanjutkan sesuai dengan progress, baca kembali CONTINUE.md dan dokumen progress lain, utamakan penyelesaian gap terlebih dahulu dan bug fixing, jika sudah clear lanjutkan ke tahap berikutnya […] segera lanjutkan ke project sesungguhnya, baik frontend maupun backend." Jalur berikutnya dipilih pemilik lewat pertanyaan berganda: **halaman Projects dengan TanStack Query**.
+- **Verifikasi menyeluruh dijalankan lebih dulu, dan semuanya hijau** — tidak ada bug maupun gap yang menunggu: `make test` sembilan paket (236 test), frontend 88 test / 10 berkas + `vite build`, dan empat pemeriksa dokumen (`ledger OK`, `BROKEN: 0`, `readme-facts OK`, `api-contract OK`). Karena itu yang dikerjakan adalah pekerjaan baru, bukan perbaikan.
+- **Halaman bisnis pertama berdiri (`T-053`, DONE):** daftar project dengan penyaring dari URL dan paginasi dari `meta`, dialog buat project dengan validasi `50-FSD.md` §3.2 **dan** pemetaan galat server per-field (`422 fieldErrors`, `409` kode duplikat), serta halaman detail dengan metadata langsung dari `GET /projects/:id`, daftar anggota, dan tab Documents/Tasks/Workflow/Activity yang menyatakan dirinya **belum** dibangun. Lapisan data memakai **TanStack Query 5** (kunci kueri terpusat + invalidasi sesudah mutasi) — pustaka yang sudah terpasang sejak P-037, jadi **tidak ada dependency baru dan tidak ada akses jaringan** pada sesi ini. Cakupan data **tidak** disaring ulang di klien, dan status kanonik tidak pernah ditampilkan apa adanya (selalu lewat `types/status.ts`, ADR-0012).
+- **Bukti:** `tsc --noEmit` bersih, `eslint .` bersih, **129 test / 14 berkas** hijau (naik 41 test), `vite build` 395 kB js / 21,1 kB css; halaman dibuka di dev server nyata — daftar memuat keadaan kosong yang jujur, dialog membuat project sungguhan (`PREVIEW-041`), peramban berpindah ke `/projects/<uuid>` hasil server, tombol **Arsipkan** berkonfirmasi dan mengubah status baris ke **Archived** tanpa reload, dan `audit_logs` mencatat `PROJECT_CREATED` + `PROJECT_ARCHIVED`. Jaringan peramban juga menunjukkan rangkaian `401` → `POST /auth/refresh` `200` → retry `200`: penukaran refresh **single-flight** bekerja di peramban nyata. Database dev dikembalikan persis ke baseline (`audit_logs` 43, `login_attempts` 0, `projects` 0, `users` 1, versi skema 10).
+- **Temuan baru: C-063 (`OPEN`).** `50-FSD.md` §3.2 mencantumkan field `Owner` sebagai **wajib** dan bertipe "User select", tetapi **tidak ada satu pun endpoint** yang dapat menyebutkan daftar pengguna (`GET /admin/users` belum diimplementasikan; `user:read` menurut matriks hanya milik Administrator). Bedanya dengan temuan sebelumnya: cacat ini **tidak terlihat** dari membaca kontrak — `42-API.md` §3 tidak pernah menjanjikan endpoint pengguna, yang menjanjikannya FSD, dan hanya terasa ketika formnya harus diisi. Yang dikerjakan bukan mengarang pemilih pengguna, melainkan **menampilkan batasnya di layar** dan menguncinya dengan test. Pilihannya (endpoint daftar pengguna + izinnya, atau menurunkan FSD §3.2) menyentuh kontrak API dan matriks izin, jadi ia butuh ADR — dicatat sebagai **Q-024** dan papan `TASKS.md` mencatatnya pada baris `T-017`.
+- **Dokumen yang disesuaikan:** `70-TESTING.md` **§3.14a** (apa yang dikunci test halaman, bukti server nyata, dan batas jujur bahwa suite frontend masih memakai HTTP tiruan), `TRACEABILITY.md` (kolom bukti lapisan UI untuk `FR-PROJ-01`..`FR-PROJ-07`, tanpa menaikkan status karena requirementnya sudah `DONE`), `STATE.md` §3 (frontend: **129 test / 14 berkas**, halaman Projects ada), `CONTINUE.md` §0, `TASKS.md`, `OPEN-QUESTIONS.md`, `CHANGELOG.md`, dan berkas audit beserta empat dokumen pemuat angkanya (marker `audit-summary` → `63 / 61 FIXED / 0 APPROVED / 2 OPEN`).
+- **Status:** DONE untuk `T-053`; **C-063** `OPEN` (keputusan pemilik + ADR).
+- **Next action:** halaman bisnis berikutnya (Documents paling dekat — endpointnya hidup dan cakupannya sama dengan project); putuskan **Q-024**; tambahkan satu test integrasi frontend ↔ server supaya regresi kontrak tertangkap mesin, bukan mata.
+
+## P-040 — 2026-09-21 — Anotasi izin 10 endpoint + pemeriksa kontrak izin (T-024, T-052)
+
+| Field | Isi |
+|---|---|
+| ID | P-040 |
+| Waktu | 2026-09-21 |
+| Aktor | agen (Buffy) |
+| Fase | 1 — kontrak API & instrumentasi (tanpa perubahan kode produksi) |
+| Log lengkap | `docs/progress/prompts/P-040-2026-09-21-anotasi-izin-endpoint-dan-pemeriksanya.md` |
+
+**Prompt user (ringkas):** "Lanjutkan sesuai dengan progress, baca kembali CONTINUE.md dan dokumen progress lain, utamakan penyelesaian gap terlebih dahulu dan bug fixing, jika sudah clear lanjutkan ke tahap berikutnya. Jika seluruh dokumen sudah selesai, segera lanjutkan ke project sesungguhnya, baik frontend maupun backend."
+
+**Hasil:**
+
+- **Verifikasi menyeluruh dijalankan lebih dulu, dan semuanya hijau** — tidak ada bug yang menunggu: `go build`/`vet`/`gofmt` bersih, `make test` sembilan paket `ok` (236 test), frontend `typecheck`/`lint` bersih + **88 test** hijau + `vite build` (336 kB js), dan empat pemeriksa dokumen hijau. Jadi langkah berikutnya adalah menutup **gap** yang ledger sendiri catat.
+- **Gap yang benar-benar dapat dikerjakan tanpa keputusan siapa pun adalah `T-024`.** Papan `TASKS.md` hanya memuat `T-050` (lisensi — `BLOCKED` menunggu Q-023) dan satu temuan `OPEN` (C-050, threading — keputusan produk); keduanya milik pemilik. `T-024` tidak menunggu siapa pun: izinnya sudah ditetapkan matriks ADR-0014.
+- **Sepuluh endpoint diberi izinnya, langsung dari matriks §3.1.2** (bukan dikarang): `GET|POST /workflows/definitions` (`workflow_definition:read` semua role / `workflow_definition:manage` Administrator), tiga endpoint notifications (`notification:read` untuk daftar dan `notification:update` untuk menandai dibaca, keduanya semua role dengan cakupan hanya baris milik sendiri), `GET|POST /admin/users` (`user:read`/`user:create`), `PATCH /admin/users/:id` (izinnya tadinya hanya menempel di dalam butir prosa — kini baris `Izin:` sendiri), `GET /admin/roles` (`role:read`), dan `PATCH /admin/settings/:key` (`setting:manage`). Hasilnya **55 endpoint: 48 dengan baris `Izin:` di bloknya + 7 lewat tabel izin bab §4**, tidak ada lagi endpoint tanpa keterangan.
+- **Angkanya tidak lagi dirawat manual.** `scripts/check-api-contract.sh` (baru, `T-052`) membaca matriks `44-SECURITY.md` §3.1.2 sebagai sumber kebenaran (**44 pasangan**) dan menegakkan tiga aturan: setiap endpoint punya izin terbaca; setiap pasangan pada anotasi/tabel ada di matriks; setiap `RequirePermission(deps.Permission, ...)` di `internal/handler/router.go` (**18 pasangan**) memakai pasangan matriks. `api-contract OK — 110 pemeriksaan, 55 endpoint`. Kelas cacat yang ditahan: hitungan manual `T-024` (pernah salah, C-055) dan pasangan izin karangan seperti `document_version:read` yang lolos ke draf §4 (Q-016).
+- **Pemeriksa itu langsung menemukan satu cacat di pekerjaan sesi ini sendiri:** kalimat penjelas "matriks tidak punya `comment:update`" terbaca sebagai **klaim** pasangan. Kalimatnya ditulis ulang tanpa token `resource:action`, dan aturan menulisnya dicatat di `02-AGENT-PROGRESS-PROTOCOL.md` §6.3 — supaya sesi berikutnya tidak mengulangi jebakan yang sama.
+- **Gigi dibuktikan dengan tiga cacat sementara:** menghapus satu baris `Izin:` → tertangkap (`POST /tasks` tanpa izin terbaca); menambahkan `document_version:read` pada anotasi → tertangkap; mengubah `task:complete` → `task:finish` di **salinan** `router.go` (berkas aslinya tidak disentuh) → tertangkap. Semuanya lalu dipulihkan dan pemeriksa kembali hijau.
+- **Tersambung ke CI dan ke aturan:** langkah keempat job `ledger` di `.github/workflows/ci.yml`, `README.md` §12.3, `12-DEVELOPMENT-WORKFLOW.md` §8, `AGENTS.md`, dan aturan baru **§6.3** pada protokol progress.
+- **`44-SECURITY.md` tidak diubah.** Matriksnya tetap satu-satunya sumber; menambah pasangan izin tetap menuntut ADR (ADR-0014). Skrip itu menahan pasangan karangan — ia tidak mengesahkannya.
+- **Tahap berikutnya diserahkan ke pemilik proyek** (halaman bisnis frontend vs modul Workflow backend, dan bila frontend: bentuk state server-nya). Alasannya dicatat di log §2: keduanya bukan pekerjaan satu sesi, sehingga memilih sepihak berarti meninggalkan dua hal setengah jalan.
+
+
+
+## P-039 — 2026-09-21 — Pemeriksa kesegaran angka & versi README (C-062)
+
+| Field | Isi |
+|---|---|
+| ID | P-039 |
+| Waktu | 2026-09-21 |
+| Aktor | agen (Buffy) |
+| Fase | pra-4 — instrumentasi dokumen (tidak menyentuh kode produksi) |
+| Log lengkap | `docs/progress/prompts/P-039-2026-09-21-pemeriksa-kesegaran-angka-readme.md` |
+
+**Prompt user (ringkas):** "Buat skrip yang memeriksa kesegaran angka di README (jumlah route, versi dependensi) terhadap repo agar tidak diam-diam basi."
+
+**Hasil:**
+
+- **`scripts/check-readme-facts.sh` (baru, 25 fakta, tanpa efek samping).** Setiap fakta dihitung dari **sumbernya**, bukan dari dokumen lain: jumlah route + rincian per modul + jumlah endpoint tiap modul dari `backend/internal/handler/router.go`; versi Go/Gin/pgx/viper/goose dari `backend/go.mod`; versi React/Vite/Tailwind/TypeScript dari `frontend/package.json`; rentang migrasi `001`-`010` dari berkas di `backend/internal/migration/`; dan klaim "belum ada/belum diisi" dari keberadaan path. `readme-facts OK` = lulus (exit 0), `FAIL` menyebut nomor barisnya (exit 1).
+- **Dua pagar yang menjaganya tidak "bokek diam-diam".** (1) **Setiap group route wajib punya ember**: sebuah group baru (`notifications`, misalnya) menambah total tanpa masuk rincian, sehingga pemeriksaan **gagal** dua kali — sekali karena ada penerima yang belum terklasifikasi, sekali karena rincian tidak berjumlah sama dengan total. (2) **Klaim yang polanya hilang dari README juga dianggap gagal**, karena pemeriksa yang berhenti memeriksa tanpa suara lebih berbahaya daripada pemeriksa yang berisik.
+- **Pemeriksa itu gagal pada percobaan pertama — dan kegagalannya itu sendiri yang menemukan C-062.** Baris **§2 "Teknologi"** masih menulis `| Frontend (rencana) | React 18 + TypeScript + Vite + TailwindCSS | Belum diinisialisasi |`: versinya salah (`frontend/package.json` memuat React **19**) dan statusnya salah (`frontend/` sudah berisi 51 berkas sejak P-037, dan §1 di berkas yang sama sudah menulis "Kerangka selesai"). Cacat ini **lolos dari dua sesi pembersihan** — termasuk P-038 yang menyapu klaim basi README dengan `grep` — karena barisnya tidak memuat kata kunci yang dicari dan enam tempat lain di README memuat versi yang benar, sehingga pembacaan sekilas terasa konsisten. `FIXED` di sesi yang sama.
+- **Gigi dibuktikan dengan lima cacat yang disuntikkan sementara**, lalu **semuanya** tertangkap: route 32→31, "8 endpoint"→"9 endpoint" pada baris Project, React 19→18, migrasi `010`→`009`, dan satu kalimat "frontend/ masih kosong". README lalu dipulihkan dan kembali hijau (25 fakta). Pagar ember route diuji terpisah memakai **salinan sementara** `router.go` (+1 group `notifications`) — tanpa menyentuh berkas aslinya — dan tertangkap oleh kedua pagar.
+- **Tersambung ke CI dan ke dokumen aturan**, supaya tidak bergantung pada ingatan siapa pun: langkah ketiga job `ledger` di `.github/workflows/ci.yml`, perintah di `README.md` §12.3, `docs/design/12-DEVELOPMENT-WORKFLOW.md` §8, `docs/design/90-AGENT-GUIDE.md`, `AGENTS.md`, dan aturan baru **`02-AGENT-PROGRESS-PROTOCOL.md` §6.2** (tabel fakta README → sumber kebenarannya) beserta butir checklist penutup sesi.
+- **Bukti:** `readme-facts OK — 25 fakta diperiksa`; `ledger OK — 0 peringatan, 236 test di backend`; `BROKEN referensi dokumen: 0`. Tidak ada berkas kode produksi yang berubah, sehingga suite backend/frontend tidak terpengaruh.
+- **Batas yang ditulis jujur di kepala skrip:** hanya `README.md` yang diperiksa (ADR-0002 dan `30-ARCHITECTURE.md` §2.1 **sengaja** menyebut "React 18" sebagai riwayat, jadi memindai semua dokumen akan menandai sejarah yang benar sebagai basi); hanya klaim ber-pola tetap; dan angka huruf hanya dipetakan 1..10.
+
+
+
+## P-038 — 2026-09-21 — Bagian Kontribusi `README.md` + status lisensi yang ditunda (C-061)
+
+| Field | Isi |
+|---|---|
+| ID | P-038 |
+| Waktu | 2026-09-21 |
+| Aktor | agen (Buffy) |
+| Fase | pra-4 — dokumentasi repositori (tidak menyentuh kode/skema) |
+| Log lengkap | `docs/progress/prompts/P-038-2026-09-21-bagian-kontribusi-dan-status-lisensi.md` |
+
+**Prompt user (ringkas):** "Tambahkan berkas LICENSE dan bagian kontribusi pada README setelah pemilik proyek memutuskan lisensinya."
+
+**Hasil:**
+
+- **Satu bagian permintaan tidak dikerjakan, dan itu disengaja.** Klausa "setelah pemilik proyek memutuskan lisensinya" adalah prasyarat, tetapi **tidak ada keputusan lisensi di mana pun** — yang ditemukan hanya satu placeholder di `README.md` yang justru melarang menganggap proyek ini open source. Agen **bertanya lebih dulu** lewat pilihan berganda alih-alih menebak, dan pemilik memilih **menunda** jenis lisensinya. Karena itu **berkas `LICENSE` tidak dibuat**, `frontend/package.json` tetap tanpa field `license`, dan ketiadaannya **ditampilkan** (bukan disenyapkan): baris `LICENSE  # belum ada — lihat §13` di pohon `README.md` §4, dan **§13 Lisensi** berbentuk tabel status dengan peringatan "jangan anggapnya open source sebelum pemilik memutuskan".
+- **Satu hal yang memang sudah diputuskan:** pemegang hak cipta yang akan ditulis di `LICENSE` kelak, **BSA** — dijawab pemilik pada sesi yang sama, sehingga tidak perlu ditanyakan lagi saat lisensinya ditetapkan.
+- **Bagian Kontribusi (`README.md` §12) dikerjakan tanpa menunggu lisensi**, karena aturan kontribusi tidak bergantung padanya. Enam subbagian: **12.1** sebelum menyentuh berkas (menunjuk §11 + `CONTINUE.md`, bukan menyalin urutannya), **12.2** lima langkah satu perubahan dengan aturan "satu prompt = satu unit yang dapat diverifikasi", **12.3** perintah verifikasi yang wajib hijau — termasuk **alasan** `make test` dan bukan `go test` telanjang (tanpa `TEST_DATABASE_URL`, test integrasi `t.Skip` tapi paketnya tetap `ok`) — beserta keluaran yang diharapkan dari kedua skrip dokumen, **12.4** tabel sepuluh aturan yang tidak boleh dilanggar **dengan sumber masing-masing** (menunjuk `40`/`41`/`44`/ADR — bukan menyalin teksnya, supaya tidak lahir sumber kebenaran kedua, pola C-014), **12.5** konvensi commit + penegasan agen tidak `commit`/`push` tanpa permintaan, **12.6** kanal usulan yang ditulis jujur: **belum ada pelacak isu**, jadi usulan masuk lewat `TASKS.md`/`OPEN-QUESTIONS.md`.
+- **C-061 ditemukan sekaligus ditutup:** enam klaim basi di `README.md`, dan empat di antaranya salah tentang keadaan repo — `frontend/` masih disebut kosong, `DESIGN.md` masih disebut `placeholder, belum diisi`, diagram §3 masih menulis "Frontend SPA (belum ada)", dan pohon §4 masih menandai keduanya sebagai belum ada, padahal P-037 sudah mengisi `DESIGN.md` dan membangun 51 berkas di `frontend/`. Dua klaim lain soal **angka**: baris "`POST /auth/refresh` dan `change-password` Belum ada" bertahan sejak P-031 padahal keduanya hidup sejak **P-034**, dan jumlah route ditulis **30** padahal `internal/handler/router.go` memuat **32** (1 health, **5** auth, sisanya sama). Akarnya bukan kelalaian acak: `README.md` lahir P-031 dan **tidak terdaftar sebagai dokumen desain**, sehingga penyelarasan sembilan dokumen pada P-037 melewatinya — kelas yang sama dengan **C-060**. Ketahuan karena sesi ini membuka README untuk menambah bagian baru, lalu menyapu klaimnya dengan `grep` alih-alih mengandalkan ingatan.
+- **Angka yang ditulis berasal dari sumbernya, bukan dari dokumen lain:** jumlah route dihitung dari `router.go` dan sumbernya disebutkan di teks, untuk menghindari kelas cacat **C-044/C-055** (angka yang disalin antar dokumen).
+- **Dua kegagalan pemeriksa yang muncul dari sesi ini, dan keduanya diperbaiki di sumber penyebabnya — bukan dengan melunakkan pemeriksaannya.** (1) `check-ledger.sh` menemukan angka `59 FIXED` yang tertinggal di prosa `audits/README.md` padahal marker sudah `60` — kelas **C-044/C-055** yang memang dirancang skrip itu untuk menangkapnya. (2) `check-doc-links.sh` melaporkan `BROKEN: CONTRIBUTING.md` karena dokumen itu **sengaja tidak dibuat** (aturannya tinggal di `README.md` §12); alih-alih menghapus nama berkasnya dari prosa atau membuat berkas kosong demi pemeriksa, skripnya diberi klasifikasi **`ABSENT`** dengan daftar `ABSENT_DOCS` yang harus tetap pendek. **Gigi pemeriksanya dibuktikan tetap tajam:** dengan sebuah berkas `.md` sementara di `docs/design/` yang jelas tidak ada, skrip tetap melaporkan `BROKEN` untuk berkas itu sementara `CONTRIBUTING.md` dilaporkan `ABSENT` — sisipan itu lalu dihapus.
+- **Bukti:** `bash scripts/check-ledger.sh` → `ledger OK — 0 peringatan, 236 test di backend`; `bash scripts/check-doc-links.sh` → `BROKEN referensi dokumen: 0` (536 `PLANNED`, 2 `ABSENT`). Tidak ada berkas kode yang tersentuh, sehingga suite backend/frontend tidak terpengaruh.
+- **Ledger:** **61 temuan — 60 FIXED / 0 APPROVED / 1 OPEN** (C-050, keputusan produk), dikunci marker `audit-summary`. Task baru: **`T-049`** (bagian Kontribusi) **DONE**, **`T-050`** (lisensi + `LICENSE`) **BLOCKED** menunggu **Q-023** — satu-satunya task di papan, dan itu keputusan pemilik, bukan pekerjaan teknis.
+
+
+
+## P-037 — 2026-09-21 — `DESIGN.md` diisi + kerangka frontend (blocker UI dibuka)
+
+| Field | Isi |
+|---|---|
+| ID | P-037 |
+| Waktu | 2026-09-21 |
+| Aktor | agen (Buffy) |
+| Fase | **pra-4 → 4** — UI dibuka sesudah gate terpenuhi |
+| Log lengkap | `docs/progress/prompts/P-037-2026-09-21-design-md-dan-kerangka-frontend.md` |
+
+**Prompt user (ringkas):** "Isi DESIGN.md, tentukan dengan rekomendasi anda sendiri berdasarkan best practices yang ada (lakukan deep research untuk keputusan desain), lalu pilih mode antislop selama pengerjaan dan mulai scaffold frontend React + Vite."
+
+**Hasil:**
+
+- **Dua pertanyaan yang menahan UI sejak P-008 dijawab.** Agen bertanya lebih dulu lewat pilihan berganda (ADR-0006/0007 masih `PROPOSED`, dan `CONTINUE.md` §8 melarang memilih mode antislop sendiri): user memilih mode **`during`** (Q-001) dan **jalur 2** ADR-0007 (Q-002 — agen menyusun arah desain atas izin eksplisit). Keduanya dicatat **ADR-0006**/**ADR-0007** `ACCEPTED`, dan **C-015** `FIXED`.
+- **`DESIGN.md` terisi (137 baris)** dengan status jujur `TERISI` — bukan "dikonfirmasi pemilik produk": identitas "ruang arsip yang bekerja", palet Paper/Ink/**satu** accent Signal dengan **alasan dan angka kontras per token**, tipografi system stack (plafon 26px, aturan mono untuk nomor), mood & kepadatan, dials resmi **ENERGY 1 / RHYTHM 2 / MOTION 1**, motif "punggung rekam", tema terang/gelap, referensi & anti-referensi, dan Design Read.
+- **Keputusan kontras dihitung, bukan dikarang:** angka di §2-§3 berasal dari perhitungan sebelum dokumen ditulis, lalu **dikunci test** `frontend/src/styles/tokens.contrast.test.ts` (31 test WCAG 2.2 AA per pasangan token, kedua tema). Test itu **punya gigi**: mengubah `--color-ink-500` menjadi `#a8a8a8` membuat **3 test gagal** (`--text-muted di atas --surface = 2,18:1`), lalu pulih sesudah nilainya dikembalikan.
+- **Kerangka frontend berdiri (`T-048`):** Vite 8 + React 19 + TypeScript 5.9 + Tailwind v4 lewat plugin `@tailwindcss/vite` — **tanpa `tailwind.config.js`** karena v4 CSS-first (**ADR-0024**) — plus Zustand 5, axios, React Router 7, dan Vitest + Testing Library + `axe-core`. Token di `src/styles/tokens.css`; shell (`AppShell`/`Header`/`Sidebar`/`PageHeader`); primitives (`Button`, `Field`, `Panel`, `DataTable`, `StatusBadge`, `States`, `tones`); lapisan API (`http.ts` dengan pemetaan galat `42-API.md` §12 — `fieldErrors`, `retryAfterSeconds`, `LOCKED`/`TOKEN_REVOKED`, single-flight refresh; `auth.ts`; `session.ts`); store `auth` + `theme`; halaman **Login** (benar-benar memanggil `/auth/login` → `/auth/me`), **Dashboard** (hanya menyebut modul yang ada/belum ada — **tanpa angka karangan**, R-18), `ModulePending`, `NotFound`.
+- **Verifikasi:** `tsc --noEmit` bersih, `eslint .` bersih, **88 test / 10 berkas** hijau, `vite build` hijau (104 modul; 336 kB js / 19,5 kB css; gzip 108 / 5,0 kB), halaman dibuka di dev server. `check-ledger.sh` → `ledger OK`, `check-doc-links.sh` → `BROKEN: 0`.
+- **Dua cacat yang ditemukan dan diperbaiki dalam sesi yang sama.** (1) **Parser test kontras sendiri salah**: prelude blok `@theme` terbawa `@import`/`@custom-variant`, sehingga blok itu tidak dikenali dan **15 test gagal** padahal tokennya benar — diperbaiki, dan akar masalahnya ditulis sebagai komentar di test. (2) **C-060**: `51-UX.md` §3/§4 masih memuat palet biru-slate + `H1 28px` dari sebelum keputusan desain — dokumen yang paling sering dibuka untuk kerja halaman justru menyimpang dari `DESIGN.md`. Keduanya kelas "dokumen/kode yang tidak dapat diperiksa silang".
+- **Sembilan dokumen diselaraskan** supaya tidak ada dua sumber kebenaran: `51-UX` (warna/tipografi → penunjuk), `30-ARCHITECTURE` (versi stack + pohon folder nyata + teks CJK dibersihkan), `60-DEPLOYMENT` (variabel env & build frontend yang **benar-benar ada**), `01-AGENT-WORKFRAME` (dial resmi), `00-README`, `11-DESIGN-DIRECTION` (`SUPERSEDED`), `12-DEVELOPMENT-WORKFLOW`, `AGENTS.md`, dan `docs/adr/README.md`.
+- **Delivery Gate antislop (mode `during`) dijalankan dan dilaporkan PASS/FAIL di log §7**, termasuk satu **FAIL yang diperbaiki di sesi yang sama**: draf pertama `60-DEPLOYMENT.md` §2.1 memuat dua variabel frontend yang saya karang (tidak ada di `.env.example`/`vite.config.ts`) — diganti tabel yang dibaca dari berkas nyatanya. Catatan jujur: `skills/antislop-*/SKILL.md` (Q-003) masih belum ada, jadi filternya `antislop.md` + `DESIGN.md`.
+- **Pertanyaan baru (NON-BLOCKING):** **Q-021** refresh token di `sessionStorage` vs cookie `HttpOnly` (menyentuh `42-API.md` §2 + ADR-0023, jadi tidak diputuskan sepihak) dan **Q-022** delapan konvensi frontend yang diputuskan agen saat scaffold, termasuk menundanya TanStack Query sampai halaman data pertama.
+- **Audit:** **60 temuan — 59 FIXED, 0 APPROVED, 1 OPEN** (hanya C-050/Q-019 yang tersisa, dan itu keputusan produk). Tidak ada lagi temuan teknis yang terbuka. `NFR-USABLE-03` naik `TODO` → `PARTIAL` dengan ambang dikoreksi ke **WCAG 2.2**.
+- **Belum:** halaman bisnis (Projects, Documents, Tasks, Approvals, Reports, Administration); TanStack Query; mode tabel nyaman 44px; `Dockerfile` tetap `T-016`.
+
+
+
+## P-036 — 2026-09-20 — Pemeriksa konsistensi ledger + CI
+
+| Field | Isi |
+|---|---|
+| ID | P-036 |
+| Waktu | 2026-09-20 |
+| Aktor | agen (Buffy) |
+| Fase | **1** — infrastruktur dokumentasi |
+| Log lengkap | `docs/progress/prompts/P-036-2026-09-20-pemeriksa-konsistensi-ledger.md` |
+
+**Prompt user (ringkas):** "Buat skrip pemeriksa konsistensi ledger (hitungan audit, status task, referensi test/fungsi yang tidak ada lagi) dan jalankan di CI, supaya kelas cacat seperti C-055 tidak terulang."
+
+**Hasil:**
+
+- **Skrip baru `scripts/check-ledger.sh`** dengan lima kelompok pemeriksaan: marker `<!-- audit-summary ... -->` harus cocok dengan tabel tindak lanjut audit **dan** seragam di empat dokumen lain (termasuk angka `N FIXED`/`N OPEN` serta penjumlahan di prosanya); papan `TASKS.md` menolak satu ID di dua kolom, baris `DONE` tanpa tanggal, dan kolom non-`DONE` yang sudah mengklaim selesai; setiap rujukan `TestXxx` pada dokumen status dan ADR wajib ada di `backend/`; hitungan test per berkas dan `**total suite N test**` di `STATE.md` §3 wajib sama dengan `grep -c '^func Test'`; setiap `T-###`/`C-###` yang dirujuk wajib ada. Keluar `ledger OK` (0) atau daftar `FAIL` (1). Log historis (`prompts/**`, `SESSION-LOG.md`, `CHANGELOG.md`) sengaja **tidak** diperiksa, dan baris mana pun bisa dikecualikan dengan `<!-- ledger-check: skip: <alasan> -->`.
+- **Skrip ini langsung menemukan cacat nyata di ledger yang "sudah bersih":** lima rujukan test yang sudah tidak ada (`TestIssueToken`, `TestLoginRateLimited`, `TestDocumentDeleteCascadesVersionsAndFiles`, `TestFailedLoginRecorded`, `TestSuccessfulLoginNotLocked`), `T-044` yang duduk di `TODO` padahal teksnya sudah `DONE`, `T-006` di dua kolom, dan ID `T-008` yang dipakai untuk dua pekerjaan berbeda. Semuanya diperbaiki di sesi ini dan dicatat sebagai **C-058** + **C-059**.
+- **Bukti skrip punya gigi, bukan lulus kosong:** dua cacat disuntikkan sementara (total suite `236 → 213` dan marker `fixed=55 → 54`) → dua `FAIL` spesifik dengan `exit=1`; cacat ketiga di prosa (`56 + 0 + 2 = 59`) → `FAIL AGENTS.md:57: penjumlahan audit di prosa tidak berjumlah`. Semuanya dikembalikan, lalu hijau.
+- **Angka audit kini dikunci mesin:** marker `total=59 fixed=57 approved=0 open=2 rejected=0 rinci=37` ada di laporan audit, `audits/README.md`, `AGENTS.md`, `STATE.md`, dan `CONTINUE.md`, dan tidak ada lagi kalimat yang menyalin angka tanpa sumber.
+- **CI `.github/workflows/ci.yml`:** job `ledger` menjalankan kedua skrip dokumen, job `backend` menjalankan `go build`/`go vet`/`gofmt` dan `make test` di atas PostgreSQL 16 dengan database test terpisah `bwdcs_test`.
+- **Aturan ditulis untuk agen berikutnya:** `02-AGENT-PROGRESS-PROTOCOL.md` §6.1 + checklist §8, `12-DEVELOPMENT-WORKFLOW.md` §8, `90-AGENT-GUIDE.md` §7, dan `AGENTS.md`.
+- **Verifikasi:** `bash -n` bersih; skrip hijau (`0 peringatan`, 236 test); `check-doc-links.sh` → `BROKEN: 0`; `make test` → sembilan paket `ok`; angka per berkas dihitung ulang dari kode (jwt 17, middleware 12, auth service 22 + user 4, auth handler 14 + user 3, total 236) dan cocok dengan `STATE.md` §3. Tidak ada kode produksi yang berubah.
+- **Sisa yang butuh tangan user:** menjadikan job `ledger` *required status check* di GitHub — itu setelan repositori, bukan berkas.
+
+
+
+| Field | Isi |
+|---|---|
+| ID | P-035 |
+| Waktu | 2026-09-20 |
+| Aktor | agen (Buffy) |
+| Fase | **1** — pemeliharaan bukti |
+| Log lengkap | `docs/progress/prompts/P-035-2026-09-20-probe-ulang-alur-sesi-dan-lock.md` |
+
+**Prompt user (ringkas):** "Jalankan ulang satu sesi probe HTTP nyata khusus alur sesi dan lock, lalu lampirkan hasilnya sebagai bukti segar di 70-TESTING.md §3.12b."
+
+**Hasil:**
+
+- **Bukti §3.12b diganti dengan eksekusi baru**, bukan disalin: binari dibangun ulang (memuat `change-password` dan `refresh`), server dijalankan bersama probe-nya dalam satu perintah, dan seluruh angka berasal dari sesi ini. Judul bagiannya kini menandai "dijalankan ulang P-035".
+- **Seluruh klaim `T-040`/`T-041` bertahan:** `401`×4 lalu **`423`** pada percobaan kelima (ambang `system_settings` = 5), `423` juga untuk password **benar** saat terkunci (status akun dinilai sebelum password), `Retry-After: 900` **dan** `details.retry_after_seconds=900` + `locked_until` terkirim (bentuk C-052), lock hanya menghalangi login (sesi berjalan tetap `200`), `unlock` `200` dua kali dengan `USER_UNLOCKED=1`, `logout_all` `200` lalu ketiga token user itu `401 TOKEN_REVOKED` sementara **token user lain tetap `200`**, dan login ulang tepat sesudahnya sah (`200`).
+- **Dua perilaku baru terbukti di HTTP** karena endpoint refresh belum ada saat P-030: akun **terkunci** masih dapat memperpanjang sesinya (`POST /auth/refresh` → `200`; `423` hanya berlaku di `POST /auth/login`), sedangkan sesudah `logout_all` refresh token lama → `401 TOKEN_REVOKED`. Keduanya kini tercatat sebagai kontrak, bukan asumsi dari ADR-0023.
+- **C-035 dalam bentuk angka yang dapat diperiksa:** ringkasan `audit_logs` rentang probe = `LOGIN=6`, `LOGOUT_ALL=1`, `USER_UNLOCKED=1`, sementara **sembilan** percobaan gagal tidak menghasilkan satu pun baris audit. `LOGIN=6` tepat sama dengan jumlah login yang berhasil.
+- **Selisih angka dari P-030 dijelaskan, bukan disembunyikan:** `login_attempts succeeded=false` kini **7** bukan `6`, karena probe mengirim satu permintaan tambahan khusus untuk membaca header `Retry-After`.
+- **Pembersihan diperiksa, bukan diasumsikan:** audit dihapus lewat jalur pemeliharaan **sebelum** user (FK `RESTRICT`), telemetri login sebelum user (aturan C-056), dan hasil akhirnya `users=1`, `audit_logs=43`, `login_attempts=0`, `token_revocations=0`, `organizations=1`, `locked=0`, `tokens_invalid_before` epoch, `schema=10`, port 8081 bebas, tanpa berkas sementara tertinggal.
+- **Verifikasi:** `gofmt -l` bersih, `go vet ./...` bersih, `make test` hijau (sembilan paket). **Tidak ada perubahan kode dan tidak ada temuan baru.**
+
+**File berubah:** `70-TESTING.md` §3.12b, log `P-035`, dan entri ledger (`CHANGELOG`, `SESSION-LOG`, `STATE`, `CONTINUE`, `TASKS`).
+
+**Status:** DONE — bukti segar terpasang.
+
+**Next action:** **Workflow** (Phase 2) atau modul **admin/notification**; selipan murah `T-024`.
+
+## P-034 — 2026-09-20 — T-034 (sebagian): `POST /auth/change-password` berjalan, refresh dipisah ke `T-045`
+
+| Field | Isi |
+|---|---|
+| ID | P-034 |
+| Waktu | 2026-09-20 |
+| Aktor | agen (Buffy) |
+| Fase | **1** — melunasi kontrak auth yang tertunda |
+| Log lengkap | `docs/progress/prompts/P-034-2026-09-20-change-password-dan-status-refresh.md` |
+
+**Prompt user (ringkas):** "Kerjakan T-034: daftarkan POST /auth/refresh dan POST /auth/change-password dengan aturan 'cabut seluruh sesi lain' memakai tokens_invalid_before plus penerbitan token baru, lengkap dengan test."
+
+**Hasil:**
+
+- **`change-password` selesai dan berjalan.** Route `POST /api/v1/auth/change-password` terdaftar dengan benar-benar hanya autentikasi (aksi pada akun sendiri, FR-AUTH-09). Urutannya mengikat dan itu inti perubahan: `old_password` diverifikasi **lebih dulu** (gagal berarti tidak ada hash, tidak ada pencabutan, tidak ada audit), lalu hash baru + `RevokeAllForUser` + audit `PASSWORD_CHANGED` ditulis dalam **satu** transaksi, dan token pengganti diterbitkan **sesudah commit** — kalau di dalam transaksi, `iat`-nya bisa jatuh di detik yang sama dengan titik pencabutan (C-053). Response `200` memuat `token` + `expires_at`.
+- **"Seluruh sesi lain dicabut, sesi yang dipakai tetap hidup" dinyatakan lewat token pengganti, bukan `keepJTI`.** Butir `keepJTI` yang lama di `42-API.md` §2 dihapus karena penanda per user memang **tidak dapat** mengecualikan satu `jti`; pengecualiannya dibuat dengan menerbitkan token baru yang `iat`-nya setelah titik pencabutan (keputusan Q-013/ADR-0021).
+- **Lima test baru, dua lapis.** Service: `TestChangePasswordKeepsCurrentSession` (token pengganti baru & tidak dianggap tercabut; token sesi ini **dan** perangkat lain dicabut; user lain tidak tersentuh; audit tepat satu; password lama gagal sedangkan baru berhasil), `TestChangePasswordRejectsWrongCurrentPassword` (nol audit, sesi tidak dicabut, password lama masih berlaku), `TestChangePasswordEnforcesNewPasswordRules` (batas bawah, **tepat** pada ambang, mengulang password lama). Handler: `TestChangePasswordEndToEnd` dan `TestChangePasswordErrorMapping` (lima subtest: `400 INVALID_CURRENT_PASSWORD`, `422` + `field`, `401` tanpa token).
+- **Test tidak lulus karena kebetulan waktu.** `TestChangePasswordEndToEnd` menunggu 1,1 detik sebelum mengganti password dan perangkat lain login **nyata** lebih dulu; tanpa keduanya, "sesi lain dicabut" tidak dapat dibedakan dari token yang selamat di detik yang sama. Bukti gigi test: dengan `RevokeAllForUser` dinonaktifkan sementara, dua test gagal tepat pada asersi "token sesi ini/perangkat lain harus ditolak".
+- **`POST /auth/refresh` sengaja TIDAK didaftarkan.** `42-API.md` §2 melarang mengarang bentuk refresh token sebelum ada keputusan, dan memang belum ada yang memutuskan (tidak ada tabel/kolom penyimpanannya, tidak ada `FR-AUTH-*` yang menuntutnya). Yang **sudah** mengikat hanya pemeriksaan pencabutannya: jalur yang sama dengan endpoint terproteksi lain (ADR-0009 butir 7 + ADR-0021 butir 6). Keputusannya dicatat sebagai **Q-020** dengan tiga opsi, dan sisanya menjadi task **`T-045`** di papan `BLOCKED`.
+- **Verifikasi:** `gofmt -l` bersih, `go vet ./...` bersih, `make test` hijau untuk sembilan paket. Dokumen diselaraskan (`42-API.md` §2, `40-TSD.md` §2.4/§6, `70-TESTING.md` §3.12b/§3.12c) dan ledger ditutup (`TASKS.md`, `OPEN-QUESTIONS.md`, `TRACEABILITY.md` `FR-AUTH-09` → DONE, `STATE.md`, `CONTINUE.md`, `AGENTS.md`).
+- **Temuan baru: C-057** (angka test per berkas di `STATE.md` §3 menyimpang dari isi repo — mis. auth service 14 → **17**, handler auth 9 → **11**, total suite 213 → **222**). Kelas yang sama dengan C-044 dan C-055, dan sebabnya sama: tiap sesi menaikkan angka dari angka sesi sebelumnya alih-alih menghitung ulang. Hitungan diperbaiki, dan audit kini **57 temuan / 55 FIXED / 0 APPROVED / 2 OPEN** dengan ketiga angka yang benar-benar bertemu lewat `grep` (status `C-015` dicetak tebal karena itu).
+
+**File berubah:** lihat `CHANGELOG.md` tanggal 2026-09-20 (sesi P-034).
+
+**Status:** `T-034` **DONE sebagian** — yang tertunda dipindahkan, bukan dibiarkan menggantung; `T-045` `BLOCKED` pada Q-020; `FR-AUTH-09` **DONE**.
+
+**Next action:** jawab **Q-020** bila menginginkan `POST /auth/refresh` hidup, atau lanjut ke **Workflow** (Phase 2) / modul admin-notification.
+
+### Lanjutan P-034 — `POST /auth/refresh` (T-045, ADR-0023)
+
+**Keputusan user:** **Opsi A** — refresh token adalah JWT kedua yang bertanda klaim `typ`, tanpa
+penyimpanan di server. Dicatat sebagai **ADR-0023** (`ACCEPTED`).
+
+**Hasil:**
+
+- **Pengaman intinya adalah klaim `typ` yang wajib.** Access token bertanda `access`, refresh token `refresh`; token tanpa `typ` ditolak. Middleware hanya menerima `access`, endpoint refresh hanya menerima `refresh`. Tanpa itu, satu refresh token berumur 7 hari dapat dipakai sebagai bearer token — dan itu **bukan** hipotetis: dengan pemeriksaan tipe dinonaktifkan sementara, `TestRefreshTokenIsNotABearerToken` menyala `status 200` pada `/auth/me` dan **enam test gagal di tiga paket**.
+- **Masa berlaku 7 hari** sebagai konstanta kode `jwt.RefreshExpiry` (bukan env var baru): angkanya sudah ditetapkan `44-SECURITY.md` §2.2, dan menambah variabelnya berarti menambah kunci yang harus dijaga di tiga berkas untuk nilai yang tetap (alasan yang sama dengan ADR-0020 butir 2). Access token tetap 24 jam.
+- **`POST /auth/login` kini juga mengembalikan `refresh_token` + `refresh_expires_at`.** Tanpa itu endpoint refresh tidak punya modal apa pun untuk ditukar — kelalaian yang mudah terjadi kalau hanya endpoint barunya yang dikerjakan.
+- **Pencabutannya memakai jalur yang sama** dengan endpoint terproteksi lain (ADR-0009 butir 7 + ADR-0021 butir 6), jadi `logout_all` dan `change-password` otomatis mematikan refresh token lama. Akun nonaktif → `403 ACCOUNT_INACTIVE`; user yang hilang → `401 TOKEN_REVOKED`.
+- **Refresh tidak menulis `audit_logs`** dan itu dinyatakan terbuka di ADR-0023: ia tidak mengubah data dan tidak ada di kosakata aksi audit; sesinya sudah tercatat sebagai `LOGIN`. Menambah aksi yang terjadi setiap hari akan mengubur aksi yang berarti (alasan yang sama dengan ADR-0022 butir 2).
+- **Batas yang diterima sadar, dikunci test:** token lama tidak dicabut saat rotasi karena bentuknya stateless, jadi pemakaian ulang tidak dapat dideteksi. `TestRefreshKeepsPreviousRefreshTokenValid` sengaja ditulis untuk **gagal lebih dulu** bila kelak mekanismenya diganti ke token buram ber-rotasi (opsi B yang direkomendasikan OWASP, lebih kuat, tidak dibatalkan sebagai kemungkinan).
+- **Satu jebakan waktu ditemukan saat menulis test:** refresh sesudah `logout_all` **berhasil** pada percobaan pertama karena `iat` berpresisi detik dan `tokens_invalid_before` dipotong ke detik — token yang terbit pada detik yang sama memang selamat (C-053). Test kini menunggu 1,1 detik lebih dulu supaya yang diuji pencabutannya, bukan kebetulan waktu.
+- **Verifikasi:** 14 test baru (6 `internal/pkg/jwt` + 5 service + 3 handler), `gofmt`/`go vet` bersih, `make test` hijau (sembilan paket, **236 test**). **Bukti server nyata** (binari dibangun ulang, satu perintah bersama servernya, user probe terpisah dari admin): login menyerahkan kedua token; dekode klaim → access 24 jam, refresh 7 hari; refresh token sebagai bearer → `401 UNAUTHORIZED`; access token di endpoint refresh → `401`; `"bukan-token"` → `401`; `{}` → `422 field=refresh_token`; penukaran sah → `200` dengan pasangan baru yang keduanya berbeda; token pengganti dipakai ke `/auth/me` → `200`; penukaran kedua → `200`; `logout_all` → `200` lalu refresh → `401 TOKEN_REVOKED`; `token_revocations(logout_all)=1`, `login_attempts=1`, `audit_logs LOGIN=1`. Database dev dikembalikan persis (`users=1`, `audit_logs=43`, `login_attempts=0`, `token_revocations=0`, `organizations=1`, `schema=10`, tidak ada proses server tertinggal).
+
+**Status:** `T-045` **DONE**; Q-020 `RESOLVED`; tidak ada lagi tugas backend yang menunggu keputusan.
+
+**Next action:** pilihan bebas — **Workflow** (Phase 2) atau modul **admin/notification**; selipan murah `T-024`.
+
+## P-033 — 2026-09-20 — Kontrak HTTP semantik batas rentang `due_date`
+
+| Field | Isi |
+|---|---|
+| ID | P-033 |
+| Waktu | 2026-09-20 |
+| Aktor | agen (Buffy) |
+| Fase | **1** — penguatan test kontrak |
+| Log lengkap | `docs/progress/prompts/P-033-2026-09-20-kontrak-batas-rentang-http.md` |
+
+**Prompt user (ringkas):** "Tambahkan test kontrak yang mengunci semantik batas rentang pada level HTTP untuk semua kombinasi (hanya due_from, hanya due_to, keduanya sama, rentang terbalik) sehingga perubahan semantik berikutnya tidak bisa lolos tanpa mengubah test."
+
+**Hasil:**
+
+- `TestTaskListDueRangeContractAtHTTP` ditambahkan di `internal/handler/task_handler_test.go`: 16 subtest yang menguji seluruh kombinasi pada tiga task berdue tetap (2030, offset `Z`), plus kasus rentang terbalik yang dikunci sampai `details.field = due_to`.
+- **Kunci semantiknya ada pada tiga kasus kesetaraan batas:** `due_from` tepat pada `due_date` task terjauh, `due_to` tepat pada task terdekat, dan `due_from == due_to` tepat pada sebuah task, masing-masing mengharapkan tepat satu baris. Begitu salah satu batas menjadi eksklusif, ketiganya menjawab `0`.
+- **Test punya gigi:** dengan `t.due_date <= $10` diubah sementara menjadi `<`, tujuh subtest gagal tepat pada kasus batas (`Total: 0/1/2` vs harapan); setelah dikembalikan, seluruh suite hijau.
+- Tenggat tidak memakai `time.Now()`, sehingga tidak ada test yang rapuh terhadap jam.
+- **Verifikasi:** `gofmt`/`vet` bersih, `make test` hijau (sembilan paket), database test kembali kosong. Tidak ada perubahan kode produksi.
+
+**File berubah:** lihat `CHANGELOG.md` tanggal 2026-09-20 (sesi P-033).
+
+**Status:** DONE (test kontrak).
+
+**Next action:** tidak ada lagi tugas backend yang sudah diputuskan; urutan berikutnya pilihan (Workflow Phase 2 atau admin/notification).
+
+---
+
+## P-032 — 2026-09-20 — T-043: `meta.total` seragam pada seluruh endpoint daftar
+
+| Field | Isi |
+|---|---|
+| ID | P-032 |
+| Waktu | 2026-09-20 |
+| Aktor | agen (Buffy) |
+| Fase | **1** — perbaikan temuan audit |
+| Log lengkap | `docs/progress/prompts/P-032-2026-09-20-meta-total-seragam.md` |
+
+**Prompt user (ringkas):** "Perbaiki temuan C-048 (T-043): samakan perilaku meta.total pada endpoint daftar project, document, dan task dengan tambalan yang sudah dipakai modul komentar, lengkap dengan test halaman di luar rentang untuk tiap modul."
+
+**Hasil:**
+
+- **Pola modul komentar disalin ke tiga repository sekaligus.** Tiap repository kini punya `count` yang membangun kueri dari `FROM` + `WHERE` yang **sama** dengan `List`: predikat daftar diangkat jadi variabel bersama (`projectListWhere`, `documentListWhere`, `taskListWhere`). Dengan begitu jalur cepat `COUNT(*) OVER()` dan kueri hitung tidak dapat menyimpang diam-diam — risiko yang justru jadi alasan C-048 tidak ditambal satu modul saja.
+- **Kueri hitung hanya jalan saat diperlukan:** `len(rows) == 0 && offset > 0`, jadi halaman normal tetap satu perjalanan ke database.
+- **Penyaring ikut dihormati kueri hitung:** aturan default dokumen menyembunyikan `archived` (ADR-0019) dan cakupan baca task diuji langsung lewat test halaman di luar rentang, bukan diasumsikan.
+- **Tiga test baru** (satu per modul) membuktikan halaman di luar rentang menjawab `data: []` dengan `meta.total` tetap jumlah sebenarnya. **Bukti test itu punya gigi:** dengan tambalan project dinonaktifkan sementara, `TestProjectListOutOfRangePageKeepsTotal` gagal tepat pada asersinya (`total 0`), lalu tambalan dikembalikan.
+- **Verifikasi:** `gofmt`/`vet` bersih, `make test` hijau (sembilan paket), database test kembali kosong. Tidak ada migrasi dan tidak ada perubahan kontrak selain jaminan yang kini berlaku penuh.
+- Ledger diselaraskan: `T-043` DONE, **C-048 `FIXED`**, hitungan audit **54 FIXED / 0 APPROVED / 2 OPEN** (dihitung ulang dari berkasnya).
+
+**File berubah:** lihat `CHANGELOG.md` tanggal 2026-09-20 (sesi P-032).
+
+**Status:** DONE (`T-043`); `C-048` `FIXED`.
+
+**Next action:** tidak ada lagi tugas backend yang sudah diputuskan. Urutan berikutnya pilihan: modul **Workflow** (Phase 2, ADR-0015/0016) atau modul **admin/notification**; UI menunggu arah desain (Q-001/Q-002).
+
+---
+
+## P-031 — 2026-09-20 — README.md komprehensif
+
+| Field | Isi |
+|---|---|
+| ID | P-031 |
+| Waktu | 2026-09-20 |
+| Aktor | agen (Buffy) |
+| Fase | Dokumentasi (lintas fase) |
+| Log lengkap | `docs/progress/prompts/P-031-2026-09-20-readme-komprehensif.md` |
+
+**Prompt user (ringkas):** "Buatkan readme.md yang komprehensif, penulisan ikuti juga panduan dari antislop.md."
+
+**Hasil:**
+
+- `README.md` dibuat dari nol (repo sebelumnya tidak punya README). Isinya: gambaran produk dan alur utama, tabel **status jujur per bagian** (termasuk yang belum ada: modul Workflow, Notification, Report, Admin CRUD, `refresh`/`change-password`, dan frontend yang masih kosong), teknologi beserta versi yang benar-benar dipin di `go.mod`, arsitektur modular monolith dengan keputusan yang mengikat, struktur repo, prasyarat, panduan mulai cepat (database, `.env`, `make run`, login, jalur Docker), perintah test dan pemeriksaan, daftar 30 route yang hidup beserta catatan perilaku yang mudah salah dibaca, peran dan izin, aturan migrasi, navigasi dokumen, dan status lisensi.
+- **Penulisan mengikuti `antislop.md`.** Tanpa em dash (R-02), tanpa buzzword pemasaran (R-16), tanpa angka atau klaim yang tidak bersumber (R-17/R-36), dan bagian yang belum ada ditulis apa adanya alih-alih dipoles (R-38). Tidak ada testimoni, statistik, atau logo yang dikarang.
+- **Sumber angka diverifikasi dari repo**, bukan dari ingatan: 30 route dihitung dari `internal/handler/router.go`, versi dependensi dari `go.mod`, status modul dari `docs/progress/STATE.md` dan `80-ROADMAP.md`.
+
+**File berubah:** `README.md` (baru), `docs/progress/prompts/P-031-2026-09-20-readme-komprehensif.md`, `docs/progress/CHANGELOG.md`, `docs/progress/SESSION-LOG.md`.
+
+**Verifikasi:** `bash scripts/check-doc-links.sh` -> `BROKEN: 0`; `grep "—" README.md` -> kosong; penyaring buzzword -> kosong.
+
+**Status:** DONE (dokumen).
+
+**Next action:** `T-043` (seragamkan `meta.total`), lalu modul Workflow (Phase 2) atau admin/notification; UI tetap menunggu arah desain (`DESIGN.md`) dan pilihan mode antislop (Q-001/Q-002).
+
+---
+
+## P-030 — 2026-09-19 — T-040 + T-041: pencabutan seluruh sesi & auto-lock login
+
+| Field | Isi |
+|---|---|
+| ID | P-030 |
+| Waktu | 2026-09-19 |
+| Aktor | agen (Buffy) |
+| Fase | **1** — implementasi ADR yang sudah `ACCEPTED` |
+| Log lengkap | `docs/progress/prompts/P-030-2026-09-19-pencabutan-sesi-dan-auto-lock.md` |
+
+**Prompt user (ringkas):** "Kerjakan T-040 dan T-041 dalam satu migrasi 010: pencabutan seluruh sesi lewat users.tokens_invalid_before (ADR-0021) dan login_attempts + auto-lock 423 dengan POST /admin/users/:id/unlock (ADR-0022), lalu buktikan dengan test dan satu sesi probe HTTP nyata."
+
+**Hasil:**
+
+- **Pencabutan seluruh sesi berjalan** (`T-040`, ADR-0021). `RevocationRepository.SessionRevoked` menjawab kedua sebab (`jti` tercabut **atau** `iat < users.tokens_invalid_before`) dalam **satu** kueri ber-cache; `RevokeAllForUser` menulis kolom itu dan membuang cache user; `AuthService.Logout` mencabut `jti` request **plus** seluruh token lama + audit `LOGOUT_ALL`. `logout_all: true` → `200`, dan `501 NOT_IMPLEMENTED` hilang dari kontrak dan dari `internal/pkg/response`. `jwt.Validate` kini menolak token tanpa `iat`.
+- **Auto-lock login berjalan** (`T-041`, ADR-0022). `login_attempts` mencatat **setiap** percobaan (berhasil/gagal, termasuk username tak ada); ambang `auth.max_login_attempts` dari `system_settings`, jendela 15 menit konstanta kode; percobaan yang melewati ambang → **`423 LOCKED`** + `Retry-After` + `details.retry_after_seconds`; password benar saat terkunci juga `423`; `POST /admin/users/:id/unlock` (izin `user:update`) membuka lebih awal, idempoten, mengaudit `USER_UNLOCKED` sekali saja. **`login_guard.go` dihapus.**
+- **Tanpa migrasi baru:** `010` (P-029) sudah memasang seluruh skema ADR-0021/0022, jadi sesi ini murni kode.
+- **Bukti:** `make test` hijau (sembilan paket, tiga kali, database test `bwdcs_test`) + **satu sesi probe HTTP nyata ±30 permintaan** pada binari yang dibangun ulang (`versi_skema 10`) — logout per-token vs `logout_all`, login ulang pada detik yang sama tetap `200`, empat `401` lalu `423` + `Retry-After: 900`, password benar saat terkunci `423`, Viewer `403`, `unlock` `200` dua kali dengan **satu** audit. Database dev dikembalikan persis seperti semula (`audit_logs 43`, `login_attempts 0`, `users 1`), tanpa proses tertinggal.
+- **Lima temuan baru, semuanya ditutup di sesi yang sama:** **C-052** (bentuk `details` `423` daftar vs objek), **C-053** (`NOW()` mentah menolak token yang lahir di detik yang sama), **C-054** (pemicu `429` per username yang tidak lagi cocok), **C-055** (hitungan audit tidak dapat diperiksa silang), **C-056** (database test tidak kosong — `projectHTTPFixture` tidak membersihkan `login_attempts`). Tiga temuan lama (`C-009`, `C-033`, `C-035`) menjadi `FIXED`, sehingga kolom `APPROVED` di audit kini **kosong**.
+
+**File berubah:** lihat `CHANGELOG.md` tanggal 2026-09-19 (sesi P-030).
+
+**Verifikasi:** `cd backend && make test` → sembilan paket `ok`; `gofmt`/`go vet`/build bersih; `scripts/check-doc-links.sh` → `BROKEN: 0`.
+
+**Status:** DONE (`T-040` + `T-041`); `T-034` (`/auth/refresh` + `change-password`) tetap terbuka tetapi tidak lagi terblokir keputusan.
+
+**Next action:** kerjakan **`T-043`** (seragamkan `meta.total`, temuan C-048), lalu modul **Workflow** (Phase 2) atau admin/notification.
+
+---
+
+## P-029 — 2026-09-19 — T-039: arsip dokumen menggantikan `DELETE`, `document_versions` menjadi append-only
+
+| Field | Isi |
+|---|---|
+| ID | P-029 |
+| Waktu | 2026-09-19 |
+| Aktor | agen (Buffy) |
+| Fase | **1** — implementasi ADR yang sudah `ACCEPTED` |
+| Log lengkap | `docs/progress/prompts/P-029-2026-09-19-arsip-dokumen-dan-trigger-versi.md` |
+
+**Prompt user (ringkas):** "Kerjakan T-039: ganti DELETE /documents/:id dengan POST /documents/:id/archive sesuai ADR-0019, termasuk nilai kanonik archived dan trigger append-only pada document_versions, lalu buktikan test di 70-TESTING.md §3.12 lulus."
+
+**Hasil:**
+
+- **Migrasi `010` memuat seluruh isi yang dijadwalkan `41-DATABASE.md` §4** — termasuk skema ADR-0021/0022 (`users.tokens_invalid_before`, `users.locked_until`, `login_attempts`) — karena berkas migrasi **tidak boleh disunting setelah diterapkan** (dev & test sudah di versi goose 9). Bagian milik `T-040`/`T-041` dipasang sebagai skema saja; kodenya menyusul. Trigger `document_versions` dibungkus `StatementBegin`/`StatementEnd` (temuan C-031) dan memakai **fungsi yang sama** dengan `audit_logs`.
+- **Arsip bukan hapus, dan itu diuji dari dua sisi.** `Archive` hanya `UPDATE` (`status='archived'`, `archived_at=NOW()`), jadi baris, `document_versions`, berkas di storage, dan jejak auditnya tetap — dibuktikan `TestArchiveDocumentKeepsVersionsAndFiles` (2 baris versi + dua berkas tetap ada, unduhan tetap `200` identik) dan pada server nyata (`ls` storage sesudah arsip). Daftar default menyembunyikan arsip (`?status=archived` menampilkannya kembali) lewat kueri di repository, bukan handler.
+- **Dua `409` yang berbeda makna:** unggahan versi baru pada dokumen terarsip (ditolak **sebelum** berkas ditulis, jadi tidak ada berkas yatim) dan arsip ulang (supaya `archived_at` tidak bergeser — arsip sengaja **tidak** idempoten, berbeda dari arsip project).
+- **Jalur lama tidak dibiarkan sebagai alias:** route `DELETE /documents/:id` dihapus, dan test membuktikannya (`404` dari router, bukan `200` dengan semantik berbeda). Izin arsip `document:update` (Viewer `403`, Contributor `200`) — baris `document:delete` kini tanpa pemakai.
+- **Bukti pada server nyata (bukan klaim):** 13 probe + 4 query `psql` dengan binari dibangun ulang (`versi_skema 10`): arsip `200` (`status=archived`, `archived_at` terisi), detail/unduh `200` (isi identik via `cmp`), daftar default `total 0` / `?status=archived` `total 1`, unggahan ulang & arsip ulang `409`, `DELETE` lama `404`, Viewer `403` "anda tidak memiliki izin document:update"; `audit_logs` ber-`entity_id` nomor dokumen (`DOCUMENT_ARCHIVED=1`). Database dev dikembalikan seperti semula (`projects 0`, `documents 0`, `document_versions 0`, `users 1`, `audit_logs 43`), berkas uji dihapus, tanpa proses tertinggal.
+- **Konsekuensi yang sengaja dicatat:** karena `document_versions` kini append-only, `DELETE FROM documents` **ikut tertahan** `23001` bila dokumennya punya versi (kaskade melewati trigger) — pembersihan data memakai `SET LOCAL bwdcs.audit_maintenance = 'on'`, jalur yang sama dengan `audit_logs`. Diuji `TestDocumentVersions_DeleteFromDocumentsIsRejected` dan ditulis di `STATE.md`/`AGENTS.md`.
+- **Yang belum dapat diuji dan dinyatakan apa adanya:** penolakan **submit ke workflow** untuk dokumen terarsip (endpoint-nya milik modul Workflow yang belum ada) — dicatat di `70-TESTING.md` §3.12 supaya tidak ditutup tanpa test saat modulnya dikerjakan.
+- **Satu temuan baru, ditutup di sesi yang sama — C-051.** FK `document_versions.document_id` tetap `ON DELETE CASCADE` di skema, tetapi kaskadenya kini ditahan trigger: `DELETE FROM documents` gagal `23001` bila dokumennya punya versi. Bukan kontradiksi (ADR-0019 menerima konsekuensi itu), tetapi mudah menyesatkan siapa pun yang membaca skema dan menyimpulkan pembersihan bebas hambatan — jadi dicatat, diberi catatan di `41-DATABASE.md` §2.3, dan dikunci test `TestDocumentVersions_DeleteFromDocumentsIsRejected`.
+- **Ledger:** C-004 `APPROVED` → **`FIXED`**, C-051 baru (FIXED); hitungan **51 / 45 FIXED / 3 APPROVED / 3 OPEN**; `T-039` pindah ke DONE. Satu cacat lama ikut diperbaiki saat menyentuh barisnya: kolom test `FR-AUDIT-01` di `TRACEABILITY.md` menyatu dengan kolom kode (satu `|` hilang).
+
+**Verifikasi:** `gofmt`/`go vet`/`go build` bersih; `make test` hijau (sembilan paket, tanpa SKIP/FAIL); `scripts/check-doc-links.sh` → `BROKEN` = 0.
+
+**Next action:** `T-040` (pencabutan sesi lewat `tokens_invalid_before` — kolomnya sudah ada), lalu `T-041` (`login_attempts` + auto-lock), lalu `T-043` (`meta.total`), kemudian Workflow.
+
+---
+
+## P-028 — 2026-09-19 — Q-017: butir (11) diverifikasi ulang, butir (10) dikoreksi user menjadi batas inklusif
+
+| Field | Isi |
+|---|---|
+| ID | P-028 |
+| Waktu | 2026-09-19 |
+| Aktor | agen (Buffy) |
+| Fase | **3** — perbaikan kontrak modul Task |
+| Log lengkap | `docs/progress/prompts/P-028-2026-09-19-rentang-tanggal-inklusif-q017.md` |
+
+**Prompt user (ringkas):** "Ambil rekomendasi Q-017: perbaiki bindJSON bersama agar pesan 422 untuk UUID tidak sah di body jujur dan menyebut field-nya, lalu tambahkan penyaring rentang tanggal pada GET /tasks dengan semantik RFC 3339 batas inklusif."
+
+**Hasil:**
+
+- **Satu bagian sudah ada, satu bagian berbeda arah — dan keduanya diperiksa lebih dulu.** Butir (11) (`bindJSON`) sudah dikerjakan P-026 (C-045) dan **diverifikasi ulang** tanpa menyentuh kode: `document_id`, `title`, `due_date`, `body`, dan `owner_id` (`POST /projects`) semuanya `422` dengan field yang benar. Butir (10) sudah dikerjakan P-026 **tetapi sebagai setengah terbuka** (usulan agen), sedangkan prompt ini meminta **batas inklusif** — pilihan yang memang dinyatakan reversibel di Q-017, jadi dikerjakan. Menulis ulang `bindJSON` hanya akan mengulang pekerjaan yang sudah terbukti.
+- **Semantik rentang kini tertutup** `[due_from, due_to]`: kueri `<=`, validasi `due_to < due_from` → `422`, dan **`due_to == due_from` sah** (satu instan). Konsekuensi yang diketahui — rentang bersebelahan dapat tumpang tindih — ditulis di `42-API.md` §6 dan log ini, bukan disembunyikan.
+- **Test pembeda ditulis lebih dulu:** `TestTaskListDueRangeFilterIsHalfOpen` → `TestTaskListDueRangeFilterIsInclusiveBothEnds` (7 kasus: batas atas inklusif, batas bawah inklusif, kedua batas sama, dua baris, tanpa batas bawah, tanpa batas atas, rentang kosong), plus satu kasus HTTP yang mengirim `due_to` **tepat sama** dengan `due_date` sebuah task — inklusif menjawab 1 baris, setengah terbuka akan menjawab 0.
+- **Bukti server nyata** (binari dibangun ulang lebih dulu): rentang `03-10..03-20` → `total=2` (dulu 1), `03-20..03-20` → `total=1` (dulu `422`), rentang luas `%2B` → `3`, `?due_to=<tepat due task>` → `1`, rentang terbalik → `422 field=due_to`. Butir (11) dijalankan ulang sebagai regresi pada binari yang sama.
+- **Kebersihan:** data bukti dibersihkan (`projects 0`, `tasks 0`, `audit_logs 43`), server berhenti rapi, tidak ada proses tertinggal.
+
+**Verifikasi:** `gofmt`/`go vet` bersih; `make test` hijau; `TestTaskListDueRangeFilterIsInclusiveBothEnds` 7/7 dan `TestTaskListQueryValidation` 30 kasus PASS.
+
+**Status:** `T-044` DONE. **Next action:** `T-039`/`T-040`/`T-041` → `T-043` → modul **Workflow** (Phase 2).
+
+---
+
+## P-027 — 2026-09-19 — Modul Comment: lima endpoint §7, cakupan dari entitas, edit/hapus sebagai kepemilikan
+
+| Field | Isi |
+|---|---|
+| ID | P-027 |
+| Waktu | 2026-09-19 |
+| Aktor | agen (Buffy) |
+| Fase | **3** (Task & Comment) — dikerjakan lebih awal dari urutan, sesuai asumsi Q-018 |
+| Log lengkap | `docs/progress/prompts/P-027-2026-09-19-modul-comment-dan-kepemilikan.md` |
+
+**Prompt user (ringkas):** "Kerjakan modul Comment: lima endpoint 42-API.md §7 dengan cakupan mengikuti entitas yang boleh dibaca dan edit/hapus hanya milik sendiri, lengkap dengan test dan bukti pada server nyata."
+
+**Hasil:**
+
+- **Lima endpoint §7 hidup** (`GET|POST /api/v1/comments`, `GET|PATCH|DELETE /api/v1/comments/:id`). Dua aturan `44-SECURITY.md` §3.1.3 dijalankan sekaligus, keduanya **di dalam kueri**: cakupan baca diturunkan dari entitas yang dikomentari (tabel `comments` tidak menyimpan `project_id`, jadi pemetaan entitas → project tinggal satu di repository) dan edit/hapus dibatasi **kepemilikan** (`WHERE created_by_id = actor`), bukan izin. Matriks ADR-0014 tidak memuat `comment:update`/`comment:delete`, jadi `PATCH`/`DELETE` dijaga `comment:read` — pemisahan "boleh mengubah" datang dari kueri, bukan middleware.
+- **Perilaku yang tidak dituntut dokumen tidak dikarang.** `workflow_instance` (nama panjang) ditolak sebagai `entity_type` karena kolomnya adalah kosakata tertutup; balasan ber-thread tidak diimplementasikan karena skemanya tidak punya kolom induk — FSD §7 dinyatakan **belum didukung** dan perilakunya dikunci test yang memeriksa `information_schema`.
+- **Tiga temuan baru, semuanya dari menjalankan sesuatu.** **C-048** `meta.total` = 0 pada halaman di luar rentang (`COUNT(*) OVER()` tidak dievaluasi tanpa baris) — ketahuan dari test paginasi sendiri, ditambal di modul ini, tiga modul lain dicatat sebagai `T-043`; **C-049** bentuk rute daftar `/comments/:entityType/:entityId` **panik** saat registrasi bersama `/comments/:id`, sehingga kontrak memakai bentuk kueri; **C-050** threading tanpa dukungan skema, dengan **Q-019** (rekomendasi: tunda).
+- **Bukti pada server nyata** (binari dibangun ulang, server dijalankan dalam satu perintah bersama probe-nya): 33 probe HTTP + 3 query `psql`. Termasuk perbandingan yang paling menjelaskan modul ini — aktor ber-role **viewer** yang **bukan** anggota project menerima `404` di semua endpoint dan daftar `total 0`, lalu **setelah** ditambahkan sebagai anggota ia boleh membaca (`total 2`) dan berkomentar (`201`) tetapi tetap **404** saat menyunting komentar orang lain; `403` hanya muncul saat viewer mencoba `POST /projects`. Audit: `COMMENT_CREATED` 3, `COMMENT_UPDATED` 2, `COMMENT_DELETED` 2 ber-`entity = comment`, tanpa entri untuk permintaan yang ditolak.
+- **Satu temuan perencanaan yang menghemat satu putaran:** bentuk rute daftar diuji **sebelum** handler ditulis, bukan sesudah — kalau tidak, panik Gin akan muncul di tengah implementasi dengan asumsi kontrak yang sudah tertulis di dokumen.
+- **Kebersihan bukti:** database dev dikembalikan seperti semula (`users 1`, `projects 0`, `comments 0`, `audit_logs 43`), tidak ada proses server yang ditinggal, dan berkas sementara dihapus. Hitungan audit diambil dari tabel: **50 / 43 FIXED / 4 APPROVED / 3 OPEN**.
+
+**Verifikasi:** `gofmt`/`go vet`/`go build` bersih; `make test` hijau (delapan paket, database test `bwdcs_test`); test komentar 3 model + 11 service + 7 handler, 0 FAIL/SKIP; `BROKEN` = 0; fence markdown genap.
+
+**Status:** `T-042` DONE, Phase 3 tertutup. **Next action:** `T-039`/`T-040`/`T-041` (implementasi ADR-0019/0021/0022) lalu `T-043` (C-048), kemudian modul **Workflow** (Phase 2).
+
+---
+
+## P-026 — 2026-09-19 — Perbaikan C-045/C-046/C-047, lalu menjawab sembilan temuan terbuka dengan best practice
+
+| Field | Isi |
+|---|---|
+| ID | P-026 |
+| Waktu | 2026-09-19 |
+| Aktor | agen (Buffy) |
+| Fase | **1** — perbaikan temuan + keputusan arsitektur (menyentuh kontrak modul Document) |
+| Log lengkap | `docs/progress/prompts/P-026-2026-09-19-perbaikan-c045-c046-dan-riset-best-practice.md` |
+
+**Prompt user (ringkas):** "Cek kembali progress yang sudah anda lakukan, bila masih ada gap yang perlu segera diperbaiki, segera perbaiki. Jika masih ada pertanyaan terbuka, silakan cari best practice yang ada dan jadikan pertimbangan untuk menjawab pertanyaan tersebut." (sesi yang sama juga menutup C-045/C-046 dari prompt sebelumnya)
+
+**Hasil:**
+
+- **Bagian 1 — gap ditutup, termasuk dua gap proses.** **C-045**: `bindJSON` kini membedakan **tiga** sebab kegagalan decode dan selalu menamai field — `uuid.UUID` dan `time.Time` adalah `json.Unmarshaler` kustom yang errornya tidak membawa nama field, dan itulah sebabnya `{"document_id":"bukan-uuid"}` dulu dijawab `field: "body"`. **C-046**: penyaring rentang ditetapkan **setengah terbuka** `[from, to)` ber-batas RFC 3339 (konvensi Stripe `created[gte]`/`created[lt]`), dengan `+07:00` maupun `%2B07:00` diterima dan rentang terbalik ditolak `422`. **C-047** ditemukan saat memeriksa ulang: tabel status fase `80-ROADMAP.md` masih menulis Phase 0/1 "Belum dimulai" dan ledger melabeli modul Task sebagai Phase 1 padahal roadmap menempatkannya di Phase 3.
+- **Dua gap ledger yang hanya terlihat karena memeriksa ulang.** Log `P-026-...md` **belum pernah ada** padahal `TASKS.md`, `STATE.md`, `CONTINUE.md`, `70-TESTING.md`, dan footer `AUDIT-001` sudah merujuk namanya; dan `AGENTS.md`/`STATE.md` masih memuat hitungan lama (46 temuan, 35 FIXED, 11 OPEN) dengan daftar temuan yang sudah tidak benar. Keduanya diperbaiki; angka sekarang diambil dari tabel tindak lanjut (**47 / 42 FIXED / 4 APPROVED / 1 OPEN**) dan dapat diperiksa silang.
+- **Bagian 2 — sembilan temuan terbuka dijawab, bukan diserahkan kembali.** User meminta pertanyaan terbuka **dijawab** dengan best practice, jadi agen memutuskan dan menuliskan dasarnya. Enam pencarian web dipakai (retensi audit SOC 2/ISO 27001, denylist `jti` vs penanda per user untuk JWT, ambang lockout OWASP/CIS, interval setengah terbuka Stripe/AIP-160, pelaporan field gagal `encoding/json`); hasilnya dirangkum di `OPEN-QUESTIONS.md` **§3** beserta sumbernya.
+- **Empat ADR `ACCEPTED`** lahir dari situ: **ADR-0019** (arsip sebagai default penghapusan dokumen — `DELETE /documents/:id` diganti `POST /documents/:id/archive`, `documents.archived_at` + nilai kanonik `archived`, penghapusan permanen ditunda; karena kaskade hilang, `document_versions` **boleh** diberi trigger append-only), **ADR-0020** (retensi audit = operasi pemeliharaan berlantai **12 bulan** lewat `bwdcs.audit_maintenance`, prosedur di `60-DEPLOYMENT.md` §6.4, **bukan** kontrol UI), **ADR-0021** (`users.tokens_invalid_before` — satu kolom per user, diperiksa middleware bersama `jti`), dan **ADR-0022** (tabel `login_attempts` + `users.locked_until`: auto-lock **sementara** `423 LOCKED`, terbuka sendiri, admin dapat membuka lebih awal; `actor_id` tetap `NOT NULL` sehingga "login" pada FR-AUDIT-01 = login **berhasil**).
+- **Dua keputusan sengaja menyimpang dari rekomendasi riset**, dan selisihnya dicatat: ambang auto-lock **tidak** dinaikkan ke 10 (FR-AUTH-06 sudah mengontrak 5, dan menaikkannya mengubah perilaku yang sudah diuji), dan retensi **tidak** dijadikan kunci `system_settings` (kunci yang tidak dibaca siapa pun adalah cacat yang sedang ditutup — C-028 sendiri lahir dari kontrol tanpa perilaku).
+- **Empat task implementasi menunggu, dan itu dinyatakan di mana-mana.** C-004/C-009/C-033/C-035 berstatus **`APPROVED`**, bukan `FIXED`: keputusan ada, **kode belum** (`T-039`/`T-040`/`T-041`, memakai migrasi `010` yang sama). Test yang wajib ada ditulis **lebih dulu** di `70-TESTING.md` **§3.12** supaya tidak dikarang mengikuti implementasi, dan setiap kotak "Status implementasi" di `42-API.md` menyebut tasknya. Satu-satunya temuan yang masih `OPEN` adalah **C-015** (arah desain) — milik user, karena riset tidak dapat menggantikan keputusan rasa.
+- **Verifikasi:** `gofmt`/`go vet`/`go build` bersih, `make test` hijau (database test terpisah), `BROKEN` = 0 pada pemeriksa tautan, fence markdown genap, dan hitungan audit pada lima berkas saling cocok. Tidak ada satu baris kode baru di bagian 2 sesi ini — bagian itu murni keputusan, dokumen, dan ledger.
+
+**Status:** Bagian 1 DONE; bagian 2 selesai sebagai keputusan (`APPROVED` untuk empat temuan, `FIXED` untuk empat lainnya). **Next action:** `T-039` → `T-040` → `T-041` (ketiganya sudah punya test yang harus dipenuhi), lalu modul **Comment** sesuai asumsi Q-018.
+
+---
+
 ## P-025 — 2026-09-19 — T-038: Modul Task & Cakupan Baris Kedua (C-045/C-046)
 
 | Field | Isi |

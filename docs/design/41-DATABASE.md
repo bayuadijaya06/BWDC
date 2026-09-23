@@ -61,8 +61,11 @@ CREATE TABLE users (
     is_active      BOOLEAN NOT NULL DEFAULT true,
     -- Token dengan iat < tokens_invalid_before ditolak (401 TOKEN_REVOKED). Satu titik waktu per
     -- user, bukan daftar token: logout_all / change-password / reset admin / akun dinonaktifkan
-    -- semuanya menulis NOW() ke kolom ini (ADR-0021). Default 'epoch' supaya token yang sudah
-    -- terbit saat migrasi berjalan TIDAK ikut mati.
+    -- semuanya menulis ke kolom ini (ADR-0021). Default 'epoch' supaya token yang sudah terbit
+    -- saat migrasi berjalan TIDAK ikut mati. Nilai tulisnya date_trunc('second', NOW()), bukan
+    -- NOW() mentah: iat JWT berpresisi detik, sehingga NOW() mentah akan menolak token hasil login
+    -- ulang pada detik yang sama — pengguna ter-logout sendiri sesudah logout_all (temuan C-053,
+    -- 42-API.md §2). Konsekuensinya: token lain yang terbit di detik yang sama ikut selamat.
     tokens_invalid_before TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT 'epoch'::timestamptz,
     -- Auto-lock sementara (ADR-0022). NULL = tidak terkunci; lock terbuka sendiri saat NOW() lewat,
     -- dan Administrator dapat menyetelnya NULL lebih awal (POST /admin/users/:id/unlock).
@@ -91,6 +94,13 @@ CREATE TABLE login_attempts (
 
 CREATE INDEX idx_login_attempts_username ON login_attempts(username_attempted, created_at DESC);
 CREATE INDEX idx_login_attempts_created ON login_attempts(created_at);
+
+-- Pemakaian (T-041, P-030): hitungan percobaan gagal dibaca `count(*) ... WHERE
+-- username_attempted = $1 AND succeeded = false AND created_at > NOW() - make_interval(secs => $2)`
+-- dengan jendela 15 menit dari `service.LoginAttemptWindow` (FR-AUTH-06); ambang dan durasi lock
+-- dari `system_settings`. Barisnya ditulis SETIAP percobaan (berhasil maupun gagal), termasuk
+-- untuk username yang tidak ada (user_id NULL) — itulah jejak yang tidak dapat ditulis di
+-- `audit_logs` karena actor_id-nya NOT NULL (temuan C-035).
 
 -- token_revocations (daftar revokasi JWT; lihat ADR-0009)
 CREATE TABLE token_revocations (
@@ -218,6 +228,10 @@ CREATE TABLE document_sequences (
 
 CREATE TABLE document_versions (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- FK tetap CASCADE di skema, tetapi sejak migrasi 010 kaskadenya DITAHAN trigger
+    -- append-only (temuan C-051): `DELETE FROM documents` gagal `23001` bila ada versi,
+    -- dan satu-satunya jalan membersihkannya adalah jalur pemeliharaan
+    -- `SET LOCAL bwdcs.audit_maintenance = 'on'` (44-SECURITY.md §6.1).
     document_id    UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     version        VARCHAR(20) NOT NULL,
     file_key       VARCHAR(500) NOT NULL,
@@ -413,6 +427,10 @@ INSERT INTO system_settings (key, value) VALUES
 Tabel ini tidak punya dependensi ke tabel lain. Rumah migrasinya ditetapkan di §4 — butir "Pembagian isi tiap berkas" (temuan **C-030**).
 
 ---
+
+### 2.7 Catatan untuk Dashboard Analytics (baru P-054)
+
+MVP dashboard **tidak** menambah kolom/tabel (`52-DASHBOARD-ANALYTICS.md` §4.1). 8 KPI + 8 chart-nya dibaca dari tabel yang sudah ada: `documents` (status), `workflow_instances` (running/overdue/volume), `workflow_actions` (approval trend), `document_versions` (revision this month), `tasks` (open/overdue), `audit_logs` (activity). Yang `Dashboard.md` tulis tetapi belum ada di skema — `department`, `review_due_at`/`expiry_at`/`published_at`, `stage history` presisi, kosakata `published`/`obsolete` — masuk backlog penuh (Q-DASH-01..04) dan **belum** direpresentasikan sebagai DDL. Bila kelak ditambahkan, itu migrasi `012` dengan ADR.
 
 ## 3. Index Strategy
 

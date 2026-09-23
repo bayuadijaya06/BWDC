@@ -484,6 +484,9 @@ func TestTaskListQueryValidation(t *testing.T) {
 		"?due_from=2026-03-01T00:00:00+07:00&due_to=2026-04-01T00:00:00+07:00",
 		"?due_from=2026-03-01T00:00:00+07:00",
 		"?due_to=2026-04-01T00:00:00+07:00",
+		// Kedua batas inklusif (keputusan user, P-028), jadi rentang yang kedua
+		// batasnya sama berarti satu instan — sah, bukan `422`.
+		"?due_from=2026-03-01T00:00:00+07:00&due_to=2026-03-01T00:00:00+07:00",
 		// Bentuk persen (`%2B`) adalah cara standar menulis offset; bentuk di atas
 		// (`+`) sampai ke handler sebagai spasi karena pengurai query URL. Keduanya
 		// diterima `parseRFC3339Query`.
@@ -505,7 +508,6 @@ func TestTaskListQueryValidation(t *testing.T) {
 		"?due_from=01-03-2026",
 		"?due_to=bukan-tanggal",
 		"?due_from=2026-04-01T00:00:00+07:00&due_to=2026-03-01T00:00:00+07:00",
-		"?due_from=2026-03-01T00:00:00+07:00&due_to=2026-03-01T00:00:00+07:00",
 		"?project_id=bukan-uuid",
 		"?assignee_id=bukan-uuid",
 		"?page=0",
@@ -519,8 +521,12 @@ func TestTaskListQueryValidation(t *testing.T) {
 
 	// Task ketiga lewat tenggat: `?overdue=` harus benar-benar menyaring di
 	// database, bukan hanya menerima parameternya lalu mengembalikan semuanya.
+	// `due_date` dikirim sebagai RFC 3339 (presisi detik), jadi nilai yang tersimpan
+	// sama persis dengan `overdueAt.Truncate(time.Second)` — itulah yang dipakai
+	// sebagai batas atas pada kasus pembeda di bawah.
+	overdueAt := time.Now().Add(-48 * time.Hour)
 	overdueBody := fmt.Sprintf(`{"project_id":%q,"title":"Lewat","assignee_id":%q,"due_date":%q,"priority":"urgent"}`,
-		projectID, manager.ID, time.Now().Add(-48*time.Hour).Format(time.RFC3339))
+		projectID, manager.ID, overdueAt.Format(time.RFC3339))
 	requireStatus(t, doJSON(t, engine, http.MethodPost, "/api/v1/tasks", token, overdueBody), http.StatusCreated)
 
 	for _, tc := range []struct {
@@ -532,10 +538,13 @@ func TestTaskListQueryValidation(t *testing.T) {
 		{"?priority=urgent", 1},
 		{"?priority=urgent&overdue=true", 1},
 		{"?priority=low&overdue=true", 0},
-		// Rentang `due_date` setengah terbuka (C-046): dua task berdue +48 jam,
-		// satu lewat tenggat (due -48 jam).
+		// Rentang `due_date` (C-046, kedua batas inklusif sejak P-028): dua task
+		// berdue +48 jam, satu lewat tenggat (due -48 jam).
 		{"?due_from=" + time.Now().Add(24*time.Hour).Format(time.RFC3339), 2},
 		{"?due_to=" + time.Now().Add(-24*time.Hour).Format(time.RFC3339), 1},
+		// Pembeda semantik: batas atas **tepat sama** dengan `due_date` task yang
+		// lewat tenggat. Inklusif memilihnya; setengah terbuka akan menjawab 0.
+		{"?due_to=" + overdueAt.Truncate(time.Second).Format(time.RFC3339), 1},
 		// Rentang yang "masuk akal" tetapi tidak memuat satu pun task: yang lewat
 		// tenggat sudah di bawah batas bawah, yang belum tenggat di atas batas
 		// atas — bukti batasnya benar-benar dipakai, bukan diabaikan.
@@ -559,6 +568,91 @@ func TestTaskListQueryValidation(t *testing.T) {
 	decodeBody(t, rec, &env)
 	if env.Meta == nil || env.Meta.Total != 3 || env.Meta.TotalPage != 3 {
 		t.Errorf("meta %+v, diharapkan total 3 dan total_page 3", env.Meta)
+	}
+}
+
+// TestTaskListDueRangeContractAtHTTP mengunci **semantik** batas rentang
+// `?due_from=&due_to=` di level HTTP untuk setiap kombinasi yang mungkin: hanya
+// `due_from`, hanya `due_to`, kedua batas sama (satu instan), rentang tertutup,
+// rentang kosong, dan rentang terbalik. Kontraknya `[due_from, due_to]` dengan
+// **kedua batas inklusif** (keputusan user 2026-09-19, P-028; `42-API.md` §6).
+//
+// Ini bukan pengulangan `TestTaskListQueryValidation`, melainkan kunci semantik:
+// tiga task berdue tetap dipakai, lalu `due_from` tepat pada task **terjauh**,
+// `due_to` tepat pada task **terdekat**, dan `due_from == due_to` tepat pada
+// sebuah task masing-masing mengharapkan tepat satu baris. Begitu salah satu
+// batas menjadi eksklusif atau rentangnya kembali setengah terbuka, salah satu
+// kasus itu menjawab `0` dan test ini gagal. Karena itu perubahan semantik tidak
+// dapat lolos tanpa sengaja mengubah test ini.
+//
+// Tenggat sengaja tetap di masa depan dan ber-offset `Z`, sehingga tidak ada
+// ketergantungan pada `time.Now()` maupun pada cara `+` di-encode di URL.
+func TestTaskListDueRangeContractAtHTTP(t *testing.T) {
+	fixture := newProjectHTTPFixture(t)
+	engine := newEngine(t, 5)
+
+	manager := fixture.createActor("manager")
+	token := loginToken(t, engine, manager)
+	projectID := createProjectOverHTTP(t, engine, token, manager.ID, "DUE-RANGE")
+
+	const (
+		due1 = "2030-03-10T01:00:00Z"
+		due2 = "2030-03-20T01:00:00Z"
+		due3 = "2030-03-30T01:00:00Z"
+	)
+	for i, due := range []string{due1, due2, due3} {
+		body := fmt.Sprintf(`{"project_id":%q,"title":"Rentang %d","assignee_id":%q,"due_date":%q}`,
+			projectID, i+1, manager.ID, due)
+		requireStatus(t, doJSON(t, engine, http.MethodPost, "/api/v1/tasks", token, body), http.StatusCreated)
+	}
+
+	cases := []struct {
+		name  string
+		query string
+		want  int
+	}{
+		{"tanpa penyaring", "", 3},
+		{"hanya due_from, tepat batas bawah task pertama", "?due_from=" + due1, 3},
+		{"hanya due_from, batas bawah di tengah", "?due_from=" + due2, 2},
+		{"hanya due_from, tepat due_date task terakhir", "?due_from=" + due3, 1},
+		{"hanya due_from setelah semua", "?due_from=2030-04-01T00:00:00Z", 0},
+		{"hanya due_to, tepat batas atas task pertama", "?due_to=" + due1, 1},
+		{"hanya due_to, batas atas di tengah", "?due_to=" + due2, 2},
+		{"hanya due_to, tepat due_date task terakhir", "?due_to=" + due3, 3},
+		{"hanya due_to sebelum semua", "?due_to=2030-03-01T00:00:00Z", 0},
+		{"kedua batas sama, tepat satu task", "?due_from=" + due2 + "&due_to=" + due2, 1},
+		{"kedua batas sama, task pertama", "?due_from=" + due1 + "&due_to=" + due1, 1},
+		{"kedua batas sama, tidak ada task", "?due_from=2030-06-01T00:00:00Z&due_to=2030-06-01T00:00:00Z", 0},
+		{"rentang tertutup penuh", "?due_from=" + due1 + "&due_to=" + due3, 3},
+		{"rentang tertutup sebagian", "?due_from=" + due1 + "&due_to=" + due2, 2},
+		{"rentang di antara dua task", "?due_from=2030-03-15T00:00:00Z&due_to=2030-03-25T00:00:00Z", 1},
+		{"rentang setelah semua task", "?due_from=2030-04-01T00:00:00Z&due_to=2030-05-01T00:00:00Z", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doJSON(t, engine, http.MethodGet, "/api/v1/tasks"+tc.query, token, "")
+			requireStatus(t, rec, http.StatusOK)
+
+			var env envelope
+			decodeBody(t, rec, &env)
+			if env.Meta == nil || env.Meta.Total != tc.want {
+				t.Errorf("meta %+v, diharapkan total %d", env.Meta, tc.want)
+			}
+		})
+	}
+
+	// Rentang terbalik ditolak `422` yang menunjuk `due_to`, bukan dikembalikan
+	// kosong diam-diam.
+	rec := doJSON(t, engine, http.MethodGet, "/api/v1/tasks?due_from="+due3+"&due_to="+due1, token, "")
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+
+	var env envelope
+	decodeBody(t, rec, &env)
+	if env.Error == nil || len(env.Error.Details) != 1 {
+		t.Fatalf("details %+v, diharapkan tepat satu", env.Error)
+	}
+	if got := env.Error.Details[0]; got.Field != "due_to" {
+		t.Errorf("detail %+v, diharapkan field due_to", got)
 	}
 }
 

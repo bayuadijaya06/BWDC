@@ -322,6 +322,22 @@ docker-compose logs -f
 # Verifikasi referensi dokumen (link check, tanpa efek samping)
 # BROKEN = referensi dokumen hilang (harus diperbaiki); PLANNED = file kode yang belum dibuat (normal)
 bash scripts/check-doc-links.sh
+
+# Verifikasi konsistensi ledger (tanpa efek samping): hitungan audit, papan TASKS,
+# hitungan test, dan rujukan test yang sudah tidak ada. `ledger OK` = lulus;
+# `FAIL` = angka basi atau rujukan mati (C-044/C-055/C-057). Protokol: 02-...md §6.1
+bash scripts/check-ledger.sh
+
+# Angka & versi di README terhadap repo (jumlah route, versi dependensi, rentang
+# migrasi, klaim "belum ada"). `readme-facts OK` = lulus; `FAIL` = README basi
+# (C-061/C-062). Protokol: 02-...md §6.2
+bash scripts/check-readme-facts.sh
+
+# Rujukan ke sistem aturan antislop: nomor R-XX ada di antislop.md, path skill ada di
+# disk, sha256 cocok dengan tabel provenans, salinan core identik, dan tidak ada kalimat
+# aturan upstream yang tersalin ke dokumen. `antislop-refs OK` = lulus.
+# Protokol: 02-...md §6.4; keputusan pin-nya di ADR-0025
+bash scripts/check-antislop-refs.sh
 ```
 
 ### Ledger Progress (Jangan Dilewati)

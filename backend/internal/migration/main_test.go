@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"bwdcs/backend/internal/migration"
@@ -83,23 +85,83 @@ func withRollbackTx(t *testing.T, fn func(ctx context.Context, tx *sql.Tx, actor
 func seedActor(t *testing.T, ctx context.Context, tx *sql.Tx) string {
 	t.Helper()
 
+	_, userID := seedOrganizationAndUser(t, ctx, tx)
+	return userID
+}
+
+// seedOrganizationAndUser membuat organisasi + user dan mengembalikan keduanya.
+// Dipisahkan dari seedActor karena fixture dokumen butuh `organization_id`
+// project, bukan hanya id user.
+func seedOrganizationAndUser(t *testing.T, ctx context.Context, tx *sql.Tx) (string, string) {
+	t.Helper()
+
 	var orgID string
 	if err := tx.QueryRowContext(ctx,
 		`INSERT INTO organizations (name, code) VALUES ($1, $2) RETURNING id::text`,
-		"Org Test Migrasi", "TEST-MIG",
+		"Org Test Migrasi", "TEST-MIG-"+uuidSuffix(),
 	).Scan(&orgID); err != nil {
 		t.Fatalf("buat organisasi test: %v", err)
 	}
 
 	var userID string
+	username := "test-actor-migrasi-" + uuidSuffix()
 	if err := tx.QueryRowContext(ctx,
 		`INSERT INTO users (organization_id, username, email, password_hash)
 		 VALUES ($1::uuid, $2, $3, $4) RETURNING id::text`,
-		orgID, "test-actor-migrasi", "test-actor-migrasi@example.invalid", "x",
+		orgID, username, username+"@example.invalid", "x",
 	).Scan(&userID); err != nil {
 		t.Fatalf("buat user test: %v", err)
 	}
-	return userID
+	return orgID, userID
+}
+
+// seedDocumentVersion membuat project + dokumen + satu versi dokumen di dalam
+// transaksi test, lalu mengembalikan id versinya.
+//
+// Diperlukan sejak migrasi `010`: `document_versions` append-only
+// (`44-SECURITY.md` §6.1), sehingga menguji penolakan `UPDATE`/`DELETE` menuntut
+// baris yang benar-benar ada — bukan id acak.
+func seedDocumentVersion(t *testing.T, ctx context.Context, tx *sql.Tx) string {
+	t.Helper()
+
+	orgID, userID := seedOrganizationAndUser(t, ctx, tx)
+
+	var projectID string
+	if err := tx.QueryRowContext(ctx,
+		`INSERT INTO projects (organization_id, code, name, owner_id)
+		 VALUES ($1::uuid, $2, $3, $4::uuid) RETURNING id::text`,
+		orgID, "UJI-"+uuidSuffix(), "Project Uji Migrasi", userID,
+	).Scan(&projectID); err != nil {
+		t.Fatalf("buat project test: %v", err)
+	}
+
+	var documentID string
+	if err := tx.QueryRowContext(ctx,
+		`INSERT INTO documents (project_id, document_number, title, owner_id)
+		 VALUES ($1::uuid, $2, $3, $4::uuid) RETURNING id::text`,
+		projectID, "UJI-001", "Dokumen uji migrasi", userID,
+	).Scan(&documentID); err != nil {
+		t.Fatalf("buat dokumen test: %v", err)
+	}
+
+	var versionID string
+	if err := tx.QueryRowContext(ctx,
+		`INSERT INTO document_versions
+			(document_id, version, file_key, original_name, mime_type, size, checksum, uploaded_by_id)
+		 VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid) RETURNING id::text`,
+		documentID, "1.0", "orgs/uji/docs/1.0/uji.pdf", "uji.pdf", "application/pdf", 42,
+		strings.Repeat("a", 64), userID,
+	).Scan(&versionID); err != nil {
+		t.Fatalf("buat versi dokumen test: %v", err)
+	}
+	return versionID
+}
+
+// uuidSuffix mengembalikan potongan acak untuk nama/kode yang wajib unik; semua
+// baris test digulung balik, tetapi kode organisasi tetap harus unik di dalam
+// satu transaksi.
+func uuidSuffix() string {
+	return uuid.NewString()[:8]
 }
 
 // insertAuditLog menulis satu entri audit di dalam transaksi test.

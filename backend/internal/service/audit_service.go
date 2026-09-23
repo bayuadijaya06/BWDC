@@ -15,12 +15,17 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Nama aksi audit yang dipakai modul auth. Sumber nama: FR-AUDIT-01
-// (`20-SRS.md`) — "login" wajib tercatat. Penulisan huruf besar mengikuti
-// contoh yang sudah dipakai dokumen (`DOCUMENT_CREATED`, `DOCUMENT_VERSION_CREATED`).
+// Nama aksi audit yang dipakai modul auth dan administrasi user. Sumber nama:
+// FR-AUDIT-01 (`20-SRS.md`) — "login" wajib tercatat (login **berhasil**; yang
+// gagal hidup di `login_attempts`, ADR-0022 butir 2) — dan ADR-0021 butir 3
+// untuk `LOGOUT_ALL`. Penulisan huruf besar mengikuti contoh yang sudah dipakai
+// dokumen (`DOCUMENT_CREATED`, `DOCUMENT_VERSION_CREATED`).
 const (
-	ActionLogin  = "LOGIN"
-	ActionLogout = "LOGOUT"
+	ActionLogin           = "LOGIN"
+	ActionLogout          = "LOGOUT"
+	ActionLogoutAll       = "LOGOUT_ALL"
+	ActionPasswordChanged = "PASSWORD_CHANGED"
+	ActionUserUnlocked    = "USER_UNLOCKED"
 )
 
 // AuditService menulis entri `audit_logs` (`41-DATABASE.md` §2.5).

@@ -9,21 +9,33 @@ import (
 	"github.com/google/uuid"
 )
 
-// Status dokumen kanonik (`documents.status`, `41-DATABASE.md` §2.3, FR-DOC-03).
+// Status dokumen kanonik (`documents.status`, `41-DATABASE.md` §2.3, FR-DOC-03,
+// ADR-0012).
 //
-// Hanya lima nilai ini yang pernah tersimpan. Label tampilan ("Draft", "In
+// Hanya enam nilai ini yang pernah tersimpan. Label tampilan ("Draft", "In
 // Review", ...) dan seluruh keadaan turunan dihitung saat dibaca, tidak pernah
 // disimpan (ADR-0012, `50-FSD.md` §11).
+//
+// `archived` bukan status alur review, melainkan hasil `POST /documents/:id/archive`
+// (ADR-0019): dokumen terarsip keluar dari daftar default, tetap dapat dibaca
+// dan diunduh, tetapi menolak unggahan versi baru maupun submit ke workflow.
+// Kosakata di sini **wajib** sama dengan `CHECK` di migrasi `010`; test
+// `TestDocumentStatusVocabularyIncludesArchived` (migrasi) membandingkan keduanya
+// supaya keduanya tidak dapat berbeda diam-diam.
 const (
 	DocumentStatusDraft            = "draft"
 	DocumentStatusInReview         = "in_review"
 	DocumentStatusRevisionRequired = "revision_required"
 	DocumentStatusApproved         = "approved"
 	DocumentStatusRejected         = "rejected"
+	DocumentStatusArchived         = "archived"
 )
 
 // DocumentStatuses mengembalikan daftar status dokumen yang sah, dipakai
 // validasi filter daftar dan pesan error yang menyebut nilai yang diterima.
+//
+// Urutannya mengikuti `50-FSD.md` §11 (status alur lebih dulu, `archived`
+// terakhir) dan dipakai apa adanya pada pesan `422`.
 func DocumentStatuses() []string {
 	return []string{
 		DocumentStatusDraft,
@@ -31,7 +43,17 @@ func DocumentStatuses() []string {
 		DocumentStatusRevisionRequired,
 		DocumentStatusApproved,
 		DocumentStatusRejected,
+		DocumentStatusArchived,
 	}
+}
+
+// IsDocumentArchived menjawab apakah dokumen sudah diarsipkan (ADR-0019).
+//
+// Aturannya bergantung pada kolom kanonik `status`, bukan pada `archived_at`:
+// satu-satunya penulis keduanya adalah operasi arsip itu sendiri, dan `status`
+// adalah nilai yang juga dilihat penyaring daftar serta klien.
+func (d *Document) IsDocumentArchived() bool {
+	return d.Status == DocumentStatusArchived
 }
 
 // IsDocumentStatus menjawab apakah `status` termasuk himpunan tertutup FR-DOC-03.
@@ -58,6 +80,7 @@ type Document struct {
 	Description        string     `json:"description"`
 	OwnerID            uuid.UUID  `json:"owner_id"`
 	Status             string     `json:"status"`
+	ArchivedAt         *time.Time `json:"archived_at,omitempty"`
 	CurrentVersion     int        `json:"current_version"`
 	WorkflowInstanceID *uuid.UUID `json:"workflow_instance_id,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
@@ -65,6 +88,10 @@ type Document struct {
 
 	// Kolom turunan untuk daftar/detail (`50-FSD.md` §4.1 kolom tabel dan §4.3
 	// metadata). Dibaca lewat JOIN/subquery, tidak disimpan di tabel.
+	//
+	// `ProjectArchived` sengaja tetap bernama begitu (bukan `Archived`): yang
+	// diarsipkan adalah **project**-nya, dan modul dokumen tetap menerima dokumen
+	// baru di project arsip sampai Q-016 butir 6 diputuskan user.
 	ProjectCode      string `json:"project_code,omitempty"`
 	ProjectName      string `json:"project_name,omitempty"`
 	CategoryName     string `json:"category_name,omitempty"`
@@ -78,10 +105,10 @@ type Document struct {
 // (`41-DATABASE.md` §2.3).
 //
 // Baris ini **immutable** (FR-VER-03): tidak ada endpoint yang mengubah atau
-// menghapus satu versi. Imutabilitas ditegakkan di service (tidak ada jalur
-// ubah/hapus) dan di storage (`Save` menolak menimpa berkas), bukan dengan
-// trigger database — `44-SECURITY.md` §6 menjelaskan alasannya (kaskade
-// `DELETE /documents/:id` harus tetap bekerja).
+// menghapus satu versi. Imutabilitas ditegakkan **tiga lapis**: service (tidak
+// ada jalur ubah/hapus), storage (`Save` menolak menimpa berkas), dan database —
+// sejak migrasi `010` tabelnya append-only dengan trigger yang sama seperti
+// `audit_logs` (`44-SECURITY.md` §6.1, ADR-0019 butir 2).
 type DocumentVersion struct {
 	ID           uuid.UUID `json:"id"`
 	DocumentID   uuid.UUID `json:"document_id"`

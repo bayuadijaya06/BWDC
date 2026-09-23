@@ -110,6 +110,7 @@ func run() error {
 
 	users := repository.NewUserRepository(pool)
 	revocations := repository.NewRevocationRepository(pool, repository.DefaultRevocationCacheTTL)
+	loginAttempts := repository.NewLoginAttemptRepository(pool)
 
 	// Kebijakan login dibaca dari `system_settings` (seed migrasi 002), bukan
 	// dari environment variable: `60-DEPLOYMENT.md` §2.1 tetap satu sumber daftar
@@ -123,8 +124,11 @@ func run() error {
 		"lockout_duration", authPolicy.LockoutDuration.String(),
 	)
 
-	authService := service.NewAuthService(pool, users, revocations, tokenService,
-		service.NewLoginGuard(authPolicy.MaxLoginAttempts, authPolicy.LockoutDuration), logger)
+	// Ambang auto-lock (ADR-0022) dibaca dari kebijakan yang sama dengan yang
+	// dicatat di log di atas: `auth.max_login_attempts` +
+	// `auth.lockout_duration_minutes`. Tidak ada lagi pembatas percobaan login di
+	// memori — hitungannya dari tabel `login_attempts`.
+	authService := service.NewAuthService(pool, users, revocations, loginAttempts, tokenService, authPolicy, logger)
 
 	// Pembersihan baris revokasi kedaluwarsa: sekali saat startup (ADR-0009 butir 5)
 	// lalu berkala selama proses hidup.
@@ -163,7 +167,49 @@ func run() error {
 		logger,
 	)
 
+	// --- Modul komentar (`42-API.md` §7, 44-SECURITY.md §3.1.3) ---
+	commentService := service.NewCommentService(
+		pool,
+		repository.NewCommentRepository(pool),
+		repository.NewProjectRepository(pool),
+		users,
+		logger,
+	)
+
+	// --- Administration > Users (`42-API.md` §11, ADR-0022) ---
+	userService := service.NewUserService(pool, users, logger)
+
 	permissionChecker := service.NewPermissionChecker(users)
+
+	// --- Modul workflow (`42-API.md` §5, `43-WORKFLOW.md`, ADR-0015/ADR-0016) ---
+	//
+	// Pemeriksa izin ikut dirakit ke service-nya: satu-satunya route yang
+	// izinnya bergantung isi body ada di modul ini (`workflow_instance:approve`
+	// /`reject`/`request_revision`), dan middleware tidak dapat melihat body.
+	workflowService := service.NewWorkflowService(
+		pool,
+		repository.NewWorkflowRepository(pool),
+		repository.NewDocumentRepository(pool),
+		users,
+		permissionChecker,
+		logger,
+	)
+
+	// --- Analytics Dashboard (`42-API.md` §13, ADR-0026) — KPI 6 + chart 8 MVP tanpa migrasi
+	analyticsService := service.NewAnalyticsService(
+		repository.NewAnalyticsRepository(pool),
+		users,
+	)
+
+	// --- Notifications (`42-API.md` §8)
+	notificationService := service.NewNotificationService(
+		repository.NewNotificationRepository(pool),
+	)
+
+	// --- Audit (`42-API.md` §9, `44-SECURITY.md` §6)
+	auditService := service.NewAuditReadService(
+		repository.NewAuditRepository(pool),
+	)
 
 	engine := gin.New()
 	handler.Setup(engine, handler.RouterDeps{
@@ -174,9 +220,15 @@ func run() error {
 		Project:      handler.NewProjectHandler(projectService, logger),
 		Document:     handler.NewDocumentHandler(documentService, logger),
 		Task:         handler.NewTaskHandler(taskService, permissionChecker, logger),
+		Comment:      handler.NewCommentHandler(commentService, logger),
+		Workflow:     handler.NewWorkflowHandler(workflowService, logger),
+		User:         handler.NewUserHandler(userService, logger),
+		Analytics:    handler.NewAnalyticsHandler(analyticsService, logger),
+		Notification: handler.NewNotificationHandler(notificationService, logger),
+		Audit:        handler.NewAuditHandler(auditService, logger),
 		AuthMiddleware: middleware.AuthMiddleware(middleware.AuthConfig{
-			Validator:   tokenService,
-			Revocations: revocations,
+			Validator: tokenService,
+			Sessions:  revocations,
 		}),
 		Permission: permissionChecker,
 	})

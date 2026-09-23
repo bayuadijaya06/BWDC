@@ -208,7 +208,25 @@ npm run test                     # bila sudah ada test runner
 
 # Dokumen (wajib untuk perubahan dokumen)
 bash scripts/check-doc-links.sh
+bash scripts/check-ledger.sh
+bash scripts/check-readme-facts.sh    # angka & versi di README terhadap repo
+bash scripts/check-api-contract.sh    # anotasi izin endpoint terhadap matriks RBAC + router
+bash scripts/check-antislop-refs.sh   # rujukan R-XX, path skill, sha256, dan salinan core antislop
+bash scripts/check-navigation.sh      # batas sidebar terhadap model navigasi dan 51-UX.md §2.1
 ```
+
+Skrip `scripts/check-antislop-refs.sh` memeriksa rujukan ke sistem aturan antislop — **tanpa jaringan** — dan menahan enam kelas cacat: nomor `R-XX` yang dirujuk dokumen tetapi tidak ada di `antislop.md`; path `skills/...` yang didaftarkan `AGENTS.md` tetapi tidak ada di disk (**C-064**); berkas skill di disk yang tidak didaftarkan siapa pun; `sha256` berkas antislop yang menyimpang dari tabel provenans di `skills/README.md`; salinan core di `skills/antislop/SKILL.md` yang berbeda dari `antislop.md` (**C-065**); dan kalimat khas aturan/Gate upstream yang tersalin ke dokumen proyek. Keluarannya `antislop-refs OK` (exit 0) atau `FAIL` beserta nomor barisnya (exit 1). Batasnya ditulis di kepala skrip: yang diperiksa adalah **nomor** aturan dan **keaslian** berkas, bukan keputusan desain proyek terhadap aturan itu — yang terakhir adalah tugas Delivery Gate dan tinjauan user. Kalau gagal, perbaiki dokumen, berkas skill, atau tabel provenansnya; **jangan** melunakkan skripnya dan **jangan** memperbarui `sha256` tanpa benar-benar mengambil berkas dari tag rilis yang dicatat (ADR-0025).
+
+Skrip `scripts/check-navigation.sh` memeriksa **batas sidebar** (`51-UX.md` §2.1): aturan itu ditegakkan di klien tetapi tidak dijaga pemeriksa mana pun — CI tidak punya job frontend, dan `responsive-evidence.mjs` hanya mencari item menu **berkueri** sehingga path bersarang luput. Skrip ini membaca **teks** model navigasi (`frontend/src/config/navigation.ts`) dan tabel §2.1, lalu menolak entri sidebar yang membawa kueri atau fragmen, entri sidebar yang menunjuk sub-halaman (lebih dari satu segmen), label menu bergaya remah, halaman anak tanpa induk atau di luar induknya, path/label ganda, dan daftar menu yang menyimpang dari tabel §2.1 — **dua arah**, jadi menambah menu di kode tanpa baris dokumen gagal, dan sebaliknya juga. Keluarannya `navigation OK` (exit 0) atau `FAIL` (exit 1). Karena ia membaca teks, bentuk berkas yang tidak dikenali harus **gagal**: penjaga bentuk menolak hasil yang hampa maupun objek tanpa label/path/induk, supaya kegagalannya menyebut sebab yang benar (temuan **C-080**).
+
+Skrip `scripts/check-ledger.sh` memeriksa konsistensi ledger progress tanpa menyentuh apa pun:
+
+- hitungan temuan audit (marker `audit-summary`) cocok dengan tabel tindak lanjutnya, dan salinannya seragam di `audits/README.md`, `AGENTS.md`, `STATE.md`, `CONTINUE.md`;
+- papan `TASKS.md`: satu ID hanya di satu kolom status, baris `DONE` bertanggal, kolom lain tidak mengklaim selesai;
+- hitungan test di `STATE.md` §3 dan `**total suite N test**` cocok dengan `grep -c '^func Test'`;
+- rujukan `TestXxx` pada dokumen status dan ADR benar-benar ada di `backend/`, serta setiap `T-###`/`C-###` yang dirujuk ada di papan/tabel audit.
+
+`ledger OK` = lulus (exit 0). `FAIL` = kelas cacat C-044/C-055/C-057 (angka basi) atau rujukan mati, dan wajib diperbaiki sebelum sesi ditutup. Perintah ini juga jalan otomatis di CI (`.github/workflows/ci.yml`).
 
 Skrip `scripts/check-doc-links.sh` memeriksa setiap referensi file di dalam backtick pada semua `*.md`:
 
@@ -217,6 +235,10 @@ Skrip `scripts/check-doc-links.sh` memeriksa setiap referensi file di dalam back
 - Referensi berpola placeholder (`<...>`, `...`, `NNNN-*`) dilewati.
 
 Jalankan sebelum mengakhiri sesi dokumentasi dan rekam hasilnya di log prompt.
+
+Skrip `scripts/check-api-contract.sh` memeriksa **izin endpoint dari satu sumber**: ia membaca matriks §3.1.2 `44-SECURITY.md`, lalu menuntut setiap endpoint di `42-API.md` punya izin yang terbaca (baris `Izin:` di bloknya, atau baris di tabel izin babnya), setiap pasangan `resource:action` yang disebut itu **ada di matriks**, dan setiap `RequirePermission(deps.Permission, ...)` di `internal/handler/router.go` memakai pasangan yang sama. Keluarannya `api-contract OK` (exit 0) atau `FAIL` (exit 1). Kelas cacat yang ditahan: `T-024` yang selama ini dirawat sebagai hitungan manual (45/55, dan angkanya pernah tidak dapat diperiksa silang — C-055), serta pasangan izin karangan seperti `document_version:read` yang pernah muncul di draf §4 padahal matriks tidak memuatnya (Q-016). Menambah pasangan izin baru tetap menuntut ADR (ADR-0014) — skrip ini tidak membuatnya sah, ia hanya memastikan yang ditulis memang ada.
+
+Skrip `scripts/check-readme-facts.sh` memeriksa **keadaan repo yang diklaim `README.md`**, bukan ledger: jumlah route beserta rincian per modul (dihitung dari `internal/handler/router.go`), versi Go/Gin/pgx/viper/goose (`go.mod`), versi React/Vite/Tailwind/TypeScript (`frontend/package.json`), rentang migrasi (berkas di `internal/migration/`), dan klaim "belum ada" atas folder yang sebenarnya sudah berdiri. Keluarannya `readme-facts OK` (exit 0) atau `FAIL` beserta nomor barisnya (exit 1). Kelas cacat yang ditahan: **C-061/C-062** — README pernah menulis 30 route padahal router memuat 32, dan menyebut `frontend/` kosong sesudah kerangkanya berdiri. Bila sebuah klaim hilang dari README sehingga tidak ada lagi yang diperiksa, skripnya **gagal** dengan sengaja: perbarui skripnya, jangan biarkan pemeriksaannya mati diam-diam.
 
 ---
 
@@ -242,7 +264,7 @@ Handoff dianggap gagal bila agen berikutnya harus membaca seluruh riwayat git, a
 |---|---|
 | Dokumen desain dan kode menyimpang | Update dokumen di sesi yang sama; ADR baru bila keputusan berubah |
 | Requirement "terasa" selesai padahal test belum ada | Definition of Done §5 + bukti di `TRACEABILITY.md` |
-| UI dibangun sebelum arah desain ada | Cek `DESIGN.md`; bila kosong, UI dilarang, task ditandai `BLOCKED` |
+| UI dibangun sebelum arah desain ada | Cek `DESIGN.md`; sejak P-037 statusnya **terisi** (ADR-0007 jalur 2), jadi UI boleh dibangun — tetapi UI yang tidak membaca `DESIGN.md`/`51-UX.md` tetap salah |
 | Ledger diisi asal-asalan di akhir | Catat saat kejadian, bukan dari ingatan |
 | Menambah dependency pihak ketiga tanpa alasan | Cek `IDEA.md` bagian 15-16 (tanpa dependensi cloud wajib) dan catat keputusan di ADR |
 | Mengklaim "sudah dites" tanpa perintah & output | Aturan bukti `02-AGENT-PROGRESS-PROTOCOL.md` §6 |

@@ -139,6 +139,10 @@ func (f *projectFixture) clean() {
 		args []any
 	}{
 		{`DELETE FROM audit_logs WHERE actor_id = ANY($1::uuid[])`, []any{f.users}},
+		// Komentar dihapus sebelum project dan user: `comments.created_by_id`
+		// bersifat `ON DELETE RESTRICT`, jadi baris komentar uji akan menggagalkan
+		// penghapusan user-nya bila tertinggal.
+		{`DELETE FROM comments WHERE created_by_id = ANY($1::uuid[])`, []any{f.users}},
 		{`DELETE FROM projects WHERE organization_id = ANY($1::uuid[])`, []any{f.orgs}},
 		{`DELETE FROM user_roles WHERE user_id = ANY($1::uuid[])`, []any{f.users}},
 		{`DELETE FROM users WHERE id = ANY($1::uuid[])`, []any{f.users}},
@@ -622,5 +626,56 @@ func TestProjectListFilterStatusAndSearch(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Code != "FILTER-LAIN" {
 		t.Errorf("filter search → %d project, diharapkan 1 (FILTER-LAIN)", len(list))
+	}
+}
+
+// TestProjectListOutOfRangePageKeepsTotal menutup temuan **C-048** pada modul
+// project: `COUNT(*) OVER()` dievaluasi **per baris hasil**, jadi halaman yang
+// tidak memuat baris apa pun (offset melewati akhir data) melaporkan total 0
+// tanpa tambalan `count`. Klien memakai `meta.total` untuk menghitung jumlah
+// halaman, sehingga jawaban 0 membuat data yang nyata ada tampak tidak ada.
+//
+// Yang dibuktikan tiga hal: halaman normal tetap benar, halaman di luar rentang
+// tetap melaporkan total sebenarnya, dan kueri hitung menghormati penyaring yang
+// sama (bukan menghitung seluruh baris).
+func TestProjectListOutOfRangePageKeepsTotal(t *testing.T) {
+	fixture := newProjectFixture(t)
+	owner := fixture.createOrgAndUser("manager")
+	projects := newProjectService(t)
+	ctx := context.Background()
+
+	for _, code := range []string{"PAGE-A", "PAGE-B", "PAGE-C"} {
+		if _, err := projects.Create(ctx, actorOf(owner), projectInput(owner.ID, code)); err != nil {
+			t.Fatalf("buat project %s: %v", code, err)
+		}
+	}
+
+	// Dasar pembanding: halaman pertama memuat dua baris, totalnya tiga.
+	page1, total1, err := projects.List(ctx, actorOf(owner), service.ProjectListFilter{Page: 1, Limit: 2})
+	if err != nil {
+		t.Fatalf("daftar halaman 1: %v", err)
+	}
+	if len(page1) != 2 || total1 != 3 {
+		t.Fatalf("halaman 1: %d baris, total %d, diharapkan 2 baris dan total 3", len(page1), total1)
+	}
+
+	// Halaman di luar rentang: kosong, tetapi totalnya tetap 3.
+	page3, total3, err := projects.List(ctx, actorOf(owner), service.ProjectListFilter{Page: 3, Limit: 2})
+	if err != nil {
+		t.Fatalf("daftar halaman 3: %v", err)
+	}
+	if len(page3) != 0 || total3 != 3 {
+		t.Errorf("halaman 3: %d baris, total %d, diharapkan 0 baris dan total 3 (C-048)", len(page3), total3)
+	}
+
+	// Penyaring ikut dihormati kueri hitung: pencarian tanpa hasil di halaman di
+	// luar rentang tetap total 0, bukan jumlah seluruh baris.
+	none, totalNone, err := projects.List(ctx, actorOf(owner),
+		service.ProjectListFilter{Search: "tidak-ada-sama-sekali", Page: 3, Limit: 2})
+	if err != nil {
+		t.Fatalf("daftar halaman 3 dengan search: %v", err)
+	}
+	if len(none) != 0 || totalNone != 0 {
+		t.Errorf("halaman 3 search tanpa hasil: %d baris, total %d, diharapkan 0", len(none), totalNone)
 	}
 }

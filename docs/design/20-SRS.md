@@ -193,7 +193,11 @@ BWDCS adalah aplikasi web mandiri yang di-deploy di server internal organisasi. 
 | ID | Persyaratan | Prioritas |
 |---|---|---|
 | FR-DASH-01 | Dashboard menampilkan: active projects, pending approvals, documents under review, revision required, open tasks, overdue tasks, recent activities | High |
-| FR-DASH-02 | Data dashboard dihitung real-time dari database | High |
+| FR-DASH-02 | Data dashboard dihitung real-time dari database (cakupan `44-SECURITY.md` §3.1.3) dan tidak memakai mock/hardcode (R-17/R-18) | High |
+| FR-DASH-03 | MVP Analytics: KPI 6 + chart 8 dari transaksi yang sudah ada (`documents`, `workflow_instances`, `workflow_actions`, `document_versions`, `tasks`, `audit_logs`) tanpa migrasi — metric dictionary `52-DASHBOARD-ANALYTICS.md` §7 | High |
+| FR-DASH-04 | Dashboard mendukung filter global (`Date Range`, `Project`, `Document Status`, `Workflow Status`) yang hidup di URL dan drill-down ke daftar (`GET /documents`/`/workflows/instances`/`/tasks`/`GET /audit`) | Medium |
+
+> Rencana penuh (filter Department/Document Type/SLA, chart SLA/Expiry, funnel Published, stage presisi) ditahan di `52-DASHBOARD-ANALYTICS.md` §4 — butuh field/definisi baru dan migrasi `012` + ADR.
 
 ### 3.13 Modul Report & Export
 

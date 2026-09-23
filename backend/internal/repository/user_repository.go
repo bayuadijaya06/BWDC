@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -27,7 +28,11 @@ func (r *UserRepository) WithTx(tx pgx.Tx) *UserRepository {
 	return &UserRepository{db: tx}
 }
 
-const userColumns = `id, organization_id, username, email, password_hash, is_active, created_at, updated_at`
+// userColumns adalah daftar kolom yang dipakai SEMUA pembacaan user, termasuk
+// `tokens_invalid_before` (ADR-0021) dan `locked_until` (ADR-0022): keduanya
+// keputusan otentikasi, jadi baris user yang dibaca middleware/​service tidak
+// boleh datang tanpa keduanya.
+const userColumns = `id, organization_id, username, email, password_hash, is_active, tokens_invalid_before, locked_until, created_at, updated_at`
 
 // FindByUsername mencari user berdasarkan username. Username unik
 // (`users.username UNIQUE`), jadi hasilnya nol atau satu baris.
@@ -119,6 +124,51 @@ func (r *UserRepository) HasPermission(ctx context.Context, userID uuid.UUID, re
 	return allowed, nil
 }
 
+// LockUntil mengunci akun selama `duration` dan mengembalikan batas waktunya.
+//
+// Batas waktunya dihitung jam DATABASE (`NOW()`) supaya sama dengan sumber yang
+// membandingkannya (`locked_until > NOW()` pada pemeriksaan service) — bukan
+// jam proses aplikasi, yang bisa berbeda di host lain (ADR-0022 butir 4).
+func (r *UserRepository) LockUntil(ctx context.Context, userID uuid.UUID, duration time.Duration) (time.Time, error) {
+	var until time.Time
+	if err := r.db.QueryRow(ctx, `
+		UPDATE users
+		SET locked_until = NOW() + make_interval(secs => $2), updated_at = NOW()
+		WHERE id = $1
+		RETURNING locked_until`, userID, duration.Seconds()).Scan(&until); err != nil {
+		return time.Time{}, wrapNotFound(err)
+	}
+	return until, nil
+}
+
+// ClearLock mengosongkan `locked_until` (ADR-0022 butir 5).
+//
+// Kembaliannya menandai apakah ada penanda lock yang benar-benar dibersihkan:
+// `false` berarti kolomnya sudah `NULL` (atau akunnya tidak ada — dibedakan
+// lewat ErrNotFound), sehingga pemanggil dapat melewatkan entri audit dan
+// tetap idempoten (`42-API.md` §11).
+func (r *UserRepository) ClearLock(ctx context.Context, userID uuid.UUID) (bool, error) {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE users
+		SET locked_until = NULL, updated_at = NOW()
+		WHERE id = $1 AND locked_until IS NOT NULL`, userID)
+	if err != nil {
+		return false, fmt.Errorf("buka lock akun: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return true, nil
+	}
+
+	var exists bool
+	if err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, userID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("periksa keberadaan user: %w", err)
+	}
+	if !exists {
+		return false, ErrNotFound
+	}
+	return false, nil
+}
+
 // UpdatePasswordHash mengganti hash password user (FR-AUTH-09).
 func (r *UserRepository) UpdatePasswordHash(ctx context.Context, userID uuid.UUID, passwordHash string) error {
 	tag, err := r.db.Exec(ctx,
@@ -138,7 +188,8 @@ func scanUser(row pgx.Row) (*model.User, error) {
 	var u model.User
 	if err := row.Scan(
 		&u.ID, &u.OrganizationID, &u.Username, &u.Email,
-		&u.PasswordHash, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.PasswordHash, &u.IsActive, &u.TokensInvalidBefore, &u.LockedUntil,
+		&u.CreatedAt, &u.UpdatedAt,
 	); err != nil {
 		return nil, wrapNotFound(err)
 	}

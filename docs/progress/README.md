@@ -56,6 +56,9 @@ Contoh: `prompts/P-001-2026-09-17-agent-documentation-foundation.md`
 4. **Jangan menghapus atau menulis ulang riwayat.** Koreksi dilakukan dengan baris/entri baru yang menyebut koreksinya.
 5. **Update `STATE.md`** di akhir setiap sesi supaya agen berikutnya tahu harus mulai dari mana.
 6. **Jika update progress tidak bisa dilakukan** (misalnya tool gagal), tulis alasannya di log prompt dan di `OPEN-QUESTIONS.md`. Diam-diam melewati protokol ini adalah pelanggaran.
+7. **Ledger diperiksa mesin, bukan dipercaya.** Jalankan `bash scripts/check-ledger.sh` sebelum menutup sesi; ia memeriksa hitungan audit terhadap marker `<!-- audit-summary ... -->`, papan `TASKS.md`, rujukan test yang sudah tidak ada, dan hitungan test `STATE.md` §3 terhadap `grep -c '^func Test'`. `ledger OK` yang diharapkan; `FAIL` wajib diperbaiki sebelum sesi ditutup. Perintah ini juga jalan di CI. Aturannya di `docs/design/02-AGENT-PROGRESS-PROTOCOL.md` §6.1.
+
+   Kelas serupa di luar ledger diperiksa `bash scripts/check-readme-facts.sh` (sejak P-039): angka & versi di `README.md` — jumlah route, versi dependensi, rentang migrasi, klaim "belum ada" — dihitung dari `router.go`, `go.mod`, `package.json`, dan berkas migrasi, bukan dari dokumen lain. Aturannya di §6.2.
 
 ---
 
