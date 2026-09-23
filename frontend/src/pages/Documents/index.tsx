@@ -12,7 +12,7 @@ import { Field } from "@/components/common/Field";
 import { EmptyState } from "@/components/common/States";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useDocumentList } from "@/queries/documents";
+import { useDocumentList, useDocumentCategories } from "@/queries/documents";
 import { ApiError } from "@/services/http";
 import { useProjectList } from "@/queries/projects";
 import type { DocumentRecord } from "@/services/documents";
@@ -103,6 +103,7 @@ export function DocumentsPage() {
     : "";
   const search = params.get("search") ?? "";
   const projectId = params.get("project_id") ?? "";
+  const categoryId = params.get("category_id") ?? "";
   const updatedFrom = params.get("updated_from") ?? "";
   const updatedTo = params.get("updated_to") ?? "";
   const onlyMine = params.get("view") === "mine";
@@ -123,6 +124,7 @@ export function DocumentsPage() {
     status,
     search,
     project_id: projectId,
+    category_id: categoryId,
     updated_from: updatedFrom,
     updated_to: updatedTo,
   });
@@ -132,6 +134,7 @@ export function DocumentsPage() {
     { limit: 100 },
     { enabled: canReadProjects },
   );
+  const categories = useDocumentCategories();
 
   const meta = query.data?.meta;
   const rows = query.data?.items ?? [];
@@ -139,6 +142,7 @@ export function DocumentsPage() {
     status !== "" ||
     search.trim() !== "" ||
     projectId !== "" ||
+    categoryId !== "" ||
     updatedFrom !== "" ||
     updatedTo !== "";
   /** Menulis parameter baru; nilai kosong dibuang supaya URL tetap pendek. */
@@ -160,6 +164,7 @@ export function DocumentsPage() {
       search: null,
       status: null,
       project_id: null,
+      category_id: null,
       updated_from: null,
       updated_to: null,
       page: null,
@@ -390,6 +395,30 @@ export function DocumentsPage() {
             </select>
           </div>
         ) : null}
+
+        <div className="flex flex-col gap-1.5 min-w-0 flex-1 min-w-[140px] max-w-[200px]">
+          <label
+            htmlFor="penyaring-kategori-dokumen"
+            className="text-13 font-medium text-text-soft"
+          >
+            Kategori
+          </label>
+          <select
+            id="penyaring-kategori-dokumen"
+            value={categoryId}
+            onChange={(event) =>
+              navigate({ category_id: event.target.value, page: null })
+            }
+            className="tap-target rounded-control border border-line-strong bg-surface-raised px-2 text-14 text-text"
+          >
+            <option value="">Semua kategori</option>
+            {(categories.data ?? []).map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {/*
           Rentang `updated_at` adalah **satu kendali** dengan dua isian, bukan

@@ -351,3 +351,16 @@ export function validateRevisionNote(note: string): string | null {
   }
   return null;
 }
+
+/** Kategori dokumen untuk dropdown penyaring (`GET /documents/categories`). */
+export interface DocumentCategory {
+  id: string;
+  name: string;
+  code: string;
+}
+
+/** Mengambil seluruh kategori dokumen pada organisasi aktor. */
+export async function listDocumentCategories(): Promise<DocumentCategory[]> {
+  const response = await http.get<ApiSuccess<DocumentCategory[]>>("/documents/categories");
+  return response.data.data;
+}

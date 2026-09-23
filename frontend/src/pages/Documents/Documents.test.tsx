@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   archive: vi.fn(),
   download: vi.fn(),
   listProjects: vi.fn(),
+  listCategories: vi.fn(),
 }));
 
 vi.mock("@/services/documents", async (importOriginal) => {
@@ -32,6 +33,7 @@ vi.mock("@/services/documents", async (importOriginal) => {
     createDocument: mocks.create,
     downloadDocumentVersion: mocks.download,
     fetchDocument: mocks.fetch,
+    listDocumentCategories: mocks.listCategories,
     listDocumentVersions: mocks.versions,
     listDocuments: mocks.list,
     uploadDocumentVersion: mocks.upload,
@@ -98,6 +100,10 @@ beforeEach(() => {
   for (const mock of Object.values(mocks)) mock.mockReset();
   mocks.list.mockResolvedValue({ items: [document], meta: meta(1) });
   mocks.listProjects.mockResolvedValue({ items: [project], meta: meta(1) });
+  mocks.listCategories.mockResolvedValue([
+    { id: "c1", name: "SOP", code: "SOP" },
+    { id: "c2", name: "SPK", code: "SPK" },
+  ]);
   useAuthStore.setState({
     status: "authenticated",
     profile: profileWith([
@@ -185,6 +191,20 @@ describe("halaman Documents — daftar", () => {
     await waitFor(() =>
       expect(mocks.list).toHaveBeenLastCalledWith(
         expect.objectContaining({ project_id: "p1" }),
+      ),
+    );
+  });
+
+  it("mengirim category_id dari penyaring kategori", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DocumentsPage />, { route: "/documents" });
+    await screen.findByRole("link", { name: "BRD" });
+
+    await user.selectOptions(screen.getByLabelText("Kategori"), "c1");
+
+    await waitFor(() =>
+      expect(mocks.list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ category_id: "c1" }),
       ),
     );
   });

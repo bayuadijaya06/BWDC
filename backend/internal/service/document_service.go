@@ -384,6 +384,12 @@ func (s *DocumentService) Archive(ctx context.Context, actor Actor, documentID u
 	return s.Get(ctx, actor, documentID)
 }
 
+// ListCategories mengembalikan seluruh kategori dokumen pada organisasi aktor.
+// Dipakai endpoint `GET /documents/categories` untuk mengisi dropdown penyaring.
+func (s *DocumentService) ListCategories(ctx context.Context, actor Actor) ([]model.DocumentCategory, error) {
+	return s.documents.ListCategories(ctx, actor.OrganizationID)
+}
+
 // formatDocumentNumber menyusun nomor dokumen `{PROJECT_CODE}-{NNN}` (ADR-0017).
 //
 // Lebar minimum tiga digit (`001`), dan nomor ke-1000 menjadi `1000` tanpa

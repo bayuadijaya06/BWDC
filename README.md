@@ -21,14 +21,14 @@ Ringkasan jujur, bukan target:
 | Backend skeleton + migrasi | Selesai | Go 1.22 modular monolith, migrasi `001` sampai `011`, bootstrap admin pertama |
 | Auth + RBAC | Selesai | Lima endpoint auth (login, logout, me, change-password, refresh), JWT ber-`jti` dengan klaim `typ` (ADR-0023), middleware izin dari matriks `role_permissions`, rate limit login, `logout_all`, auto-lock akun + `unlock` oleh Administrator |
 | Modul Project | Selesai | 8 endpoint, termasuk anggota project dan cakupan data per anggota organisasi |
-| Modul Document | Selesai | 7 endpoint, unggah versi, penomoran `{PROJECT_CODE}-{NNN}` di dalam transaksi, arsip dokumen |
+| Modul Document | Selesai | 8 endpoint, unggah versi, penomoran `{PROJECT_CODE}-{NNN}` di dalam transaksi, arsip dokumen, daftar kategori |
 | Modul Task | Selesai | 5 endpoint, cakupan baca dan tulis yang berbeda, penyaring server-side |
 | Modul Comment | Selesai | 5 endpoint, cakupan diturunkan dari entitas, edit dan hapus berbasis kepemilikan |
 | Modul Workflow | Selesai | 9 endpoint: definisi + step, submit instance, aksi `approve`/`reject`/`request_revision`, re-submit, dan daftar instance ber-cakupan |
 | Modul Notification, Audit (baca), Report, Admin (CRUD) | Belum ada | Hanya endpoint `unlock` akun yang sudah hidup |
 | Frontend | Kerangka selesai, tiga halaman bisnis berdiri | Vite 8 + React 19 + TypeScript + Tailwind v4 (ADR-0024). Token desain dari `DESIGN.md` ada di `frontend/src/styles/tokens.css` dan diperiksa test kontras. Berdiri: shell, primitives, halaman Login, Dashboard, dan **Projects**, **Documents**, **Tasks** (daftar + dialog buat + detail, dengan TanStack Query; Tasks punya penyaring tri-state overdue, **rentang tenggat sebagai satu kelompok berlabel** (kedua batasnya tidak dapat terpisah baris — diukur `scripts/responsive-evidence.mjs`), dan ketiga transisi status). **Sidebar memuat modul saja**; sub-navigasi (tab dan penyaring) hidup di halaman yang memilikinya, dengan bentuk URL yang dapat dibagikan (`?view=mine`, `?overdue=true`, `?status=completed`). Halaman Approvals, Reports, dan Administration belum dibangun |
 
-Endpoint yang sudah terpasang di router: **51 route** (1 health, 5 auth, 5 admin, 8 project, 7 document, 5 task, 5 comment, 9 workflow, 1 analytics, 3 notifications, 1 audit, 1 reports) — dihitung dari `internal/handler/router.go`, bukan dari ingatan.
+Endpoint yang sudah terpasang di router: **52 route** (1 health, 5 auth, 5 admin, 8 project, 8 document, 5 task, 5 comment, 9 workflow, 1 analytics, 3 notifications, 1 audit, 1 reports) — dihitung dari `internal/handler/router.go`, bukan dari ingatan.
 
 ---
 

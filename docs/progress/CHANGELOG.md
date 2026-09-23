@@ -6,6 +6,29 @@
 
 ---
 
+## 2026-09-24 (sesi P-071)
+
+Documents category filter `T-085` DONE. Backend: `GET /documents/categories` (`document_category:read`, semua role), `ListCategories` di repository/service/handler + test `TestDocumentListCategories`. Frontend: dropdown Kategori di `Documents/index.tsx` (setelah Project, sebelum rentang), `listDocumentCategories()` + `useDocumentCategories()`, `category_id` mengalir ke query. Test: "mengirim category_id dari penyaring kategori". Backend **283 → 284 test**, frontend **299 → 300 test**. Menutup Q-016 sisi kategori.
+
+### Added
+
+- `backend/internal/repository/document_repository.go` — `ListCategories` (P-071)
+- `backend/internal/service/document_service.go` — `ListCategories` (P-071)
+- `backend/internal/handler/document_handler.go` — `ListCategories` handler (P-071)
+- `backend/internal/handler/document_handler_test.go` — `TestDocumentListCategories` (P-071)
+
+### Changed
+
+- `backend/internal/handler/router.go` — `GET /documents/categories` (52 route total, 8 document) (P-071)
+- `frontend/src/services/documents.ts` — `DocumentCategory`, `listDocumentCategories()` (P-071)
+- `frontend/src/queries/documents.ts` — `useDocumentCategories()` (P-071)
+- `frontend/src/pages/Documents/index.tsx` — dropdown Kategori + `category_id` ke query (P-071)
+- `frontend/src/pages/Documents/Documents.test.tsx` — mock + test category filter (P-071)
+- `README.md` — `7 → 8 document endpoint`, `51 → 52 route` (P-071)
+- `docs/progress/STATE.md` — `283 → 284 test`, T-085 DONE (P-071)
+
+---
+
 ## 2026-09-24 (sesi P-070)
 
 Project Members CRUD UI `T-084` DONE. Tab Members di `ProjectDetail.tsx`: tombol "Tambah anggota" (hanya bila `project_member:manage`), dialog add member (radio user search via `GET /admin/users` + select role `SelectField`, formError 409/422 inline), hapus anggota bukan owner via `DELETE /projects/:id/members/:userId` + invalidasi kueri project. Baru: `services/admin.ts`, `queries/admin.ts`, `components/common/SelectField.tsx`. Frontend **294 → 299 test** (naik 5), menutup **C-063/Q-024**.

@@ -171,6 +171,9 @@ func Setup(r *gin.Engine, deps RouterDeps) {
 		documents.GET("/:id/download/:versionId",
 			middleware.RequirePermission(deps.Permission, "document_version", "download"),
 			deps.Document.Download)
+		documents.GET("/categories",
+			middleware.RequirePermission(deps.Permission, "document_category", "read"),
+			deps.Document.ListCategories)
 	}
 
 	// --- Tasks (`42-API.md` §6) ---

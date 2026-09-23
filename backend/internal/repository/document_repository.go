@@ -455,3 +455,31 @@ func scanDocumentVersionRow(rows pgx.Rows, version *model.DocumentVersion) error
 	}
 	return nil
 }
+
+// ListCategories mengembalikan seluruh kategori dokumen pada organisasi yang
+// diberikan, diurutkan berdasarkan nama. Dipakai oleh endpoint `GET /documents/categories`
+// supaya klien dapat mengisi dropdown penyaring kategori di halaman dokumen.
+func (r *DocumentRepository) ListCategories(ctx context.Context, organizationID uuid.UUID) ([]model.DocumentCategory, error) {
+	var categories []model.DocumentCategory
+	rows, err := r.db.Query(ctx, `
+		SELECT id, organization_id, name, code, created_at
+		FROM document_categories
+		WHERE organization_id = $1
+		ORDER BY name
+	`, organizationID)
+	if err != nil {
+		return nil, fmt.Errorf("daftar kategori dokumen: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c model.DocumentCategory
+		if err := rows.Scan(&c.ID, &c.OrganizationID, &c.Name, &c.Code, &c.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan kategori dokumen: %w", err)
+		}
+		categories = append(categories, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterator kategori dokumen: %w", err)
+	}
+	return categories, nil
+}

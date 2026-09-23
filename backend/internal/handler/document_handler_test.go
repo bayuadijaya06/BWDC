@@ -970,3 +970,63 @@ func createDocumentWithCategoryHTTP(t *testing.T, engine *gin.Engine, token stri
 	return payload
 }
 
+func TestDocumentListCategories(t *testing.T) {
+	requirePool(t)
+	fixture := newDocumentHTTPFixture(t)
+	engine := fixture.parts.engine
+	manager := fixture.createActor("manager")
+	token := loginToken(t, engine, manager)
+
+	// Buat tiga kategori
+	ctx := context.Background()
+	var cats []uuid.UUID
+	for _, pair := range [][2]string{{"Kat Alpha", "KA"}, {"Kat Beta", "KB"}, {"Kat Gamma", "KG"}} {
+		var id uuid.UUID
+		if err := testPool.QueryRow(ctx, `INSERT INTO document_categories (organization_id, name, code) VALUES ($1, $2, $3) RETURNING id`, manager.OrgID, pair[0], pair[1]).Scan(&id); err != nil {
+			t.Fatalf("buat kategori %q: %v", pair[0], err)
+		}
+		cats = append(cats, id)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM document_categories WHERE id = ANY($1::uuid[])`, cats)
+	})
+
+	// GET /documents/categories -> 200, urut nama
+	rec := doJSON(t, engine, http.MethodGet, "/api/v1/documents/categories", token, "")
+	requireStatus(t, rec, http.StatusOK)
+	type catItem struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Code string `json:"code"`
+	}
+	var items []catItem
+	decodeData(t, rec, &items)
+	if len(items) != 3 {
+		t.Fatalf("jumlah kategori: %d, diharapkan 3", len(items))
+	}
+	if items[0].Name != "Kat Alpha" {
+		t.Errorf("urutan salah: %+v, harapan pertama Kat Alpha", items[0])
+	}
+	if items[1].Name != "Kat Beta" {
+		t.Errorf("urutan salah: %+v, harapan kedua Kat Beta", items[1])
+	}
+	if items[2].Name != "Kat Gamma" {
+		t.Errorf("urutan salah: %+v, harapan ketiga Kat Gamma", items[2])
+	}
+
+	// Unauthenticated -> 401
+	rec = doJSON(t, engine, http.MethodGet, "/api/v1/documents/categories", "", "")
+	requireStatus(t, rec, http.StatusUnauthorized)
+
+	// Viewer tanpa project -> 200, kosong
+	viewer := fixture.createActor("viewer")
+	viewerToken := loginToken(t, engine, viewer)
+	rec = doJSON(t, engine, http.MethodGet, "/api/v1/documents/categories", viewerToken, "")
+	requireStatus(t, rec, http.StatusOK)
+	var empty []catItem
+	decodeData(t, rec, &empty)
+	if len(empty) != 0 {
+		t.Errorf("kategori viewer: %+v, diharapkan kosong", empty)
+	}
+}
+

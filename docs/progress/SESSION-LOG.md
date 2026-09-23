@@ -8,6 +8,15 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-071 — 2026-09-24 — Documents Category Filter (T-085)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md"
+- **Konstruksi:** `GET /documents/categories` (`document_category:read`, semua role) — `ListCategories` di repository/service/handler, test `TestDocumentListCategories` (3 kategori urut nama, 401 tanpa token, viewer kosong); frontend: `listDocumentCategories()` di `services/documents.ts`, `useDocumentCategories()` di `queries/documents.ts`, dropdown Kategori di `Documents/index.tsx` (setelah Project, sebelum rentang), `category_id` mengalir ke query; test: "mengirim category_id dari penyaring kategori".
+- **Bukti:** `go vet/build` OK, `make test` 9 paket **284 test** (naik 1), `ledger OK 284`, `readme-facts OK 52`, `api-contract OK 127/56`, `BROKEN 0`, `antislop-refs OK`, `navigation OK`; frontend `tsc` bersih, **300 test / 30 berkas** (naik 1). Menutup Q-016 sisi kategori.
+- **Status:** DONE. **Next:** `T-086` Approvals resubmit (`POST /workflows/instances/:id/resubmit` di ApprovalDetail).
+
+---
+
 ## P-070 — 2026-09-24 — Project Members CRUD UI (T-084)
 
 - **Prompt user:** "Lanjutkan sesuai CONTINUE.md"

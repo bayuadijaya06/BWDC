@@ -9,6 +9,7 @@ import {
   archiveDocument,
   createDocument,
   fetchDocument,
+  listDocumentCategories,
   listDocumentVersions,
   listDocuments,
   uploadDocumentVersion,
@@ -107,5 +108,12 @@ export function useArchiveDocument() {
       );
       void queryClient.invalidateQueries({ queryKey: documentKeys.lists() });
     },
+  });
+}
+
+export function useDocumentCategories() {
+  return useQuery({
+    queryKey: [...documentKeys.all, "categories"],
+    queryFn: () => listDocumentCategories(),
   });
 }

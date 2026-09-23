@@ -548,3 +548,37 @@ func contentDisposition(originalName string) string {
 
 	return `attachment; filename="` + ascii + `"; filename*=UTF-8''` + url.PathEscape(name)
 }
+
+// ListCategories melayani `GET /documents/categories`.
+//
+// Mengembalikan seluruh kategori dokumen pada organisasi aktor, diurutkan
+// berdasarkan nama. Dipakai frontend untuk mengisi dropdown penyaring kategori.
+// Tidak ada pagination: jumlah kategori per organisasi kecil (< 50).
+func (h *DocumentHandler) ListCategories(c *gin.Context) {
+	actor, ok := actorFrom(c)
+	if !ok {
+		return
+	}
+
+	categories, err := h.documents.ListCategories(c.Request.Context(), actor)
+	if err != nil {
+		h.logger.Error("daftar kategori gagal", "error", err.Error())
+		response.Internal(c)
+		return
+	}
+
+	type categoryItem struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Code string `json:"code"`
+	}
+	items := make([]categoryItem, len(categories))
+	for i, cat := range categories {
+		items[i] = categoryItem{
+			ID:   cat.ID.String(),
+			Name: cat.Name,
+			Code: cat.Code,
+		}
+	}
+	response.OK(c, items)
+}
