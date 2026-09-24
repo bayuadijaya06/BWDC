@@ -33,6 +33,8 @@ const dashboardData = {
     overdue_workflows: 1,
     avg_approval_time_hours: 52.3,
     revised_this_month: 5,
+    open_tasks: 12,
+    overdue_tasks: 4,
   },
   charts: {
     statusDist: [
@@ -136,7 +138,7 @@ describe("halaman Dashboard — MVP analytics", () => {
 
   it("menampilkan pesan kosong saat belum ada data", async () => {
     mocks.fetchDashboard.mockResolvedValue({
-      kpis: { total_documents: 0, active_workflows: 0, pending_approvals: 0, overdue_workflows: 0, avg_approval_time_hours: 0, revised_this_month: 0 },
+      kpis: { total_documents: 0, active_workflows: 0, pending_approvals: 0, overdue_workflows: 0, avg_approval_time_hours: 0, revised_this_month: 0, open_tasks: 0, overdue_tasks: 0 },
       charts: {
         statusDist: [],
         volumeTrend: [],

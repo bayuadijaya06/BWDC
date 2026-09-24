@@ -15,12 +15,14 @@ type AnalyticsQuery struct {
 
 // DashboardKPIs adalah 6 KPI MVP (`52-*` §7).
 type DashboardKPIs struct {
-	TotalDocuments      int     `json:"total_documents"`
-	ActiveWorkflows     int     `json:"active_workflows"`
-	PendingApprovals    int     `json:"pending_approvals"`
-	OverdueWorkflows    int     `json:"overdue_workflows"`
+	TotalDocuments       int     `json:"total_documents"`
+	ActiveWorkflows      int     `json:"active_workflows"`
+	PendingApprovals     int     `json:"pending_approvals"`
+	OverdueWorkflows     int     `json:"overdue_workflows"`
 	AvgApprovalTimeHours float64 `json:"avg_approval_time_hours"`
-	RevisedThisMonth    int     `json:"revised_this_month"`
+	RevisedThisMonth     int     `json:"revised_this_month"`
+	OpenTasks            int     `json:"open_tasks"`
+	OverdueTasks         int     `json:"overdue_tasks"`
 }
 
 // StatusDistItem adalah satu bucket sebaran status.

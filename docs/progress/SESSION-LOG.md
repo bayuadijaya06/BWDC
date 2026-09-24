@@ -8,6 +8,16 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-075 — 2026-09-24 — Dashboard KPI +2 (T-087 IN PROGRESS)
+
+- **Prompt user:** "Lanjutkan T-087/T-074"
+- **Konstruksi:** backend `DashboardKPIs` += `open_tasks`/`overdue_tasks`; repository `countOpenTasks`/`countOverdueTasks` (scope project, tanpa date range, project_id filter opsional); frontend `DashboardKPIs` interface += field, grid KPI 6→8 (`lg:grid-cols-4`), dua panel baru drill-down ke `/tasks?status=open` dan `/tasks?overdue=true`; test dashboard diperbarui mock.
+- **Bukti:** `go vet/build` OK, `make test` 9 paket **284 test** (backend tetap), frontend **324 test / 32 berkas** (tetap), ledger OK 284, readme-facts OK, api-contract OK, BROKEN 0, antislop-refs OK, navigation OK.
+- **Catatan:** KPI +2 selesai tanpa migrasi. Chart/field sisa T-087 (Department, SLA, review_due, published_at, stage history presisi) masih menunggu Q-DASH-01..04 + migrasi 012 — tidak dikerjakan di sesi ini.
+- **Status:** IN PROGRESS. Next: tunggu keputusan Q-DASH untuk melanjutkan T-087/T-074.
+
+---
+
 ## P-074 — 2026-09-24 — Notification Center Frontend (T-088)
 
 - **Prompt user:** "Update detail dokumen pada aplikasi BWDCS, tambahkan yang belum dan lengkapi kategorinya. Kemudian lanjutkan sesuai CONTINUE.md" (bagian kedua: lanjutkan = T-088)

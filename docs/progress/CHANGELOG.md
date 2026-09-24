@@ -6,6 +6,25 @@
 
 ---
 
+## 2026-09-24 (sesi P-075)
+
+Dashboard KPI +2 `T-087` IN PROGRESS. Backend: `DashboardKPIs` += `open_tasks`/`overdue_tasks`, repository `countOpenTasks`/`countOverdueTasks` (scope project, tanpa date range). Frontend: grid KPI 6→8 (`lg:grid-cols-4`), panel Open Tasks + Overdue Tasks dengan drill-down `/tasks?status=open` + `/tasks?overdue=true`. Test dashboard diperbarui. Backend **284 test** tetap, frontend **324 test / 32 berkas** tetap, enam pemeriksa hijau.
+
+### Added
+
+- `backend/internal/repository/analytics_repository.go` — `countOpenTasks`, `countOverdueTasks` (P-075)
+
+### Changed
+
+- `backend/internal/dto/analytics_dto.go` — `DashboardKPIs` += `open_tasks`/`overdue_tasks` (P-075)
+- `frontend/src/services/analytics.ts` — `DashboardKPIs` += field baru (P-075)
+- `frontend/src/pages/Dashboard/index.tsx` — grid 6→8 KPI panels, `lg:grid-cols-4` (P-075)
+- `frontend/src/pages/Dashboard/Dashboard.test.tsx` — mock += field baru, nilai unik (P-075)
+- `docs/progress/STATE.md` — P-075 (P-075)
+- `docs/progress/TASKS.md` — T-087 IN PROGRESS (P-075)
+
+---
+
 ## 2026-09-24 (sesi P-074)
 
 Notification Center frontend `T-088` DONE. Bell di header (badge + dropdown + penyaring + tandai semua + navigasi entitas), lapisan data `services/notifications.ts` + `queries/notifications.ts`. Frontend **310 → 324 test / 30 → 32 berkas**. Tanpa perubahan backend, kontrak, izin, atau skema.

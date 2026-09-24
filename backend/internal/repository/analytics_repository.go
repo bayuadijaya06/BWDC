@@ -65,6 +65,12 @@ func (r *AnalyticsRepository) DashboardData(ctx context.Context, scope ProjectSc
 	if err := r.countRevisedThisMonth(ctx, scope, &resp.KPIs.RevisedThisMonth); err != nil {
 		return nil, err
 	}
+	if err := r.countOpenTasks(ctx, scope, q, &resp.KPIs.OpenTasks); err != nil {
+		return nil, err
+	}
+	if err := r.countOverdueTasks(ctx, scope, q, &resp.KPIs.OverdueTasks); err != nil {
+		return nil, err
+	}
 
 	// Charts
 	if err := r.statusDist(ctx, scope, q, &resp.Charts.StatusDist); err != nil {
@@ -531,6 +537,51 @@ func (r *AnalyticsRepository) activityTrend(ctx context.Context, scope ProjectSc
 	*out = items
 	if *out == nil {
 		*out = []dto.ActivityTrendItem{}
+	}
+	return nil
+}
+
+// countOpenTasks menghitung task dengan status 'open' dalam cakupan (di luar range).
+func (r *AnalyticsRepository) countOpenTasks(ctx context.Context, scope ProjectScope, q dto.AnalyticsQuery, out *int) error {
+	query := `
+		SELECT COUNT(*)
+		FROM tasks t
+		JOIN projects p ON p.id = t.project_id
+		WHERE ` + projectScopePredicate(1, 2, 3) + `
+		  AND t.status = 'open'
+		  AND ($4::uuid IS NULL OR t.project_id = $4)`
+	var projectID *uuid.UUID
+	if q.ProjectID != nil {
+		id, err := uuid.Parse(*q.ProjectID)
+		if err == nil {
+			projectID = &id
+		}
+	}
+	if err := r.db.QueryRow(ctx, query, scope.OrganizationID, scope.AllInOrganization, scope.UserID, projectID).Scan(out); err != nil {
+		return fmt.Errorf("hitung open tasks: %w", err)
+	}
+	return nil
+}
+
+// countOverdueTasks menghitung task yang overdue (due_date lewat dan bukan completed) dalam cakupan.
+func (r *AnalyticsRepository) countOverdueTasks(ctx context.Context, scope ProjectScope, q dto.AnalyticsQuery, out *int) error {
+	query := `
+		SELECT COUNT(*)
+		FROM tasks t
+		JOIN projects p ON p.id = t.project_id
+		WHERE ` + projectScopePredicate(1, 2, 3) + `
+		  AND t.due_date < NOW()
+		  AND t.status != 'completed'
+		  AND ($4::uuid IS NULL OR t.project_id = $4)`
+	var projectID *uuid.UUID
+	if q.ProjectID != nil {
+		id, err := uuid.Parse(*q.ProjectID)
+		if err == nil {
+			projectID = &id
+		}
+	}
+	if err := r.db.QueryRow(ctx, query, scope.OrganizationID, scope.AllInOrganization, scope.UserID, projectID).Scan(out); err != nil {
+		return fmt.Errorf("hitung overdue tasks: %w", err)
 	}
 	return nil
 }

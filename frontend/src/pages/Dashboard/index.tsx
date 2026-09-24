@@ -211,7 +211,7 @@ export function DashboardPage() {
         <EmptyState title="Belum ada data" description="Belum ada transaksi dalam cakupan Anda pada rentang ini." />
       ) : (
         <>
-          <section aria-label="KPI dashboard" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <section aria-label="KPI dashboard" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Panel title="Total Dokumen" note="GET /documents dalam cakupan">
               <p className="font-mono text-20 font-semibold text-text">{kpis.total_documents}</p>
               <Link to="/documents" className="text-12 text-accent underline">
@@ -241,6 +241,18 @@ export function DashboardPage() {
             </Panel>
             <Panel title="Revised This Month" note="versi baru bulan ini">
               <p className="font-mono text-20 font-semibold text-text">{kpis.revised_this_month}</p>
+            </Panel>
+            <Panel title="Open Tasks" note="status open">
+              <p className="font-mono text-20 font-semibold text-text">{kpis.open_tasks}</p>
+              <Link to="/tasks?status=open" className="text-12 text-accent underline">
+                Lihat tasks
+              </Link>
+            </Panel>
+            <Panel title="Overdue Tasks" note="due_date lewat, belum selesai">
+              <p className="font-mono text-20 font-semibold text-text">{kpis.overdue_tasks}</p>
+              <Link to="/tasks?overdue=true" className="text-12 text-accent underline">
+                Lihat overdue
+              </Link>
             </Panel>
           </section>
 

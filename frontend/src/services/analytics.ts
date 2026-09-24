@@ -24,6 +24,8 @@ export interface DashboardKPIs {
   overdue_workflows: number;
   avg_approval_time_hours: number;
   revised_this_month: number;
+  open_tasks: number;
+  overdue_tasks: number;
 }
 
 export interface StatusDistItem {
