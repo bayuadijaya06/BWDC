@@ -6,6 +6,28 @@
 
 ---
 
+## 2026-09-24 (sesi P-073)
+
+Document detail completion `T-091` DONE (permintaan user). Kategori: select di `CreateDocumentDialog` + `category_id` di `CreateDocumentInput` + tautan kategori di detail. Workflow: `listWorkflowDefinitions` + `submitWorkflowInstance` + hook, panel Workflow di `DocumentDetail` (submit/resubmit, gate izin), alasan basi diperbaiki. Frontend **302 → 310 test / 30 berkas**. Tanpa perubahan backend, kontrak, izin, atau skema.
+
+### Added
+
+- `frontend/src/services/workflows.ts` — `WorkflowDefinition`, `SubmitWorkflowInput`, `listWorkflowDefinitions`, `submitWorkflowInstance` (P-073)
+- `frontend/src/queries/workflows.ts` — `useWorkflowDefinitions`, `useSubmitWorkflowInstance` (P-073)
+
+### Changed
+
+- `frontend/src/services/documents.ts` — `CreateDocumentInput.category_id` (P-073)
+- `frontend/src/pages/Documents/CreateDocumentDialog.tsx` — select Kategori langkah 1 (P-073)
+- `frontend/src/pages/Documents/DocumentDetail.tsx` — panel Workflow + tautan kategori + pendingSections 4→3 (P-073)
+- `frontend/src/pages/Documents/DocumentDetail.test.tsx` — 6 test baru/diubah (P-073)
+- `frontend/src/pages/Documents/Documents.test.tsx` — helper + test kategori (P-073)
+- `frontend/src/services/workflows.test.ts` — 2 test submit/definitions (P-073)
+- `docs/progress/TRACEABILITY.md` — `FR-DOC-07` catatan kategori P-073 (P-073)
+- `docs/progress/TASKS.md` — `T-091` DONE (P-073)
+
+---
+
 ## 2026-09-24 (sesi P-072)
 
 Approvals Resubmit `T-086` DONE. Tombol `Resubmit for Review` di `ApprovalDetail.tsx` saat jeda revisi (`document_status = revision_required`): gate `workflow_instance:submit`, `version` instance dikirim, `409`→alert+refetch, `403`→pesan izin, sukses → status diperbarui. Lapisan data sudah ada; sesi ini wiring UI + 3 test. Frontend **300 → 302 test / 30 berkas**. Tanpa perubahan backend, kontrak, izin, atau skema.

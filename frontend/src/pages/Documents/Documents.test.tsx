@@ -416,6 +416,18 @@ async function pickProject(user: Awaited<ReturnType<typeof userEvent.setup>>) {
   );
 }
 
+/**
+ * Memilih kategori **sesudah** daftarnya tiba dari server, sama seperti
+ * `pickProject`: memilih lebih dulu gagal karena opsinya belum ada.
+ */
+async function pickCategory(user: Awaited<ReturnType<typeof userEvent.setup>>) {
+  const select = await inDialog().findByLabelText("Kategori");
+  await user.selectOptions(
+    select,
+    await within(select).findByRole("option", { name: "SOP" }),
+  );
+}
+
 describe("dialog unggah dokumen", () => {
   it("membuat metadata lebih dulu, menampilkan nomor dari server, lalu mengunggah berkas", async () => {
     const user = userEvent.setup();
@@ -461,6 +473,33 @@ describe("dialog unggah dokumen", () => {
       expect(mocks.upload).toHaveBeenCalledWith("d1", {
         file,
         revision_note: "perbaikan 2",
+      }),
+    );
+  });
+
+  it("mengirim category_id bila kategori dipilih, dan tidak mengirimnya bila kosong", async () => {
+    const user = userEvent.setup();
+    mocks.create.mockResolvedValue({
+      document: { ...document, status: "draft", document_number: "WEB-003" },
+      current_version: null,
+    });
+
+    renderWithProviders(<DocumentsPage />, {
+      route: "/documents?upload=1",
+      path: "/documents",
+    });
+
+    await pickProject(user);
+    await pickCategory(user);
+    await user.type(inDialog().getByLabelText("Judul"), "SOP Baru");
+    await user.click(screen.getByRole("button", { name: "Lanjut ke berkas" }));
+
+    await waitFor(() =>
+      expect(mocks.create).toHaveBeenCalledWith({
+        project_id: "p1",
+        title: "SOP Baru",
+        description: "",
+        category_id: "c1",
       }),
     );
   });

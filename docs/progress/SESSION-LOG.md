@@ -8,6 +8,15 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-073 — 2026-09-24 — Document Detail Completion (T-091, permintaan user)
+
+- **Prompt user:** "Update detail dokumen pada aplikasi BWDCS, tambahkan yang belum dan lengkapi kategorinya. Kemudian lanjutkan sesuai CONTINUE.md"
+- **Konstruksi:** kategori — `CreateDocumentInput.category_id` + select di `CreateDocumentDialog` langkah 1 (dikirim bila dipilih; komentar basi dihapus) + tautan kategori di metadata detail; Workflow — `listWorkflowDefinitions` + `submitWorkflowInstance` + hook (`useWorkflowDefinitions`, `useSubmitWorkflowInstance`), panel Workflow di `DocumentDetail` (submit draft via dialog definisi aktif → redirect approvals; resubmit revision_required + instance terikat; gate `workflow_instance:submit`), `pendingSections` tinggal 3 dengan alasan Activity yang benar, catatan kaki basi dihapus. Test: service submit/definitions (2), dialog kategori (1+helper), detail kategori/submit-izin/submit-409/resubmit (5).
+- **Bukti:** `tsc` + `eslint` bersih, frontend **310 test / 30 berkas** (naik 8), `check-ledger OK 284`, `readme-facts OK 52`, `api-contract OK 127/56`, `BROKEN 0`, `antislop-refs OK`, `navigation OK`. Tanpa perubahan backend, kontrak, izin, atau skema.
+- **Status:** DONE. **Next:** `T-088` Notification Center frontend.
+
+---
+
 ## P-072 — 2026-09-24 — Approvals Resubmit (T-086)
 
 - **Prompt user:** "Lanjutkan sesuai CONTINUE.md"

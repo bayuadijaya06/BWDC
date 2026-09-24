@@ -3,8 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   actWorkflowInstance,
   fetchWorkflowInstance,
+  listWorkflowDefinitions,
   listWorkflowInstances,
   resubmitWorkflowInstance,
+  submitWorkflowInstance,
+  type SubmitWorkflowInput,
   type WorkflowActionInput,
   type WorkflowInstancesQuery,
 } from "@/services/workflows";
@@ -14,6 +17,7 @@ export const workflowKeys = {
   instances: (query: WorkflowInstancesQuery) =>
     [...workflowKeys.all, "instances", query] as const,
   instance: (id: string) => [...workflowKeys.all, "instance", id] as const,
+  definitions: () => [...workflowKeys.all, "definitions"] as const,
 };
 
 export function useWorkflowInstances(
@@ -59,6 +63,24 @@ export function useResubmitWorkflowInstance() {
       void client.invalidateQueries({
         queryKey: workflowKeys.instance(variables.id),
       });
+    },
+  });
+}
+
+export function useWorkflowDefinitions(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: workflowKeys.definitions(),
+    queryFn: () => listWorkflowDefinitions(),
+    enabled: options.enabled ?? true,
+  });
+}
+
+export function useSubmitWorkflowInstance() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SubmitWorkflowInput) => submitWorkflowInstance(input),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: workflowKeys.all });
     },
   });
 }

@@ -7,6 +7,7 @@ import { Field, TextareaField } from "@/components/common/Field";
 import { ErrorMessage } from "@/components/common/States";
 import { documentKeys, useCreateDocument } from "@/queries/documents";
 import { useProjectList } from "@/queries/projects";
+import { useDocumentCategories } from "@/queries/documents";
 import { ApiError } from "@/services/http";
 import {
   uploadDocumentVersion,
@@ -36,11 +37,7 @@ import { FilePicker } from "./FilePicker";
  * - bila langkah 2 gagal, dokumennya **sudah** ada dan tetap sah tanpa versi
  *   (`42-API.md` §4: `current_version` boleh `null`). Pengguna diberi tahu
  *   bahwa ia dapat menutup dialog dan mengunggah berkasnya dari halaman detail,
- *   bukan diarahkan mengulang langkah 1 yang akan membuat dokumen kedua;
- * - kategori dokumen tidak dapat dipilih. Matriks memberi izin
- *   `document_category:read`, tetapi `42-API.md` §4 belum memuat endpoint daftar
- *   kategori, jadi pilihannya tidak dikarang (kelas temuan yang sama dengan
- *   C-063 pada pemilih pengguna).
+ *   bukan diarahkan mengulang langkah 1 yang akan membuat dokumen kedua.
  */
 export function CreateDocumentDialog({
   onClose,
@@ -51,6 +48,7 @@ export function CreateDocumentDialog({
 }) {
   const canReadProjects = useAuthStore((state) => state.has("project:read"));
   const projects = useProjectList({ limit: 100 }, { enabled: canReadProjects });
+  const categories = useDocumentCategories();
   const createDocument = useCreateDocument();
   const queryClient = useQueryClient();
 
@@ -59,6 +57,7 @@ export function CreateDocumentDialog({
 
   const [projectId, setProjectId] = useState("");
   const [title, setTitle] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [description, setDescription] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -83,7 +82,12 @@ export function CreateDocumentDialog({
     if (Object.keys(clientErrors).length > 0) return;
 
     createDocument.mutate(
-      { project_id: projectId, title, description },
+      {
+        project_id: projectId,
+        title,
+        description,
+        ...(categoryId === "" ? {} : { category_id: categoryId }),
+      },
       {
         onSuccess: (detail) => {
           setCreated(detail);
@@ -224,6 +228,47 @@ export function CreateDocumentDialog({
             hint="Wajib, maksimal 255 karakter."
             maxLength={255}
           />
+
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="kategori-dokumen"
+              className="text-13 font-medium text-text-soft"
+            >
+              Kategori
+            </label>
+            <select
+              id="kategori-dokumen"
+              value={categoryId}
+              onChange={(event) => setCategoryId(event.target.value)}
+              aria-invalid={errors.category_id ? true : undefined}
+              aria-describedby={
+                errors.category_id ? "kategori-dokumen-error" : undefined
+              }
+              className={[
+                "tap-target rounded-control border bg-surface-raised px-2 text-14 text-text",
+                errors.category_id ? "border-danger" : "border-line-strong",
+              ].join(" ")}
+            >
+              <option value="">
+                {categories.isPending ? "Memuat kategori…" : "Tanpa kategori"}
+              </option>
+              {(categories.data ?? []).map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            {errors.category_id ? (
+              <p id="kategori-dokumen-error" className="text-12 text-danger">
+                {errors.category_id}
+              </p>
+            ) : (
+              <p className="text-12 text-text-muted">
+                Opsional. Kategori hanya dari organisasi Anda; yang tidak ada
+                ditolak server.
+              </p>
+            )}
+          </div>
 
           <TextareaField
             label="Deskripsi"

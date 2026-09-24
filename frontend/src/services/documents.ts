@@ -138,6 +138,8 @@ export interface CreateDocumentInput {
   project_id: string;
   title: string;
   description?: string;
+  /** Opsional; kategori organisasi lain atau UUID tidak sah → `422`. */
+  category_id?: string;
 }
 
 export interface UploadVersionInput {

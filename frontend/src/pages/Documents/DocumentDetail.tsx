@@ -1,10 +1,11 @@
 import { useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 
 import { Button } from "@/components/common/Button";
 import { DataTable, type DataTableColumn } from "@/components/common/DataTable";
 import { Dialog } from "@/components/common/Dialog";
 import { TextareaField } from "@/components/common/Field";
+import { SelectField } from "@/components/common/SelectField";
 import { Panel } from "@/components/common/Panel";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/States";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -13,6 +14,11 @@ import {
   useDocument,
   useDocumentVersions,
 } from "@/queries/documents";
+import {
+  useResubmitWorkflowInstance,
+  useSubmitWorkflowInstance,
+  useWorkflowDefinitions,
+} from "@/queries/workflows";
 import {
   downloadDocumentVersion,
   type DocumentVersion,
@@ -27,17 +33,14 @@ import { UploadVersionDialog } from "./UploadVersionDialog";
 
 /**
  * Bagian `50-FSD.md` §4.3 yang **belum** dibangun. Ditulis sebagai data, bukan
- * komponen setengah jadi, dan alasannya menyebut keadaan sebenarnya: mana yang
- * endpointnya belum ada (Workflow, Activity) dan mana yang endpointnya sudah
- * hidup tetapi antarmukanya belum (Comments, Related Tasks).
+ * komponen setengah jadi, dan alasannya menyebut keadaan sebenarnya.
+ *
+ * Workflow tidak ada di sini lagi: modulnya hidup dan panelnya dibangun di
+ * bawah (`T-086` backend, submit/resubmit di halaman ini). Activity juga bukan
+ * "endpoint belum ada" — `GET /audit` hidup, tetapi izin `audit:read` hanya
+ * milik Administrator dan tampilan aktivitas per dokumen belum dibangun.
  */
 const pendingSections: { label: string; reason: string; reference: string }[] = [
-  {
-    label: "Workflow",
-    reason:
-      "Modul Workflow (Phase 2) belum diimplementasikan di backend, jadi belum ada instance untuk ditampilkan.",
-    reference: "docs/design/43-WORKFLOW.md, docs/design/42-API.md §5",
-  },
   {
     label: "Comments",
     reason:
@@ -47,8 +50,8 @@ const pendingSections: { label: string; reason: string; reference: string }[] = 
   {
     label: "Activity",
     reason:
-      "Jejaknya sudah tercatat di audit_logs, tetapi endpoint pembacanya (§9) belum ada, sehingga tidak ada yang dapat ditampilkan di sini.",
-    reference: "docs/design/42-API.md §9, docs/design/44-SECURITY.md §6",
+      "Endpoint GET /audit sudah hidup dan menerima penyaring entity, tetapi izin audit:read hanya milik Administrator dan tampilan aktivitas per dokumen belum dibangun.",
+    reference: "docs/design/42-API.md §9, docs/design/44-SECURITY.md §3.1",
   },
   {
     label: "Related Tasks",
@@ -71,6 +74,7 @@ const pendingSections: { label: string; reason: string; reference: string }[] = 
  */
 export function DocumentDetailPage() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const canDownload = useAuthStore((state) =>
     state.has("document_version:download"),
   );
@@ -78,10 +82,15 @@ export function DocumentDetailPage() {
     state.has("document_version:upload"),
   );
   const canArchive = useAuthStore((state) => state.has("document:update"));
+  const canSubmit = useAuthStore((state) =>
+    state.has("workflow_instance:submit"),
+  );
 
   const query = useDocument(id);
   const versions = useDocumentVersions(id);
   const archive = useArchiveDocument();
+  const submit = useSubmitWorkflowInstance();
+  const resubmit = useResubmitWorkflowInstance();
 
   const [downloading, setDownloading] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<ApiError | null>(null);
@@ -89,6 +98,13 @@ export function DocumentDetailPage() {
   const [openUpload, setOpenUpload] = useState(false);
   const [openArchive, setOpenArchive] = useState(false);
   const [archiveReason, setArchiveReason] = useState("");
+  const [openSubmit, setOpenSubmit] = useState(false);
+  const [definitionId, setDefinitionId] = useState("");
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
+
+  const definitions = useWorkflowDefinitions({
+    enabled: openSubmit && canSubmit,
+  });
 
   if (query.isPending) {
     return (
@@ -128,6 +144,74 @@ export function DocumentDetailPage() {
   const { document, current_version: currentVersion } = detail;
   const archived = document.status === "archived";
   const versionRows = versions.data ?? [];
+  const isDraft = document.status === "draft";
+  const isRevisionRequired = document.status === "revision_required";
+  const instanceId = document.workflow_instance_id ?? null;
+
+  async function handleSubmit() {
+    setWorkflowError(null);
+    if (definitionId === "") {
+      setWorkflowError("Pilih alur review lebih dulu.");
+      return;
+    }
+    try {
+      const instance = await submit.mutateAsync({
+        document_id: document.id,
+        workflow_definition_id: definitionId,
+      });
+      setOpenSubmit(false);
+      setDefinitionId("");
+      navigate(`/approvals/${instance.id}`);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 409) {
+          setWorkflowError(`${error.message}. Muat ulang untuk melihat keadaan terbaru.`);
+          void query.refetch();
+        } else if (error.status === 403) {
+          setWorkflowError("Submit memerlukan izin workflow_instance:submit (Contributor ke atas).");
+        } else if (error.status === 422) {
+          const fields = error.fieldErrors;
+          const first = Object.values(fields)[0];
+          setWorkflowError(first ?? error.message);
+        } else {
+          setWorkflowError(error.message);
+        }
+      } else {
+        setWorkflowError("Gagal memulai review.");
+      }
+    }
+  }
+
+  async function handleResubmit() {
+    setWorkflowError(null);
+    if (instanceId === null) return;
+    try {
+      await resubmit.mutateAsync({ id: instanceId });
+      setNotice("Re-submit berhasil - review dilanjutkan pada instance yang sama.");
+      void query.refetch();
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.code === "WORKFLOW_CONFLICT" || error.code === "CONFLICT") {
+          const details = (errDetails(error));
+          setWorkflowError(
+            `${error.message}${details ? ` - ${details}` : ""}. Muat ulang untuk melihat keadaan terbaru.`,
+          );
+          void query.refetch();
+        } else if (error.status === 403) {
+          setWorkflowError("Re-submit memerlukan izin workflow_instance:submit (Contributor ke atas).");
+        } else {
+          setWorkflowError(error.message);
+        }
+      } else {
+        setWorkflowError("Gagal melakukan re-submit.");
+      }
+    }
+  }
+
+  function errDetails(error: ApiError): string | null {
+    const details = (error as unknown as { details?: unknown }).details;
+    return details === undefined ? null : JSON.stringify(details);
+  }
 
   async function download(version: DocumentVersion) {
     setDownloading(version.id);
@@ -216,7 +300,16 @@ export function DocumentDetailPage() {
         </Link>
       ),
     },
-    { label: "Kategori", value: document.category_name ?? EMPTY_VALUE },
+    { label: "Kategori", value: document.category_id ? (
+        <Link
+          to={`/documents?category_id=${encodeURIComponent(document.category_id)}`}
+          className="text-text underline decoration-line-strong underline-offset-2"
+        >
+          {document.category_name ?? document.category_id}
+        </Link>
+      ) : (
+        EMPTY_VALUE
+      ) },
     { label: "Pemilik", value: document.owner_username ?? EMPTY_VALUE },
     { label: "Versi terakhir", value: document.latest_version ?? EMPTY_VALUE },
     {
@@ -386,6 +479,92 @@ export function DocumentDetailPage() {
       </Panel>
 
       <Panel
+        title="Workflow"
+        note="Jalur review dokumen ini: submit pertama atau lanjutan sesudah revisi (ADR-0016)."
+      >
+        {archived ? (
+          <p className="text-13 text-text-muted">
+            Dokumen terarsip tidak dapat masuk atau melanjutkan review (`409`).
+          </p>
+        ) : isDraft && instanceId === null ? (
+          <div className="flex flex-col gap-2">
+            <p className="max-w-prose text-13 text-text-muted">
+              Dokumen masih draft dan belum punya workflow instance. Memulai
+              review membuat instance baru pada step 1.
+            </p>
+            {canSubmit ? (
+              <div>
+                <Button variant="primary" onClick={() => {
+                  setDefinitionId("");
+                  setWorkflowError(null);
+                  setOpenSubmit(true);
+                }}>
+                  Submit for Review
+                </Button>
+              </div>
+            ) : (
+              <p className="text-12 text-text-muted">
+                Submit memerlukan izin workflow_instance:submit (Contributor ke atas).
+              </p>
+            )}
+          </div>
+        ) : isRevisionRequired && instanceId !== null ? (
+          <div className="flex flex-col gap-2">
+            <p className="max-w-prose text-13 text-text-muted">
+              Jeda revisi: instance tetap berjalan. Setelah versi baru diunggah,
+              lanjutkan review pada instance yang sama.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {canSubmit ? (
+                <Button
+                  variant="primary"
+                  pending={resubmit.isPending}
+                  onClick={() => void handleResubmit()}
+                >
+                  Resubmit for Review
+                </Button>
+              ) : null}
+              <Link
+                to={`/approvals/${instanceId}`}
+                className="tap-target inline-flex items-center rounded-control border border-line-strong bg-surface-raised px-3 text-13 text-text hover:bg-surface-hover"
+              >
+                Buka di Approvals
+              </Link>
+            </div>
+            {!canSubmit ? (
+              <p className="text-12 text-text-muted">
+                Re-submit memerlukan izin workflow_instance:submit (Contributor ke atas).
+              </p>
+            ) : null}
+          </div>
+        ) : instanceId !== null ? (
+          <div className="flex flex-col gap-2">
+            <p className="max-w-prose text-13 text-text-muted">
+              Review berjalan pada instance yang terikat dokumen ini
+              {document.workflow_instance_status ? ` (status: ${document.workflow_instance_status})` : ""}.
+            </p>
+            <div>
+              <Link
+                to={`/approvals/${instanceId}`}
+                className="tap-target inline-flex items-center rounded-control border border-line-strong bg-surface-raised px-3 text-13 text-text hover:bg-surface-hover"
+              >
+                Buka di Approvals
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <p className="text-13 text-text-muted">
+            Belum ada workflow instance untuk dokumen ini.
+          </p>
+        )}
+        {workflowError !== null && !openSubmit ? (
+          <p role="alert" className="pt-2 text-12 text-danger">
+            {workflowError}
+          </p>
+        ) : null}
+      </Panel>
+
+      <Panel
         title="Bagian lain halaman ini"
         note="Disebut 50-FSD.md §4.3 dan belum dibangun; alasannya per bagian, bukan satu kalimat umum."
       >
@@ -406,13 +585,6 @@ export function DocumentDetailPage() {
           ))}
         </dl>
       </Panel>
-
-      <p className="text-12 text-text-muted">
-        Submit for Review dan Resubmit belum tersedia: keduanya endpoint modul
-        Workflow, dan modul itu belum ada di backend. Yang tersedia hari ini
-        adalah menyimpan versi baru; statusnya masih berubah lewat alur yang
-        belum dibangun.
-      </p>
 
       {openUpload ? (
         <UploadVersionDialog
@@ -486,6 +658,63 @@ export function DocumentDetailPage() {
             {archive.error instanceof ApiError ? (
               <p role="alert" className="text-12 text-danger">
                 {archive.error.message}
+              </p>
+            ) : null}
+          </div>
+        </Dialog>
+      ) : null}
+
+      {openSubmit ? (
+        <Dialog
+          title="Submit for Review"
+          description="Memulai review membuat workflow instance baru pada step 1. Dokumen berpindah ke In Review."
+          onClose={submit.isPending ? () => {} : () => setOpenSubmit(false)}
+          footer={
+            <>
+              <Button
+                variant="quiet"
+                onClick={() => setOpenSubmit(false)}
+                disabled={submit.isPending}
+              >
+                Batal
+              </Button>
+              <Button
+                variant="primary"
+                pending={submit.isPending}
+                disabled={definitionId === ""}
+                onClick={() => void handleSubmit()}
+              >
+                Mulai review
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-3">
+            <SelectField
+              label="Alur review"
+              value={definitionId}
+              onChange={(event) => setDefinitionId(event.target.value)}
+              hint="Definisi tidak dapat diganti setelah instance dibuat."
+            >
+              <option value="">
+                {definitions.isPending ? "Memuat alur…" : "Pilih alur"}
+              </option>
+              {(definitions.data ?? [])
+                .filter((definition) => definition.is_active)
+                .map((definition) => (
+                  <option key={definition.id} value={definition.id}>
+                    {definition.name}
+                  </option>
+                ))}
+            </SelectField>
+            {definitions.isError ? (
+              <p className="text-12 text-text-muted">
+                Daftar alur tidak dapat dimuat. Coba tutup lalu buka lagi dialog ini.
+              </p>
+            ) : null}
+            {workflowError !== null ? (
+              <p role="alert" className="text-12 text-danger">
+                {workflowError}
               </p>
             ) : null}
           </div>

@@ -72,6 +72,18 @@ export interface WorkflowActionInput {
   version?: number;
 }
 
+export interface WorkflowDefinition {
+  id: string;
+  name: string;
+  description: string;
+  is_active: boolean;
+}
+
+export interface SubmitWorkflowInput {
+  document_id: string;
+  workflow_definition_id: string;
+}
+
 async function listWorkflowInstances(
   query: WorkflowInstancesQuery = {},
 ): Promise<WorkflowInstancesResult> {
@@ -123,9 +135,28 @@ async function resubmitWorkflowInstance(
   return response.data.data;
 }
 
+async function listWorkflowDefinitions(): Promise<WorkflowDefinition[]> {
+  const response = await http.get<ApiSuccess<WorkflowDefinition[]>>(
+    "/workflows/definitions",
+  );
+  return response.data.data;
+}
+
+async function submitWorkflowInstance(
+  input: SubmitWorkflowInput,
+): Promise<WorkflowInstance> {
+  const response = await http.post<ApiSuccess<WorkflowInstance>>(
+    "/workflows/submit",
+    input,
+  );
+  return response.data.data;
+}
+
 export {
   actWorkflowInstance,
   fetchWorkflowInstance,
+  listWorkflowDefinitions,
   listWorkflowInstances,
   resubmitWorkflowInstance,
+  submitWorkflowInstance,
 };

@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   archive: vi.fn(),
   download: vi.fn(),
   saveBlob: vi.fn(),
+  submit: vi.fn(),
+  resubmit: vi.fn(),
+  definitions: vi.fn(),
 }));
 
 vi.mock("@/services/documents", async (importOriginal) => {
@@ -31,6 +34,16 @@ vi.mock("@/services/documents", async (importOriginal) => {
     fetchDocument: mocks.fetch,
     listDocumentVersions: mocks.versions,
     uploadDocumentVersion: mocks.upload,
+  };
+});
+
+vi.mock("@/services/workflows", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/workflows")>();
+  return {
+    ...actual,
+    resubmitWorkflowInstance: mocks.resubmit,
+    submitWorkflowInstance: mocks.submit,
+    listWorkflowDefinitions: mocks.definitions,
   };
 });
 
@@ -103,7 +116,28 @@ const allPermissions = [
   "document:update",
   "document_version:upload",
   "document_version:download",
+  "workflow_instance:submit",
 ];
+
+const draftDetail: DocumentDetail = {
+  document: {
+    ...detail.document,
+    status: "draft",
+    category_id: "c1",
+    category_name: "SOP",
+  },
+  current_version: null,
+};
+
+const revisionDetail: DocumentDetail = {
+  document: {
+    ...detail.document,
+    status: "revision_required",
+    workflow_instance_id: "wi-1",
+    workflow_instance_status: "running",
+  },
+  current_version: version,
+};
 
 beforeEach(() => {
   for (const mock of Object.values(mocks)) mock.mockReset();
@@ -175,12 +209,23 @@ describe("halaman detail dokumen", () => {
   it("menyatakan bagian yang belum dibangun beserta alasannya per bagian", async () => {
     renderPage();
 
-    expect((await screen.findAllByText(/belum dibangun/)).length).toBeGreaterThanOrEqual(4);
-    for (const label of ["Workflow", "Comments", "Activity", "Related Tasks"]) {
+    // Tiga bagian × dua kemunculan ("belum dibangun" di judul dan di alasan),
+    // ditambah satu di catatan panel.
+    expect((await screen.findAllByText(/belum dibangun/))).toHaveLength(6);
+    for (const label of ["Comments", "Activity", "Related Tasks"]) {
       expect(screen.getAllByText(label, { exact: false }).length).toBeGreaterThan(0);
     }
-    expect(screen.queryByRole("button", { name: /Submit for Review/ })).toBeNull();
-    expect(screen.getByText(/Submit for Review dan Resubmit belum tersedia/)).toBeInTheDocument();
+    // Workflow bukan lagi bagian "belum dibangun": panelnya hidup di bawah.
+    expect(screen.getByText("Workflow")).toBeInTheDocument();
+    expect(screen.queryByText(/Submit for Review dan Resubmit belum tersedia/)).toBeNull();
+  });
+
+  it("menautkan kategori ke daftar yang tersaring kategori itu", async () => {
+    mocks.fetch.mockResolvedValue(draftDetail);
+    renderPage();
+
+    const link = await screen.findByRole("link", { name: "SOP" });
+    expect(link).toHaveAttribute("href", "/documents?category_id=c1");
   });
 
   it("menolak aksi tulis pada dokumen terarsip, tetapi unduhan tetap tersedia", async () => {
@@ -240,6 +285,108 @@ describe("halaman detail dokumen", () => {
     expect(screen.queryByRole("button", { name: "Unggah versi" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Arsipkan" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Unduh" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Submit for Review" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resubmit for Review" })).toBeNull();
+  });
+
+  it("tidak menawarkan submit tanpa izin workflow_instance:submit", async () => {
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: profileWith(["document:read", "document:update"]),
+      error: null,
+      pending: false,
+    });
+    mocks.fetch.mockResolvedValue(draftDetail);
+
+    renderPage();
+    await screen.findByRole("heading", { name: "BRD", level: 1 });
+
+    expect(screen.queryByRole("button", { name: "Submit for Review" })).toBeNull();
+    expect(screen.getByText(/Submit memerlukan izin workflow_instance:submit/)).toBeInTheDocument();
+  });
+});
+
+describe("alur review dari halaman detail dokumen", () => {
+  it("membuka dialog submit, memilih alur, dan mengirim document_id plus definisi", async () => {
+    const user = userEvent.setup();
+    mocks.fetch.mockResolvedValue(draftDetail);
+    mocks.definitions.mockResolvedValue([
+      { id: "wd-1", name: "Standard Approval", description: "", is_active: true },
+      { id: "wd-2", name: "Nonaktif", description: "", is_active: false },
+    ]);
+    mocks.submit.mockResolvedValue({ id: "wi-9", status: "running", version: 0 });
+
+    renderPage();
+    await screen.findByRole("heading", { name: "BRD", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Submit for Review" }));
+    const dialog = within(screen.getByRole("dialog"));
+    // Definisi nonaktif tidak ditawarkan.
+    expect(dialog.queryByRole("option", { name: "Nonaktif" })).toBeNull();
+    await user.selectOptions(
+      dialog.getByLabelText("Alur review"),
+      await dialog.findByRole("option", { name: "Standard Approval" }),
+    );
+    await user.click(dialog.getByRole("button", { name: "Mulai review" }));
+
+    await waitFor(() =>
+      expect(mocks.submit).toHaveBeenCalledWith({
+        document_id: "d1",
+        workflow_definition_id: "wd-1",
+      }),
+    );
+  });
+
+  it("menampilkan penolakan 409 dari server apa adanya", async () => {
+    const user = userEvent.setup();
+    mocks.fetch.mockResolvedValue(draftDetail);
+    mocks.definitions.mockResolvedValue([
+      { id: "wd-1", name: "Standard Approval", description: "", is_active: true },
+    ]);
+    mocks.submit.mockRejectedValue(
+      new ApiError({
+        status: 409,
+        code: "CONFLICT",
+        message: "dokumen sudah memiliki workflow instance",
+      }),
+    );
+
+    renderPage();
+    await screen.findByRole("heading", { name: "BRD", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Submit for Review" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.selectOptions(
+      dialog.getByLabelText("Alur review"),
+      await dialog.findByRole("option", { name: "Standard Approval" }),
+    );
+    await user.click(dialog.getByRole("button", { name: "Mulai review" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "dokumen sudah memiliki workflow instance",
+    );
+    // State dimuat ulang sesudah konflik.
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+  });
+
+  it("menawarkan resubmit langsung saat revision_required dengan instance terikat", async () => {
+    const user = userEvent.setup();
+    mocks.fetch.mockResolvedValue(revisionDetail);
+    mocks.resubmit.mockResolvedValue({ id: "wi-1", status: "running" });
+
+    renderPage();
+    await screen.findByRole("heading", { name: "BRD", level: 1 });
+
+    expect(screen.getByRole("link", { name: "Buka di Approvals" })).toHaveAttribute(
+      "href",
+      "/approvals/wi-1",
+    );
+    await user.click(screen.getByRole("button", { name: "Resubmit for Review" }));
+
+    await waitFor(() => expect(mocks.resubmit).toHaveBeenCalledWith("wi-1", undefined));
+    expect(
+      await screen.findByText("Re-submit berhasil - review dilanjutkan pada instance yang sama."),
+    ).toBeInTheDocument();
   });
 });
 

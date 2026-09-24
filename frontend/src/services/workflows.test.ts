@@ -12,6 +12,8 @@ const {
   fetchWorkflowInstance,
   actWorkflowInstance,
   resubmitWorkflowInstance,
+  listWorkflowDefinitions,
+  submitWorkflowInstance,
 } = await import("./workflows");
 
 function meta(total = 0) {
@@ -114,5 +116,32 @@ describe("resubmitWorkflowInstance", () => {
     await resubmitWorkflowInstance("wi-1", 3);
 
     expect(mocks.post).toHaveBeenCalledWith("/workflows/instances/wi-1/resubmit", { version: 3 });
+  });
+});
+
+describe("listWorkflowDefinitions", () => {
+  it("GET /workflows/definitions tanpa parameter", async () => {
+    mocks.get.mockResolvedValue({ data: { success: true, data: [] } });
+
+    const result = await listWorkflowDefinitions();
+
+    expect(mocks.get).toHaveBeenCalledWith("/workflows/definitions");
+    expect(result).toEqual([]);
+  });
+});
+
+describe("submitWorkflowInstance", () => {
+  it("POST /workflows/submit dengan document_id dan workflow_definition_id", async () => {
+    mocks.post.mockResolvedValue({
+      data: { success: true, data: { id: "wi-1", status: "running", version: 0 } },
+    });
+
+    const result = await submitWorkflowInstance({ document_id: "d1", workflow_definition_id: "wd-1" });
+
+    expect(mocks.post).toHaveBeenCalledWith("/workflows/submit", {
+      document_id: "d1",
+      workflow_definition_id: "wd-1",
+    });
+    expect(result.version).toBe(0);
   });
 });
