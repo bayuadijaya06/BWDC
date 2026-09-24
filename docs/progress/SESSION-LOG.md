@@ -8,6 +8,15 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-074 — 2026-09-24 — Notification Center Frontend (T-088)
+
+- **Prompt user:** "Update detail dokumen pada aplikasi BWDCS, tambahkan yang belum dan lengkapi kategorinya. Kemudian lanjutkan sesuai CONTINUE.md" (bagian kedua: lanjutkan = T-088)
+- **Konstruksi:** `services/notifications.ts` (list + `is_read` boolean, mark satu/semua, `notificationTarget` hanya entitas berhalaman) + test 6; `queries/notifications.ts` (list, unread-count `limit: 1` + polling 60 dtk, dua mutasi invalidate); `components/layout/NotificationBell.tsx` (badge kontras-aman + dropdown region + penyaring + tandai semua + navigasi entitas) + test 8 termasuk axe; `Header.tsx` gate `notification:read`. Dua cacat lahir dan ditutup di sesi yang sama: peran `menu`/`menuitem` melanggar axe pada dropdown komposit (→ `region` + tombol biasa), dan badge `bg-accent text-paper-000` mengulang kelas kontras P-067 (→ `bg-text text-surface-raised`).
+- **Bukti:** `tsc` + `eslint` + `build` bersih, frontend **324 test / 32 berkas** (naik 14), `check-ledger OK 284`, `readme-facts OK 52`, `api-contract OK 127/56`, `BROKEN 0`, `antislop-refs OK`, `navigation OK`. Tanpa perubahan backend, kontrak, izin, atau skema.
+- **Status:** DONE. **Next:** `T-087` dashboard finalization (butuh Q-DASH + migrasi 012), `T-074` backlog analitik.
+
+---
+
 ## P-073 — 2026-09-24 — Document Detail Completion (T-091, permintaan user)
 
 - **Prompt user:** "Update detail dokumen pada aplikasi BWDCS, tambahkan yang belum dan lengkapi kategorinya. Kemudian lanjutkan sesuai CONTINUE.md"

@@ -4,6 +4,8 @@ import type { UserProfile } from "@/services/auth";
 import { useThemeStore, type ThemeChoice } from "@/store/theme";
 import { initials } from "@/utils/format";
 
+import { NotificationBell } from "./NotificationBell";
+
 /**
  * Header. Berisi wordmark teks (BWDCS tidak punya berkas logo, dan aset tidak
  * boleh dikarang: `DESIGN.md` §1), tombol menu untuk layar sempit, pengalih
@@ -184,6 +186,9 @@ export function Header({
 
       <div className="flex shrink-0 items-center gap-2">
         <ThemeToggle />
+        {profile && profile.permissions.includes("notification:read") ? (
+          <NotificationBell />
+        ) : null}
         {profile ? (
           <UserMenu
             profile={profile}

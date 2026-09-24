@@ -6,6 +6,24 @@
 
 ---
 
+## 2026-09-24 (sesi P-074)
+
+Notification Center frontend `T-088` DONE. Bell di header (badge + dropdown + penyaring + tandai semua + navigasi entitas), lapisan data `services/notifications.ts` + `queries/notifications.ts`. Frontend **310 → 324 test / 30 → 32 berkas**. Tanpa perubahan backend, kontrak, izin, atau skema.
+
+### Added
+
+- `frontend/src/services/notifications.ts` + `notifications.test.ts` (P-074)
+- `frontend/src/queries/notifications.ts` (P-074)
+- `frontend/src/components/layout/NotificationBell.tsx` + `NotificationBell.test.tsx` (P-074)
+
+### Changed
+
+- `frontend/src/components/layout/Header.tsx` — bell + gate `notification:read` (P-074)
+- `docs/progress/TRACEABILITY.md` — baris `UI-NOTIFICATIONS` (P-074)
+- `docs/progress/TASKS.md` — `T-088` DONE (P-074)
+
+---
+
 ## 2026-09-24 (sesi P-073)
 
 Document detail completion `T-091` DONE (permintaan user). Kategori: select di `CreateDocumentDialog` + `category_id` di `CreateDocumentInput` + tautan kategori di detail. Workflow: `listWorkflowDefinitions` + `submitWorkflowInstance` + hook, panel Workflow di `DocumentDetail` (submit/resubmit, gate izin), alasan basi diperbaiki. Frontend **302 → 310 test / 30 berkas**. Tanpa perubahan backend, kontrak, izin, atau skema.
