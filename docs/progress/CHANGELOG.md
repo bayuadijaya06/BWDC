@@ -6,6 +6,18 @@
 
 ---
 
+## 2026-09-24 (sesi P-072)
+
+Approvals Resubmit `T-086` DONE. Tombol `Resubmit for Review` di `ApprovalDetail.tsx` saat jeda revisi (`document_status = revision_required`): gate `workflow_instance:submit`, `version` instance dikirim, `409`→alert+refetch, `403`→pesan izin, sukses → status diperbarui. Lapisan data sudah ada; sesi ini wiring UI + 3 test. Frontend **300 → 302 test / 30 berkas**. Tanpa perubahan backend, kontrak, izin, atau skema.
+
+### Changed
+
+- `frontend/src/pages/Approvals/Detail.tsx` — tombol Resubmit + `handleResubmit` + pesan sukses (P-072)
+- `frontend/src/pages/Approvals/ApprovalDetail.test.tsx` — mock resubmit + 3 test baru, test jeda lama diperketat (P-072)
+- `docs/progress/TRACEABILITY.md` — `FR-WF-09` + `UI-APPROVALS` catatan UI resubmit (P-072)
+
+---
+
 ## 2026-09-24 (sesi P-071)
 
 Documents category filter `T-085` DONE. Backend: `GET /documents/categories` (`document_category:read`, semua role), `ListCategories` di repository/service/handler + test `TestDocumentListCategories`. Frontend: dropdown Kategori di `Documents/index.tsx` (setelah Project, sebelum rentang), `listDocumentCategories()` + `useDocumentCategories()`, `category_id` mengalir ke query. Test: "mengirim category_id dari penyaring kategori". Backend **283 → 284 test**, frontend **299 → 300 test**. Menutup Q-016 sisi kategori.

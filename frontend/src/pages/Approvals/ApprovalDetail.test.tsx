@@ -12,6 +12,7 @@ import { renderWithProviders } from "@/test/render";
 const mocks = vi.hoisted(() => ({
   fetchInstance: vi.fn(),
   actInstance: vi.fn(),
+  resubmitInstance: vi.fn(),
 }));
 
 vi.mock("@/services/workflows", async (importOriginal) => {
@@ -20,6 +21,7 @@ vi.mock("@/services/workflows", async (importOriginal) => {
     ...actual,
     fetchWorkflowInstance: mocks.fetchInstance,
     actWorkflowInstance: mocks.actInstance,
+    resubmitWorkflowInstance: mocks.resubmitInstance,
   };
 });
 
@@ -95,6 +97,51 @@ describe("halaman Approvals — detail", () => {
     expect(await screen.findByText(/Jeda revisi/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+    // Profil bawaan tidak punya workflow_instance:submit.
+    expect(screen.queryByRole("button", { name: "Resubmit for Review" })).toBeNull();
+    expect(screen.getByText(/Re-submit memerlukan izin workflow_instance:submit/)).toBeInTheDocument();
+  });
+
+  it("menampilkan tombol Resubmit for Review saat jeda revisi dan memiliki izin submit", async () => {
+    const user = userEvent.setup();
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: profileWith(["workflow_instance:read", "workflow_instance:submit"]),
+      error: null,
+      pending: false,
+    });
+    mocks.fetchInstance.mockResolvedValue({ ...baseInstance, document_status: "revision_required" });
+    mocks.resubmitInstance.mockResolvedValue({ ...baseInstance, document_status: "in_review", version: 4 });
+
+    renderWithProviders(<ApprovalDetailPage />, { route: "/approvals/wi-1", path: "/approvals/:id" });
+    const button = await screen.findByRole("button", { name: "Resubmit for Review" });
+
+    await user.click(button);
+
+    await waitFor(() =>
+      expect(mocks.resubmitInstance).toHaveBeenCalledWith("wi-1", 3),
+    );
+    expect(await screen.findByText("Re-submit berhasil - review dilanjutkan pada instance yang sama.")).toBeInTheDocument();
+  });
+
+  it("menampilkan alert 409 dan memuat ulang saat resubmit ditolak", async () => {
+    const user = userEvent.setup();
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: profileWith(["workflow_instance:read", "workflow_instance:submit"]),
+      error: null,
+      pending: false,
+    });
+    mocks.fetchInstance.mockResolvedValue({ ...baseInstance, document_status: "revision_required" });
+    mocks.resubmitInstance.mockRejectedValue(
+      new ApiError({ status: 409, code: "CONFLICT", message: "belum ada versi baru sejak revisi diminta" }),
+    );
+
+    renderWithProviders(<ApprovalDetailPage />, { route: "/approvals/wi-1", path: "/approvals/:id" });
+    await user.click(await screen.findByRole("button", { name: "Resubmit for Review" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("belum ada versi baru");
+    await waitFor(() => expect(mocks.fetchInstance).toHaveBeenCalledTimes(2));
   });
 
   it("menampilkan pesan selesai untuk instance yang sudah completed", async () => {

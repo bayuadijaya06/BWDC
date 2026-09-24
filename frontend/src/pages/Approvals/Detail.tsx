@@ -5,8 +5,9 @@ import { Button } from "@/components/common/Button";
 import { Field } from "@/components/common/Field";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useActWorkflowInstance, useWorkflowInstance } from "@/queries/workflows";
+import { useActWorkflowInstance, useResubmitWorkflowInstance, useWorkflowInstance } from "@/queries/workflows";
 import { ApiError } from "@/services/http";
+import { useAuthStore } from "@/store/auth";
 import { EMPTY_VALUE, formatTimestamp } from "@/utils/format";
 
 export function ApprovalDetailPage() {
@@ -14,6 +15,8 @@ export function ApprovalDetailPage() {
   const navigate = useNavigate();
   const query = useWorkflowInstance(id);
   const act = useActWorkflowInstance();
+  const resubmit = useResubmitWorkflowInstance();
+  const canResubmit = useAuthStore((state) => state.has("workflow_instance:submit"));
 
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +49,32 @@ export function ApprovalDetailPage() {
         }
       } else {
         setError(err instanceof Error ? err.message : "Gagal menjalankan aksi.");
+      }
+    }
+  }
+
+  async function handleResubmit() {
+    setError(null);
+    try {
+      await resubmit.mutateAsync({ id, version: instance?.version });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        // 409 berarti prasyarat re-submit tidak terpenuhi (belum ada versi
+        // baru, dokumen bukan revision_required, atau instance berubah) -
+        // pesannya menyebut sebabnya, lalu state dimuat ulang.
+        if (err.code === "WORKFLOW_CONFLICT" || err.code === "CONFLICT") {
+          const details = (err as unknown as { details?: unknown }).details;
+          setError(
+            `${err.message}${details ? ` - ${JSON.stringify(details)}` : ""}. Muat ulang untuk melihat keadaan terbaru.`,
+          );
+          void query.refetch();
+        } else if (err.status === 403) {
+          setError("Re-submit memerlukan izin workflow_instance:submit (Contributor ke atas).");
+        } else {
+          setError(err.message);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : "Gagal melakukan re-submit.");
       }
     }
   }
@@ -176,11 +205,33 @@ export function ApprovalDetailPage() {
         <div className="rounded-panel border border-line bg-surface-raised p-4">
           <h2 className="text-13 font-medium text-text">Aksi</h2>
           {isRevisionRequired ? (
-            <p role="status" className="mt-3 rounded-control border border-line bg-surface-sunken px-3 py-2 text-13 text-text">
-              Jeda revisi: dokumen berstatus <strong>revision_required</strong>. Tidak ada aksi yang dapat
-              dijalankan sampai owner mengunggah versi baru dan melakukan re-submit (`POST
-              /workflows/instances/:id/resubmit`) - instance tetap `running`.
-            </p>
+            <div className="mt-3 flex flex-col gap-3">
+              <p role="status" className="rounded-control border border-line bg-surface-sunken px-3 py-2 text-13 text-text">
+                Jeda revisi: dokumen berstatus <strong>revision_required</strong>. Tidak ada aksi yang dapat
+                dijalankan sampai versi baru diunggah dan review dilanjutkan - instance tetap `running`.
+              </p>
+              {canResubmit ? (
+                <div className="flex flex-col gap-2">
+                  <div>
+                    <Button
+                      variant="primary"
+                      pending={resubmit.isPending}
+                      onClick={() => void handleResubmit()}
+                    >
+                      Resubmit for Review
+                    </Button>
+                  </div>
+                  <p className="text-12 text-text-muted">
+                    Melanjutkan instance yang sama, bukan membuat yang baru. Server menolak bila belum ada
+                    versi baru sejak revisi diminta (`409`).
+                  </p>
+                </div>
+              ) : (
+                <p className="text-12 text-text-muted">
+                  Re-submit memerlukan izin workflow_instance:submit (Contributor ke atas).
+                </p>
+              )}
+            </div>
           ) : !isRunning ? (
             <p className="mt-3 text-13 text-text-muted">
               Instance sudah {instance.status}. Tidak ada aksi yang dapat dijalankan.
@@ -232,6 +283,11 @@ export function ApprovalDetailPage() {
           {act.isSuccess ? (
             <p role="status" className="mt-3 text-12 text-status-approved-ink">
               Aksi berhasil - instance diperbarui.
+            </p>
+          ) : null}
+          {resubmit.isSuccess ? (
+            <p role="status" className="mt-3 text-12 text-status-approved-ink">
+              Re-submit berhasil - review dilanjutkan pada instance yang sama.
             </p>
           ) : null}
         </div>

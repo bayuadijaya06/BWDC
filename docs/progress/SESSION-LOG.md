@@ -8,6 +8,15 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-072 — 2026-09-24 — Approvals Resubmit (T-086)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md"
+- **Konstruksi:** `ApprovalDetail.tsx` (`Detail.tsx`) — tombol `Resubmit for Review` di panel Aksi saat `document_status = revision_required`: gate `workflow_instance:submit` via `useAuthStore.has` (tanpa izin → kalimat izin), `handleResubmit` memanggil `useResubmitWorkflowInstance` dengan `version` instance, `409 WORKFLOW_CONFLICT/CONFLICT`→alert+refetch, `403`→pesan izin, sukses → status "Re-submit berhasil". Lapisan data tidak disentuh (`resubmitWorkflowInstance` + hook + test service sudah ada). Test: `ApprovalDetail.test.tsx` mock `resubmitWorkflowInstance` + 3 test (tombol+submit+version+sukses, 409+refetch, sembunyi tanpa izin; test jeda lama diperketat).
+- **Bukti:** `tsc --noEmit` + `eslint .` bersih, frontend **302 test / 30 berkas** (naik 2), `check-ledger OK 284`, `readme-facts OK 52`, `api-contract OK 127/56`, `BROKEN 0`, `antislop-refs OK`, `navigation OK`. Tanpa perubahan backend, kontrak, izin, atau skema.
+- **Status:** DONE. **Next:** `T-088` Notification Center frontend, `T-087` dashboard finalization (butuh Q-DASH + migrasi 012), `T-074` backlog.
+
+---
+
 ## P-071 — 2026-09-24 — Documents Category Filter (T-085)
 
 - **Prompt user:** "Lanjutkan sesuai CONTINUE.md"
