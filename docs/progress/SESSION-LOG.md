@@ -8,6 +8,142 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-090 — 2026-09-25 — Dukungan unggahan Office DOC/DOCX/PPT/PPTX (Q-008 Opsi A, T-101 DONE)
+
+- **Prompt user:** "oke next" → tiga keputusan diajukan sekaligus, dijawab: Q-025 Opsi A, Q-026 Opsi A, Q-008 Opsi A
+- **Konstruksi:** Q-025/Q-026 dicatat tanpa perubahan perilaku; Q-008: kontrak dulu (§4.2 + §4 + FSD + contoh accept), `DetectUploadMimeType` (ZIP→part OOXML, OLE→stream paling awal; zip-polos tetap ditolak), jendela 512 → 8192, test unit + service + HTTP (gigi: jendela 512 → kasus doc gagal), 1 luput (`ms-powerpoint`) ketahuan test.
+- **Bukti:** `make test` 9 paket **299 test**; `typecheck`/`lint`/`build` + `test:run` **353/34** bersih; enam pemeriksa hijau (`ledger OK 299`).
+- **Status:** DONE. Next: T-014 / arahan baru pemilik.
+
+---
+
+## P-089 — 2026-09-25 — Sapuan verifikasi menyeluruh (tanpa kode)
+
+- **Prompt user:** "lanjutkan sesuai dengan CONTINUE.md" → §4 butir 5 (tidak ada task yang bisa dikerjakan); arah dipilih pemilik: sapuan verifikasi
+- **Konstruksi:** verifikasi penuh — backend 296 (9 paket ok), frontend 353/34 + typecheck/lint/build, 6 pemeriksa hijau. Tanpa perubahan kode. Working tree tetap kotor (80 modified + 29 untracked sejak P-075); tidak di-commit (§8).
+- **Status:** DONE. Next: T-014 / Q-025 / Q-026 / Q-008 / arahan baru pemilik.
+
+---
+
+## P-088 — 2026-09-25 — Tutup C-063 di ledger audit + verifikasi menyeluruh (T-017 DONE)
+
+- **Prompt user:** "lanjutkan sesuai dengan CONTINUE.md"
+- **Konstruksi:** temuan inkonsistensi ledger — C-063 masih **OPEN** di tabel audit padahal P-070 sudah menutupnya via `GET /admin/users`. Diperbaiki: marker `audit-summary` diseragamkan ke `fixed=83 open=0` di 5 berkas, baris C-063 → **FIXED**, ringkasan §1 dan catatan historis diperbarui, T-017 → **DONE**.
+- **Bukti:** `check-ledger OK 296`, `BROKEN 0`, `readme-facts OK 46`, `api-contract OK`, `antislop-refs OK`, `navigation OK`; backend **296 test** 9 paket hijau; frontend **353 test / 34 berkas** hijau + typecheck/lint/build.
+- **Status:** DONE. Next: T-014 (opsional) / Q-025 / Q-026 / arahan baru pemilik.
+
+---
+
+## P-087 — 2026-09-25 — Sapuan verifikasi menyeluruh (tanpa kode)
+
+- **Prompt user:** "Lanjutkan sesuai continue.md" (Next action: tak ada task tak-blocked)
+- **Konstruksi:** verifikasi penuh — backend 296, frontend 353/34 + typecheck/lint/build, 6 pemeriksa hijau. Tanpa perubahan kode.
+- **Status:** DONE. Next: T-014 / T-017 / arahan baru pemilik.
+
+---
+
+## P-086 — 2026-09-25 — Refresh token ke cookie HttpOnly (T-098 DONE)
+
+- **Prompt user:** "Lanjutkan CONTINUE.md" (Next action: T-098)
+- **Konstruksi:** kontrak §2 + ADR-0033 + §2.2; cookie di 4 endpoint + CORS; klien tanpa storage + credentials + restore refresh-dulu; test tulis ulang dua sisi.
+- **Bukti:** `build`/`vet` + `make test` 9 paket hijau; `typecheck`/`lint`/`build` + `test:run` **353/34** bersih; probe cookie-jar `:8089` + Chrome (`verify-cookie OK`); enam pemeriksa hijau.
+- **Status:** DONE. Next: tidak ada task tak-blocked tersisa.
+
+---
+
+## P-085 — 2026-09-25 — Restart frontend + backend (binary segar)
+
+- **Prompt user:** "tolong kill dulu frontend dan backend server, dan restart ulang"
+- **Konstruksi:** kill vite basi + rebuild `backend/bin/bwdcs` in-place + kill `:8081` (respawn supervisor) + vite baru; wms + vite operator lain tak disentuh.
+- **Bukti:** `:8081` healthy, dashboard 13 KPI/11 chart + byDepartment, goose v13; `:5173` 200 + proxy 401.
+- **Status:** DONE. Next: T-098 cookie.
+
+---
+
+## P-084 — 2026-09-25 — Dashboard tahan backend lama + C-083 (T-100 DONE)
+
+- **Prompt user:** paste stack `TypeError: charts.byDepartment is undefined` + "perbaiki ini dulu"
+- **Konstruksi:** `normalizeDashboardData` (KPI→0, chart→[], funnel objek) dipakai `fetchDashboard`; test pass-through ditulis ulang + 2 regresi; C-083 FIXED + 83/82/1 di 4 berkas + T-100 DONE.
+- **Diagnosis:** `backend/bin/bwdcs` 23 Sep (pra-P-076) masih melayani `:8081` di bawah supervisor sesi lain — tak disentuh; pengguna perlu rebuild agar migrasi 012–013 hidup.
+- **Bukti:** `typecheck`/`lint`/`build` bersih; `test:run` **352/34** (+2); enam pemeriksa hijau.
+- **Status:** DONE. Next: T-098 cookie.
+
+---
+
+## P-083 — 2026-09-24 — Utas komentar UI di detail dokumen (T-097 DONE)
+
+- **Prompt user:** "Lanjutkan CONTINUE.md" ×3 (Next action: T-097; timeline belum ada → 1 pertanyaan cakupan, dijawab timeline penuh)
+- **Konstruksi:** service + query komentar; `CommentThread` (datar, penanda + fallback, balas/tulis/ubah/hapus, hapus dua langkah); kabel detail + Comments keluar pending.
+- **Bukti:** `typecheck`/`lint`/`build` bersih; `test:run` **350/34** (+11); Chrome nyata (`verify-thread OK`); `responsive-evidence OK`; enam pemeriksa hijau. Pelajaran: port dev bersama → verifikasi nyasar ke backend basi; pakai port unik.
+- **Status:** DONE. Next: T-098 cookie.
+
+---
+
+## P-082 — 2026-09-24 — Threading komentar backend + C-050 FIXED (T-096 DONE)
+
+- **Prompt user:** "Lanjutkan CONTINUE.md" (Next action: T-096)
+- **Konstruksi:** migrasi 013 + ADR-0032 + kontrak §7; `parent_id` model/repo/service/DTO/handler + validasi satu-pesan + audit; test pengunci → 3 service + 1 HTTP; FSD §7 + 41 §2.5/§4 + tabel ADR dilengkapi; C-050 FIXED + 81/1 di 4 berkas.
+- **Bukti:** `build`/`vet` + `make test` 9 paket **296 test** (+3 net); server nyata :8089 v13 (balas 201, asing 404-entitas, hapus → 0, cleanup 200); enam pemeriksa hijau. Tanpa frontend.
+- **Status:** DONE. Next: T-097 UI, lalu T-098 cookie.
+
+---
+
+## P-081 — 2026-09-24 — Jawaban 3 pertanyaan + label turunan (T-099 DONE)
+
+- **Prompt user:** "Kalau ada pertanyaan silakan sampaikan" (diajukan Q-019/Q-021/published via opsi; dijawab: threading datar, cookie HttpOnly, label turunan)
+- **Konstruksi:** jawaban terekam di Q-019/Q-021 + task T-096/097/098 TODO; `documentLifecycle()` + header detail + 7 test.
+- **Bukti:** `typecheck`/`lint`/`build` bersih; `test:run` **339/32** (+7); enam pemeriksa hijau. Tanpa backend (suite 293 tetap acuan).
+- **Status:** DONE. Next: T-096 threading backend, lalu T-097 UI, lalu T-098 cookie.
+
+---
+
+## P-080 — 2026-09-24 — Tutup T-050: kontribusi internal + klaim basi (T-050 DONE)
+
+- **Prompt user:** "Gas lanjutkan CONTINUE.md" (Next action: tak ada task tak-blocked → verifikasi menemukan T-050 masih BLOCKED; butir c ditanyakan, dijawab internal-saja)
+- **Konstruksi:** jawaban (c) di Q-023; README §12 callout + §12.6 ditulis ulang; T-050 → DONE + BLOCKED kosong; CONTINUE Blocker + STATE §4 Q-023 diperbarui.
+- **Bukti:** enam pemeriksa hijau; grep klaim basi tanpa hit di luar riwayat. Tanpa perubahan kode (suite P-079 tetap acuan).
+- **Status:** DONE. Next: Q-019 atau arahan baru pemilik.
+
+---
+
+## P-079 — 2026-09-24 — Filter owner dokumen + Milik saya (T-095 DONE)
+
+- **Prompt user:** "Lanjutkan CONTINUE.md" (Next action: filter owner butuh keputusan → diajukan 1 pertanyaan opsi, dijawab: `?owner_id=` + Milik saya)
+- **Konstruksi:** kontrak §4; `OwnerID` + `$10` (limit/offset $11/$12) + 422; tab kirim ID login + status baru; ekspektasi skrip ukur diperbarui (ditemukan via FAIL).
+- **Bukti:** `make test` 9 paket **293 test** (+1); `typecheck`/`lint`/`build` + `test:run` **332/32** bersih; server nyata :8089 (milik 6, asing 0, 422, cleanup 200); `responsive-evidence OK` + klik sungguhan (`Milik saya`, reasonShown true); enam pemeriksa hijau.
+- **Status:** DONE. Next: tidak ada task tak-blocked tersisa (Q-019, published/obsolete).
+
+---
+
+## P-078 — 2026-09-24 — Pengosongan tanggal/departemen + tipe updateProject (T-094 DONE)
+
+- **Prompt user:** "Oke lanjutkan sesuai CONTINUE.md" (Next action P-078; filter owner tetap blocked)
+- **Konstruksi:** kontrak null-eksplisit §3/§4; `bindJSON` simpan body mentah + `isExplicitNull`; `Clear*` service/repo/audit-null dokumen (3) + project (1); tombol Kosongkan ×3 di dialog; opsi kosong dept → null (tutup bug P-077); `updateProject: Promise<ProjectDetail>`.
+- **Bukti:** `build` bersih; `make test` 9 paket **292 test** (+2); `typecheck`/`lint`/`build` bersih; `test:run` **332/32** (+2); server nyata :8089 (clear → NULL di `psql`, data uji diarsipkan); `responsive-evidence OK`; enam pemeriksa hijau.
+- **Status:** DONE. Next: filter `owner` butuh keputusan pemilik (Q-016/Q-024).
+
+---
+
+## P-077 — 2026-09-24 — Tulis dokumen & departemen + lisensi (T-092/T-093 DONE)
+
+- **Prompt user:** "Lanjutkan sesuai antrean" (antrean P-076 §9)
+- **Konstruksi:** kontrak dulu (`42-API.md` §3 dept + §4 PATCH documents); `DocumentUpdate`/`Update()` + `DOCUMENT_UPDATED` + 422 per field + 409 arsip; `ProjectUpdate.DepartmentID` + `DepartmentExists` + model/select/scan/response dept; `NewDocumentResponse` kini membawa 3 tanggal (lubang P-076); `EditDocumentDialog.tsx` + tombol Ubah + pemilih dept di Metadata project; `LICENSE` Apache-2.0 + `package.json` + README §13 + amandemen 52.
+- **Cacat lahir dan ditutup di sesi yang sama:** komentar `Upload` tertimpa saat menyisipkan handler + baris ganda (dipulihkan); viewer fixture beda organisasi (pakai `createUserInOrg`); ekspektasi tanggal hardcoded +07:00 vs jsdom UTC (bandingkan lewat `toRfc3339FromLocal`); penyebutan `department:read` di baris `Izin:` memicu api-contract (tulis tanpa backtick).
+- **Bukti:** `build`/`vet` bersih; `make test` 9 paket **290 test** (+2); `typecheck`/`lint`/`build` bersih; `test:run` **330/32** (+5); server nyata :8089 (PATCH dept 200 `IT`, PATCH doc 200 + tanggal, 422×2, arsip 200, PATCH-sesudah-arsip 409, data uji diarsipkan); `responsive-evidence OK`; enam pemeriksa hijau.
+- **Status:** DONE. Next: pengosongan tanggal/departemen; tipe `updateProject` klien; filter owner (Q-016/Q-024).
+
+---
+
+## P-076 — 2026-09-24 — Analitik penuh: department, SLA, review/expiry, stage presisi (T-074 + T-087 DONE)
+
+- **Prompt user:** "Lanjutkan lagi proses yang terhenti" (lanjutan P-075 + jawaban Q-DASH-01..04 Opsi B/B/A/B dan Q-023 Opsi C Apache-2.0; ADR-0027..0031 sudah ACCEPTED)
+- **Konstruksi:** migrasi `012` (departments+seed, `sla_status`+trigger, 3 kolom documents, `workflow_stage_transitions`+trigger); repository `parseScopeIDs` + filter dept 14 kueri + `avgTimePerStage` presisi + 6 method baru; `GET /analytics/departments` (`report:read`, DTO id/nama/kode); bootstrap seed 4 dept; document select/scan 3 kolom; frontend types + `useDepartments` + dropdown dept di URL + 5 panel KPI + 3 chart (SLA, byDepartment, review trend) + metadata detail; kontrak `42-API.md` §13 hidup; `41-DATABASE.md` §2/§4; README/AGENTS angka.
+- **Cacat lahir dan ditutup di sesi yang sama:** (1) trigger memakai `NEW.workflow_definition_id` padahal kolomnya `workflow_def_id` — 6 test workflow gagal, diperbaiki + rollback/re-apply 012 di `bwdcs_test`; (2) goose memecah `;` di badan fungsi (C-031) — dibungkus `StatementBegin/End`; (3) binary basi `./bin/bwdcs` milik supervisor sesi lain menduduki 8081 — server sesi ini di 8089 + Vite proxy override, layanan lain tidak disentuh; (4) mock test `getByText("3")` ganda — nilai KPI dibuat unik; (5) edit JSX menimpa isi panel Activity Trend dua kali — dipulihkan + panel SLA disisipkan dengan benar.
+- **Bukti:** `go vet` + `make test` 9 paket **286 test** (+2); `typecheck`/`lint`/`build` bersih; `test:run` **325/32** (+1); server nyata :8089 (`/analytics/departments` 4 dept, dashboard 13 KPI/11 chart, filter 200 + bad-UUID 422); `psql` kolom ×3 + 4 dept; `responsive-evidence OK` (16 layout, 24 tema, laci); enam pemeriksa hijau (lihat STATE).
+- **Status:** DONE. Next: endpoint tulis + UI review/expiry/published & penugasan dept; berkas `LICENSE` Apache-2.0; amandemen status `52-*`.
+
+---
+
 ## P-075 — 2026-09-24 — Dashboard KPI +2 (T-087 IN PROGRESS)
 
 - **Prompt user:** "Lanjutkan T-087/T-074"

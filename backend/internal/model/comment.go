@@ -75,6 +75,11 @@ type Comment struct {
 	CreatedByID uuid.UUID
 	CreatedAt   time.Time
 
+	// ParentID menunjuk komentar induk pada entitas yang SAMA (ADR-0032,
+	// migrasi 013). NULL = komentar tingkat atas. Daftar dari server tetap
+	// kronologis datar; klien memetakan penanda "membalas…" sendiri.
+	ParentID *uuid.UUID
+
 	// CreatedByUsername adalah kolom turunan untuk tampilan "Author name"
 	// (`50-FSD.md` §7); bukan kolom tabel.
 	CreatedByUsername string

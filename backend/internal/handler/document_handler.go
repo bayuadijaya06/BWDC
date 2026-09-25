@@ -30,7 +30,10 @@ const (
 
 // magicByteWindow adalah jumlah byte yang dibaca untuk mendeteksi tipe berkas
 // berdasarkan isinya, bukan berdasarkan header dari klien (`44-SECURITY.md` §4.2).
-const magicByteWindow = 512
+// Ukurannya 8 KB, bukan 512 byte: nama part ZIP (OOXML) dan entri direktori
+// CFB (OLE) yang dipakai `service.DetectUploadMimeType` hidup sesudah byte
+// ke-512 (Q-008). Hanya memori intip sesaat; posisi pembaca dikembalikan.
+const magicByteWindow = 8192
 
 // DocumentHandler melayani bab Documents `42-API.md` §4.
 //
@@ -65,7 +68,7 @@ func (h *DocumentHandler) List(c *gin.Context) {
 
 	documents, total, err := h.documents.List(c.Request.Context(), actor, filter)
 	if err != nil {
-		h.writeServiceError(c, err)
+		h.writeServiceError(c, err, "")
 		return
 	}
 
@@ -96,7 +99,7 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 
 	detail, err := h.documents.Get(c.Request.Context(), actor, documentID)
 	if err != nil {
-		h.writeServiceError(c, err)
+		h.writeServiceError(c, err, "")
 		return
 	}
 
@@ -133,11 +136,78 @@ func (h *DocumentHandler) Create(c *gin.Context) {
 		Description: strings.TrimSpace(req.Description),
 	})
 	if err != nil {
-		h.writeServiceError(c, err)
+		h.writeServiceError(c, err, "")
 		return
 	}
 
 	h.writeDetail(c, detail, http.StatusCreated)
+}
+
+// Update melayani `PATCH /documents/:id` (aksi Edit `50-FSD.md` §4.3).
+//
+// Izin `document:update` diperiksa middleware (matriks `44-SECURITY.md` §3.1.2:
+// Administrator, Manager, Contributor — sama dengan arsip, dan sama dengan
+// aktor "Contributor+" di FSD). Bentuk response 200 sama dengan detail.
+func (h *DocumentHandler) Update(c *gin.Context) {
+	actor, ok := actorFrom(c)
+	if !ok {
+		return
+	}
+
+	documentID, ok := documentIDParam(c)
+	if !ok {
+		return
+	}
+
+	var req dto.UpdateDocumentRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+
+	fields, dates := validateUpdateDocument(req)
+	if len(fields) > 0 {
+		response.Validation(c, fields)
+		return
+	}
+
+	detail, err := h.documents.Update(c.Request.Context(), actor, documentID, service.UpdateDocumentInput{
+		Title:            trimmedOrNil(req.Title),
+		Description:      trimmedOrNil(req.Description),
+		CategoryID:       req.CategoryID,
+		ReviewDueAt:      dates.reviewDueAt,
+		ExpiryAt:         dates.expiryAt,
+		PublishedAt:      dates.publishedAt,
+		ClearReviewDueAt: isExplicitNull(c, "review_due_at"),
+		ClearExpiryAt:    isExplicitNull(c, "expiry_at"),
+		ClearPublishedAt: isExplicitNull(c, "published_at"),
+		Status:           req.Status,
+		ProjectID:        req.ProjectID,
+		OwnerID:          req.OwnerID,
+		DocumentNumber:   req.DocumentNumber,
+	})
+	if err != nil {
+		h.writeServiceError(c, err, immutableDocumentField(req))
+		return
+	}
+
+	h.writeDetail(c, detail, http.StatusOK)
+}
+
+// immutableDocumentField menamai field immutable pertama yang dikirim ke PATCH,
+// supaya `422` menyebut field-nya (`42-API.md` §4/§12), bukan `body` generik.
+func immutableDocumentField(req dto.UpdateDocumentRequest) string {
+	switch {
+	case req.Status != nil:
+		return "status"
+	case req.ProjectID != nil:
+		return "project_id"
+	case req.OwnerID != nil:
+		return "owner_id"
+	case req.DocumentNumber != nil:
+		return "document_number"
+	default:
+		return ""
+	}
 }
 
 // Upload melayani `POST /documents/:id/upload` (201, multipart/form-data).
@@ -194,7 +264,7 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 		Content:      file,
 	})
 	if err != nil {
-		h.writeServiceError(c, err)
+		h.writeServiceError(c, err, "")
 		return
 	}
 
@@ -215,7 +285,7 @@ func (h *DocumentHandler) Versions(c *gin.Context) {
 
 	versions, err := h.documents.Versions(c.Request.Context(), actor, documentID)
 	if err != nil {
-		h.writeServiceError(c, err)
+		h.writeServiceError(c, err, "")
 		return
 	}
 
@@ -243,7 +313,7 @@ func (h *DocumentHandler) Download(c *gin.Context) {
 
 	download, err := h.documents.Download(c.Request.Context(), actor, documentID, versionID)
 	if err != nil {
-		h.writeServiceError(c, err)
+		h.writeServiceError(c, err, "")
 		return
 	}
 	defer func() { _ = download.Content.Close() }()
@@ -274,7 +344,7 @@ func (h *DocumentHandler) Archive(c *gin.Context) {
 
 	detail, err := h.documents.Archive(c.Request.Context(), actor, documentID)
 	if err != nil {
-		h.writeServiceError(c, err)
+		h.writeServiceError(c, err, "")
 		return
 	}
 
@@ -298,7 +368,7 @@ func (h *DocumentHandler) writeDetail(c *gin.Context, detail *service.DocumentDe
 
 // writeServiceError memetakan error domain modul dokumen ke response
 // (`42-API.md` §4/§12).
-func (h *DocumentHandler) writeServiceError(c *gin.Context, err error) {
+func (h *DocumentHandler) writeServiceError(c *gin.Context, err error, field string) {
 	switch {
 	case errors.Is(err, service.ErrDocumentNotFound):
 		response.Fail(c, http.StatusNotFound, response.CodeNotFound, "document not found")
@@ -329,6 +399,21 @@ func (h *DocumentHandler) writeServiceError(c *gin.Context, err error) {
 		response.Validation(c, []response.FieldError{{
 			Field: "category_id",
 			Error: "kategori tidak ditemukan di organisasi ini",
+		}})
+
+	case errors.Is(err, service.ErrDocumentNoUpdateFields):
+		response.Validation(c, []response.FieldError{{
+			Field: "body",
+			Error: "tidak ada field yang dapat diperbarui",
+		}})
+
+	case errors.Is(err, service.ErrDocumentImmutableField):
+		if field == "" {
+			field = "status"
+		}
+		response.Validation(c, []response.FieldError{{
+			Field: field,
+			Error: "field tidak dapat diubah lewat endpoint ini",
 		}})
 
 	case errors.Is(err, service.ErrDocumentFileType):
@@ -452,6 +537,16 @@ func parseDocumentListQuery(c *gin.Context) (service.DocumentListFilter, []respo
 		}
 	}
 
+	var ownerID *uuid.UUID
+	if raw := strings.TrimSpace(c.Query("owner_id")); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			fields = append(fields, response.FieldError{Field: "owner_id", Error: "harus UUID yang sah"})
+		} else {
+			ownerID = &parsed
+		}
+	}
+
 	if len(fields) > 0 {
 		return service.DocumentListFilter{}, fields
 	}
@@ -463,6 +558,7 @@ func parseDocumentListQuery(c *gin.Context) (service.DocumentListFilter, []respo
 		UpdatedFrom: updatedFrom,
 		UpdatedTo:   updatedTo,
 		CategoryID:  categoryID,
+		OwnerID:     ownerID,
 		Page:        page,
 		Limit:       limit,
 	}, nil
@@ -505,8 +601,67 @@ func validateCreateDocument(req dto.CreateDocumentRequest) []response.FieldError
 	return fields
 }
 
+// documentDates adalah tiga tanggal `PATCH /documents/:id` yang sudah diurai.
+type documentDates struct {
+	reviewDueAt *time.Time
+	expiryAt    *time.Time
+	publishedAt *time.Time
+}
+
+// validateUpdateDocument memeriksa body `PATCH /documents/:id` (`42-API.md` §4).
+//
+// Tiga tanggal diterima sebagai string lalu diurai di sini supaya pesannya
+// menyebut field-nya (`42-API.md` §12), bukan galat JSON generik.
+func validateUpdateDocument(req dto.UpdateDocumentRequest) ([]response.FieldError, documentDates) {
+	var fields []response.FieldError
+	var dates documentDates
+
+	if req.Title != nil {
+		title := strings.TrimSpace(*req.Title)
+		switch {
+		case title == "":
+			fields = append(fields, response.FieldError{Field: "title", Error: "tidak boleh kosong"})
+		case utf8.RuneCountInString(title) > maxDocumentTitleLength:
+			fields = append(fields, response.FieldError{Field: "title", Error: "maksimal 255 karakter"})
+		}
+	}
+
+	if req.Description != nil && utf8.RuneCountInString(*req.Description) > maxDocumentDescriptionLength {
+		fields = append(fields, response.FieldError{Field: "description", Error: "maksimal 5000 karakter"})
+	}
+
+	if req.CategoryID != nil && *req.CategoryID == uuid.Nil {
+		fields = append(fields, response.FieldError{Field: "category_id", Error: "tidak boleh UUID kosong"})
+	}
+
+	parseDate := func(raw *string, field string, out **time.Time) {
+		if raw == nil {
+			return
+		}
+		if strings.TrimSpace(*raw) == "" {
+			fields = append(fields, response.FieldError{Field: field, Error: "tidak boleh kosong"})
+			return
+		}
+		parsed, err := parseRFC3339Query(*raw)
+		if err != nil {
+			fields = append(fields, response.FieldError{Field: field, Error: "harus waktu RFC 3339 yang sah"})
+			return
+		}
+		*out = &parsed
+	}
+	parseDate(req.ReviewDueAt, "review_due_at", &dates.reviewDueAt)
+	parseDate(req.ExpiryAt, "expiry_at", &dates.expiryAt)
+	parseDate(req.PublishedAt, "published_at", &dates.publishedAt)
+
+	return fields, dates
+}
+
 // detectUploadedMimeType membaca awal berkas untuk mengenali tipenya dari isi,
 // lalu mengembalikan pembaca ke posisi semula supaya isi berkas utuh.
+//
+// Deteksinya milik service (`service.DetectUploadMimeType`) supaya test
+// service menghitung MIME dari byte sungguhan lewat kode produksi yang sama,
+// bukan menulisnya dengan tangan (pelajaran C-072).
 func detectUploadedMimeType(file multipartSeeker) (string, error) {
 	header := make([]byte, magicByteWindow)
 	read, err := file.Read(header)
@@ -514,7 +669,7 @@ func detectUploadedMimeType(file multipartSeeker) (string, error) {
 		return "", err
 	}
 
-	detected := http.DetectContentType(header[:read])
+	detected := service.DetectUploadMimeType(header[:read])
 	if _, err := file.Seek(0, 0); err != nil {
 		return "", err
 	}

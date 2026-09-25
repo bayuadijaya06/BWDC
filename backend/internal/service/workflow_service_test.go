@@ -1440,3 +1440,94 @@ func mineDocumentNumber(t *testing.T, documentID uuid.UUID) string {
 	}
 	return number
 }
+
+// --- SLA & riwayat stage (ADR-0028, ADR-0030, migrasi 012) ---
+
+// TestWorkflowSlaStatusComputedOnComplete mengunci trigger
+// `trg_workflow_sla_status`: instance yang selesai sebelum deadline step
+// terakhir ber-`sla_status = 'on_time'`, dan yang masih `running` tetap NULL.
+func TestWorkflowSlaStatusComputedOnComplete(t *testing.T) {
+	fixture := newWorkflowFixture(t)
+	admin := fixture.createOrgAndUser("administrator")
+	reviewer := fixture.createUserInOrg(admin.OrgID, "manager")
+	contributor := fixture.createUserInOrg(admin.OrgID, "contributor")
+	ctx := context.Background()
+
+	projectID := fixture.createProject(contributor, "WF-SLA")
+	fixture.addMember(contributor, projectID, reviewer, model.ProjectRoleManager)
+	documentID := fixture.createDocument(contributor, projectID, "BRD SLA")
+	definition := fixture.newDefinition(admin, "Alur SLA",
+		workflowStep("Review", 1, "manager", intPtr(30)),
+	)
+
+	instance, _, err := fixture.workflows.Submit(ctx, actorOf(contributor), documentID, definition.ID)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	var sla *string
+	if err := testPool.QueryRow(ctx,
+		`SELECT sla_status FROM workflow_instances WHERE id = $1`, instance.ID).Scan(&sla); err != nil {
+		t.Fatalf("baca sla_status: %v", err)
+	}
+	if sla != nil {
+		t.Errorf("sla_status saat running = %q, diharapkan NULL", *sla)
+	}
+
+	if _, err := fixture.workflows.ExecuteAction(ctx, actorOf(reviewer), instance.ID,
+		service.WorkflowActionInput{Action: model.WorkflowActionApprove, Comment: "ok"}); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	if err := testPool.QueryRow(ctx,
+		`SELECT sla_status FROM workflow_instances WHERE id = $1`, instance.ID).Scan(&sla); err != nil {
+		t.Fatalf("baca sla_status sesudah complete: %v", err)
+	}
+	if sla == nil || *sla != "on_time" {
+		t.Errorf("sla_status sesudah complete = %v, diharapkan on_time (deadline 30 hari)", sla)
+	}
+}
+
+// TestWorkflowStageTransitionsInsertedOnTransition mengunci trigger
+// `trg_stage_transition_insert`: setiap perpindahan step menutup baris
+// sebelumnya (`completed_at` terisi) dan membuka baris step tujuan, sehingga
+// `AVG(completed_at - started_at)` adalah durasi presisi (ADR-0030).
+func TestWorkflowStageTransitionsInsertedOnTransition(t *testing.T) {
+	fixture := newWorkflowFixture(t)
+	admin := fixture.createOrgAndUser("administrator")
+	reviewer := fixture.createUserInOrg(admin.OrgID, "manager")
+	contributor := fixture.createUserInOrg(admin.OrgID, "contributor")
+	ctx := context.Background()
+
+	projectID := fixture.createProject(contributor, "WF-STAGE")
+	fixture.addMember(contributor, projectID, reviewer, model.ProjectRoleManager)
+	fixture.addMember(contributor, projectID, admin, model.ProjectRoleManager)
+	documentID := fixture.createDocument(contributor, projectID, "BRD Stage")
+	definition := fixture.newDefinition(admin, "Alur Stage",
+		workflowStep("Review", 1, "manager", intPtr(3)),
+		workflowStep("Final", 2, "manager", intPtr(3)),
+	)
+
+	instance, _, err := fixture.workflows.Submit(ctx, actorOf(contributor), documentID, definition.ID)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	if _, err := fixture.workflows.ExecuteAction(ctx, actorOf(reviewer), instance.ID,
+		service.WorkflowActionInput{Action: model.WorkflowActionApprove, Comment: "lanjut"}); err != nil {
+		t.Fatalf("approve step 1: %v", err)
+	}
+
+	var finished, open int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FILTER (WHERE completed_at IS NOT NULL), COUNT(*) FILTER (WHERE completed_at IS NULL)
+		 FROM workflow_stage_transitions WHERE workflow_instance_id = $1`, instance.ID).Scan(&finished, &open); err != nil {
+		t.Fatalf("hitung transisi stage: %v", err)
+	}
+	if finished < 1 {
+		t.Errorf("baris stage selesai = %d, diharapkan >= 1 (step 1 ditutup saat pindah)", finished)
+	}
+	if open != 1 {
+		t.Errorf("baris stage berjalan = %d, diharapkan tepat 1 (step 2)", open)
+	}
+}

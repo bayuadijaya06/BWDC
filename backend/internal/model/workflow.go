@@ -263,6 +263,8 @@ type WorkflowInstance struct {
 	Version             int        `json:"version"`
 	CreatedAt           time.Time  `json:"created_at"`
 	CompletedAt         *time.Time `json:"completed_at"`
+	// SLA status (ADR-0028): NULL selama running, diisi saat complete/rejected.
+	SlaStatus *string `json:"sla_status,omitempty"`
 
 	CurrentStepName string    `json:"current_step_name,omitempty"`
 	DocumentNumber  string    `json:"document_number,omitempty"`
@@ -290,4 +292,25 @@ type WorkflowAction struct {
 	Action        string    `json:"action"`
 	Comment       string    `json:"comment"`
 	CreatedAt     time.Time `json:"created_at"`
+}
+
+// WorkflowStageTransition adalah satu baris `workflow_stage_transitions` (ADR-0030).
+type WorkflowStageTransition struct {
+	ID                 uuid.UUID  `json:"id"`
+	WorkflowInstanceID uuid.UUID  `json:"workflow_instance_id"`
+	StepID             uuid.UUID  `json:"step_id"`
+	StageOrder         int        `json:"stage_order"`
+	StartedAt          time.Time  `json:"started_at"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+	Deadline           *time.Time `json:"deadline,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+}
+
+// Department adalah satu baris `departments` (ADR-0027).
+type Department struct {
+	ID             uuid.UUID `json:"id"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Code           string    `json:"code"`
+	CreatedAt      time.Time `json:"created_at"`
 }

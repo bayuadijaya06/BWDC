@@ -597,7 +597,7 @@ const clickTab = (navLabel, linkLabel) => `(() => {
   return true;
 })()`;
 
-/** Keadaan sesudah tab Milik saya dibuka: penandanya pindah, alasannya terbaca. */
+/** Keadaan sesudah tab Milik saya dibuka: penandanya pindah, status filter terbaca. */
 const measureDocumentsMine = `(() => {
   const nav = document.querySelector('nav[aria-label="Sub-halaman dokumen"]');
   return {
@@ -607,7 +607,7 @@ const measureDocumentsMine = `(() => {
           .map((a) => a.textContent.trim())
       : [],
     reasonShown: document.body.innerText.includes(
-      "Penyaring Milik saya belum dapat dijalankan",
+      "Menampilkan dokumen yang Anda buat",
     ),
   };
 })()`;
@@ -1113,7 +1113,7 @@ async function main() {
       await settle(cdp, layoutSignature);
       documentsMine = await cdp.evaluate(measureDocumentsMine);
       if (!documentsMine.reasonShown)
-        note('documents: alasan penyaring Milik saya belum dapat dijalankan tidak terbaca');
+        note('documents: status filter Milik saya tidak terbaca');
       if (documentsMine.current[0] !== "Milik saya")
         note(
           `documents: penanda tab tidak berpindah ke Milik saya (${documentsMine.current.join(", ") || "tidak ada"})`,

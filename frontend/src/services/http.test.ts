@@ -86,8 +86,14 @@ beforeEach(() => {
 });
 
 describe("interceptor http", () => {
+  it("mengirim kredensial cookie pada instance (ADR-0033)", () => {
+    // Tanpa ini peramban menahan cookie refresh dan sesi tidak pernah
+    // bertahan melewati umur access token.
+    expect(http.defaults.withCredentials).toBe(true);
+  });
+
   it("menyisipkan access token pada setiap permintaan", async () => {
-    session.setTokens("access-1", "refresh-1");
+    session.setTokens("access-1");
     handler = () => success({ ok: true });
 
     await http.get("/auth/me");
@@ -96,13 +102,15 @@ describe("interceptor http", () => {
     expect(calls[0]?.authorization).toBe("Bearer access-1");
   });
 
-  it("menukar refresh token lalu mengulang permintaan sekali saat 401 UNAUTHORIZED", async () => {
-    session.setTokens("access-lama", "refresh-1");
+  it("menukar refresh token lewat cookie lalu mengulang permintaan sekali saat 401 UNAUTHORIZED", async () => {
+    session.setTokens("access-lama");
     let protectedAttempts = 0;
 
     handler = (config) => {
       if (String(config.url).includes("/auth/refresh")) {
-        return success({ token: "access-baru", refresh_token: "refresh-2" });
+        // Cookie dilampirkan peramban; body kosong dan respons hanya access
+        // token (ADR-0033) — tidak ada refresh_token yang dibaca dari storage.
+        return success({ token: "access-baru" });
       }
       protectedAttempts += 1;
       if (protectedAttempts === 1) return failure(401, "UNAUTHORIZED");
@@ -114,7 +122,6 @@ describe("interceptor http", () => {
     expect(response.data.data).toEqual({ username: "admin" });
     expect(protectedAttempts).toBe(2);
     expect(session.getAccessToken()).toBe("access-baru");
-    expect(session.getRefreshToken()).toBe("refresh-2");
     // Penukaran refresh memakai instance axios polos, jadi ia sengaja **tidak**
     // membawa header Authorization; permintaan yang diulang membawa token baru.
     const refreshCall = calls.find((call) =>
@@ -129,7 +136,7 @@ describe("interceptor http", () => {
   });
 
   it("tidak menukar token berkali-kali saat banyak permintaan gagal bersamaan", async () => {
-    session.setTokens("access-lama", "refresh-1");
+    session.setTokens("access-lama");
     const attempts = new Map<string, number>();
     let refreshes = 0;
 
@@ -137,7 +144,7 @@ describe("interceptor http", () => {
       const url = String(config.url);
       if (url.includes("/auth/refresh")) {
         refreshes += 1;
-        return success({ token: "access-baru", refresh_token: "refresh-2" });
+        return success({ token: "access-baru" });
       }
       const attempt = (attempts.get(url) ?? 0) + 1;
       attempts.set(url, attempt);
@@ -152,11 +159,11 @@ describe("interceptor http", () => {
 
     expect(results).toHaveLength(3);
     expect(refreshes).toBe(1);
-    expect(session.getRefreshToken()).toBe("refresh-2");
+    expect(session.getAccessToken()).toBe("access-baru");
   });
 
   it("tidak mencoba refresh saat token sesi sudah dicabut (TOKEN_REVOKED)", async () => {
-    session.setTokens("access-1", "refresh-1");
+    session.setTokens("access-1");
     const listener = vi.fn();
     const stop = onSessionLost(listener);
     handler = () => failure(401, "TOKEN_REVOKED");
@@ -165,16 +172,21 @@ describe("interceptor http", () => {
 
     expect(listener).toHaveBeenCalledOnce();
     expect(session.getAccessToken()).toBeNull();
-    expect(session.getRefreshToken()).toBeNull();
     expect(
       calls.filter((call) => call.url.includes("/auth/refresh")),
     ).toHaveLength(0);
     stop();
   });
 
-  it("meneruskan 401 apa adanya bila tidak ada refresh token tersimpan", async () => {
+  it("mencoba refresh sekali lalu menyerah saat anonim tanpa cookie", async () => {
+    // Klien tidak dapat melihat cookie (HttpOnly), jadi tidak ada gerbang
+    // "punya refresh token" lagi: satu percobaan dilakukan, dan kegagalannya
+    // berarti anonim. Tanpa cookie, refresh 401 dan galat aslinya diteruskan.
     session.clear();
-    handler = () => failure(401, "UNAUTHORIZED");
+    handler = (config) =>
+      String(config.url).includes("/auth/refresh")
+        ? failure(401, "UNAUTHORIZED")
+        : failure(401, "UNAUTHORIZED");
 
     const error = await http.get("/auth/me").catch((caught: unknown) => caught);
 
@@ -182,7 +194,7 @@ describe("interceptor http", () => {
     expect((error as ApiError).status).toBe(401);
     expect(
       calls.filter((call) => call.url.includes("/auth/refresh")),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
   });
 
   it("membaca lama tunggu akun terkunci dari details 423 (ADR-0022)", async () => {

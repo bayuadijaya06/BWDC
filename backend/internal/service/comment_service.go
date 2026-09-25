@@ -51,6 +51,12 @@ var (
 
 	// ErrCommentNoUpdateFields → `422 VALIDATION_ERROR` (PATCH tanpa field).
 	ErrCommentNoUpdateFields = errors.New("tidak ada field yang dapat diperbarui")
+
+	// ErrCommentParentInvalid → `422 VALIDATION_ERROR` (field `parent_id`):
+	// bukan UUID kosong tidak diperiksa di sini (handler), tetapi induk yang
+	// tidak ada **atau** berada pada entitas yang berbeda. Keduanya memakai satu
+	// pesan supaya keberadaan komentar di entitas lain tidak dapat dipetakan.
+	ErrCommentParentInvalid = errors.New("komentar induk tidak ditemukan pada entitas ini")
 )
 
 // CreateCommentInput adalah input `POST /comments` yang sudah dibaca handler.
@@ -61,6 +67,9 @@ type CreateCommentInput struct {
 	EntityType string
 	EntityID   uuid.UUID
 	Content    string
+	// ParentID opsional (balasan, ADR-0032): `nil` berarti komentar tingkat
+	// atas. Wajib menunjuk komentar pada entitas yang SAMA.
+	ParentID *uuid.UUID
 }
 
 // UpdateCommentInput adalah input `PATCH /comments/:id`. `Content` bernilai
@@ -158,7 +167,9 @@ func (s *CommentService) Get(ctx context.Context, actor Actor, commentID uuid.UU
 // berada di dalam cakupan project aktor: `comment:create` dimiliki keempat role,
 // jadi izin tidak mempersempit apa pun dan cakupan inilah satu-satunya pembatas.
 // Kata "komentar pada entitas yang boleh dibaca" (§3.1.3) menutup komentar pada
-// entitas di luar cakupan maupun balasan pada komentar (yang bukan entitas).
+// entitas di luar cakupan. Balasan ditulis lewat `parent_id` pada entitas yang
+// sama (ADR-0032) — bukan lewat `entity_type = comment`, karena komentar bukan
+// entitas yang dapat dikomentari.
 func (s *CommentService) Create(ctx context.Context, actor Actor, input CreateCommentInput) (*model.Comment, error) {
 	entityType := model.NormalizeCommentEntityType(input.EntityType)
 	if !model.IsCommentEntityType(entityType) {
@@ -181,11 +192,24 @@ func (s *CommentService) Create(ctx context.Context, actor Actor, input CreateCo
 		return nil, err
 	}
 
+	// Balasan wajib menunjuk komentar yang ada **pada entitas yang sama**
+	// (ADR-0032). Induk pada entitas lain — atau yang tidak ada — dijawab sama,
+	// supaya UUID komentar tidak dapat dipakai memetakan entitas lain.
+	if input.ParentID != nil {
+		if _, err := s.comments.FindOnEntity(ctx, *input.ParentID, entityType, input.EntityID); err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, ErrCommentParentInvalid
+			}
+			return nil, err
+		}
+	}
+
 	comment := &model.Comment{
 		EntityID:    input.EntityID,
 		EntityType:  entityType,
 		Content:     content,
 		CreatedByID: actor.ID,
+		ParentID:    input.ParentID,
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -198,13 +222,17 @@ func (s *CommentService) Create(ctx context.Context, actor Actor, input CreateCo
 		return nil, err
 	}
 
+	metadata := map[string]any{
+		"entity_type":  entityType,
+		"entity_id":    input.EntityID.String(),
+		"project_id":   projectID.String(),
+		"content_size": len([]rune(content)),
+	}
+	if input.ParentID != nil {
+		metadata["parent_id"] = input.ParentID.String()
+	}
 	if err := NewAuditService(tx).Log(ctx, actor.ID, ActionCommentCreated, EntityComment, comment.ID.String(),
-		"Komentar ditambahkan pada "+entityType, map[string]any{
-			"entity_type":  entityType,
-			"entity_id":    input.EntityID.String(),
-			"project_id":   projectID.String(),
-			"content_size": len([]rune(content)),
-		}); err != nil {
+		"Komentar ditambahkan pada "+entityType, metadata); err != nil {
 		return nil, err
 	}
 
@@ -214,7 +242,8 @@ func (s *CommentService) Create(ctx context.Context, actor Actor, input CreateCo
 
 	s.logger.Info("komentar dibuat",
 		"comment_id", comment.ID.String(), "entity_type", entityType,
-		"entity_id", input.EntityID.String(), "actor_id", actor.ID.String())
+		"entity_id", input.EntityID.String(), "actor_id", actor.ID.String(),
+	)
 
 	// Komentar yang baru saja ditulis dibaca kembali lewat jalur kepemilikan,
 	// bukan jalur bercakupan: barisnya pasti ada dan pasti milik aktor, sehingga
@@ -285,12 +314,22 @@ func (s *CommentService) Update(ctx context.Context, actor Actor, commentID uuid
 // (ADR-0019) — karena komentar adalah catatan diskusi, bukan artefak yang
 // dirujuk dokumen lain. Jejak penghapusannya tetap ada di `audit_logs` yang
 // append-only (`44-SECURITY.md` §6).
+//
+// Menghapus induk menghapus balasannya lewat `ON DELETE CASCADE` (ADR-0032).
+// Jumlah balasan yang ikut terhapus dihitung lebih dulu dan dicatat di
+// metadata audit induknya (`deleted_reply_count`); balasan itu sendiri tidak
+// mendapat entri masing-masing.
 func (s *CommentService) Delete(ctx context.Context, actor Actor, commentID uuid.UUID) error {
 	current, err := s.comments.FindOwn(ctx, commentID, actor.ID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrCommentNotFound
 		}
+		return err
+	}
+
+	replies, err := s.comments.CountReplies(ctx, commentID)
+	if err != nil {
 		return err
 	}
 
@@ -310,9 +349,10 @@ func (s *CommentService) Delete(ctx context.Context, actor Actor, commentID uuid
 
 	if err := NewAuditService(tx).Log(ctx, actor.ID, ActionCommentDeleted, EntityComment, commentID.String(),
 		"Komentar pada "+current.EntityType+" dihapus", map[string]any{
-			"entity_type":  current.EntityType,
-			"entity_id":    current.EntityID.String(),
-			"content_size": len([]rune(current.Content)),
+			"entity_type":         current.EntityType,
+			"entity_id":           current.EntityID.String(),
+			"content_size":        len([]rune(current.Content)),
+			"deleted_reply_count": replies,
 		}); err != nil {
 		return err
 	}

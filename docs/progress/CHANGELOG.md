@@ -6,6 +6,367 @@
 
 ---
 
+## 2026-09-25 (sesi P-090)
+
+Q-025/Q-026/Q-008 dijawab pemilik (Opsi A semua) dan Q-008 diimplementasikan: `.doc/.docx/.ppt/.pptx` hidup (`T-101` DONE). Kontrak (`44-SECURITY.md` §4.2 + `42-API.md` §4 + `50-FSD.md` §4.2) → `DetectUploadMimeType` + jendela 8 KB → test unit/service/HTTP/frontend → backend 299, frontend 353/34, 6 pemeriksa hijau.
+
+### Added
+
+- `docs/progress/prompts/P-090-2026-09-25-dukungan-office-q008.md` — log sesi (P-090)
+
+### Changed
+
+- `docs/progress/OPEN-QUESTIONS.md` — Q-025/Q-026/Q-008 → RESOLVED (P-090)
+- `docs/design/44-SECURITY.md` — §4.2 sketsa + butir 2a pemurnian Office (P-090)
+- `docs/design/42-API.md` — §4 daftar MIME +3, ekstensi +4 (P-090)
+- `docs/design/50-FSD.md` — §4.2 tipe didukung +DOC/DOCX/PPT/PPTX (P-090)
+- `docs/design/51-UX.md` — contoh `accept` diselaraskan (P-090)
+- `docs/design/12-DEVELOPMENT-WORKFLOW.md` — butir 8 → Selesai (P-090)
+- `backend/internal/service/document_service_upload.go` — `DetectUploadMimeType`, map +3 MIME/+4 ext (P-090)
+- `backend/internal/service/document_service_test.go` — 2 test Office baru (P-090)
+- `backend/internal/handler/document_handler.go` — jendela 8192 + detektor service (P-090)
+- `backend/internal/handler/document_handler_test.go` — `TestUploadAcceptsOfficeTypesHTTP` (P-090)
+- `frontend/src/services/documents.ts` — `ALLOWED_UPLOAD_EXTENSIONS` +4 (P-090)
+- `frontend/src/services/documents.test.ts` — test ekstensi kontrak +4 nama (P-090)
+- `docs/progress/TASKS.md` — `T-101` baru → DONE (P-090)
+- `docs/progress/TRACEABILITY.md` — FR-DOC-01 bukti Q-008 (P-090)
+- `docs/progress/STATE.md` — hitungan suite 296 → 299 + header P-090
+
+---
+
+## 2026-09-25 (sesi P-089)
+
+Sapuan verifikasi menyeluruh tanpa perubahan kode (arah dipilih pemilik; T-014 daemon mati, Q-025/Q-026/Q-008 menunggu pemilik). Backend 296 (9 paket ok), frontend 353/34 + typecheck/lint/build, 6 pemeriksa hijau.
+
+### Added
+
+- `docs/progress/prompts/P-089-2026-09-25-sapuan-verifikasi.md` — log sesi (P-089)
+
+---
+
+## 2026-09-25 (sesi P-088)
+
+Tutup **C-063** di ledger audit (`OPEN` → `FIXED`, P-070 sudah menghidupkan `GET /admin/users`), tandai **T-017 DONE**, seragamkan marker `audit-summary` di 5 berkas (83/83/0/0). Tanpa perubahan kode. Backend 296, frontend 353/34, 6 pemeriksa hijau.
+
+### Added
+
+- `docs/progress/prompts/P-088-2026-09-25-c063-ledger-fix.md` — log sesi (P-088)
+
+### Changed
+
+- `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` — marker `fixed=83 open=0`; baris C-063 **OPEN** → **FIXED**; ringkasan §1 dan catatan historis diselaraskan
+- `docs/progress/audits/README.md` — marker `fixed=83 open=0`; baris ringkasan `82 FIXED / 1 OPEN` → `83 FIXED / 0 OPEN`
+- `AGENTS.md` — marker `fixed=83 open=0`; prosa audit "1 OPEN (C-063)" → "0 OPEN; C-063 FIXED pada P-070"
+- `docs/progress/STATE.md` — marker `fixed=83 open=0`; blok "Audit terbuka" diselaraskan
+- `CONTINUE.md` — marker `fixed=83 open=0`; blok "Audit terbuka" dan "Next action" diselaraskan
+- `docs/progress/TASKS.md` — T-017 status → **DONE**
+
+---
+
+## 2026-09-25 (sesi P-087)
+
+Sapuan verifikasi menyeluruh tanpa perubahan kode (tak ada task tak-blocked: T-014 butuh Docker yang tak ada, T-017 menunggu produk). Backend 296, frontend 353/34, 6 pemeriksa hijau.
+
+### Added
+
+- `docs/progress/prompts/P-087-2026-09-25-sapuan-verifikasi.md` — log sesi (P-087)
+
+---
+
+## 2026-09-25 (sesi P-086)
+
+`T-098` DONE: refresh token ke cookie HttpOnly (ADR-0033, amandemen transpor ADR-0023). Backend hijau, frontend **353 test / 34 berkas**. Probe cookie-jar + Chrome live PASS.
+
+### Added
+
+- `docs/adr/0033-refresh-token-cookie-httponly.md` — amandemen transpor (P-086)
+- `docs/progress/prompts/P-086-2026-09-25-refresh-cookie-httponly.md` — log sesi (P-086)
+
+### Changed
+
+- `docs/design/42-API.md` — §2 cookie + CSRF note (P-086)
+- `docs/design/44-SECURITY.md` — §2.2 transpor cookie (P-086)
+- `docs/adr/README.md` — baris 0033 (P-086)
+- `backend/internal/handler/auth_handler.go` — konstanta + helper cookie, 4 endpoint, flag Secure (P-086)
+- `backend/internal/dto/auth_dto.go` — body tanpa refresh; hapus `RefreshRequest` (P-086)
+- `backend/internal/service/auth_service.go` — `PasswordChanged.RefreshToken` (P-086)
+- `backend/internal/middleware/cors.go` — `Allow-Credentials` dev (P-086)
+- `backend/cmd/server/main.go` — teruskan `IsProduction` (P-086)
+- `backend/internal/handler/main_test.go` — wiring + struct tanpa refresh body (P-086)
+- `backend/internal/handler/auth_handler_test.go` — helper cookie + tulis ulang 4 test (P-086)
+- `frontend/src/services/session.ts` — tanpa storage, ditulis ulang (P-086)
+- `frontend/src/services/http.ts` — credentials + refresh cookie + coba-sekali (P-086)
+- `frontend/src/services/auth.ts` — tipe tanpa refresh + `refreshSession()` (P-086)
+- `frontend/src/store/auth.ts` — restore/signIn cookie (P-086)
+- `frontend/src/services/http.test.ts` — tulis ulang 5 test + kredensial (P-086)
+- `frontend/src/store/auth.test.ts` — tulis ulang 4 test (P-086)
+- `frontend/src/pages/Login/Login.test.tsx` — tipe tanpa refresh (P-086)
+- `docs/progress/TASKS.md` — `T-098` DONE (P-086)
+- `docs/progress/TRACEABILITY.md` — FR-AUTH-02 bukti P-086 (P-086)
+- `docs/progress/OPEN-QUESTIONS.md` — catatan dikerjakan P-086 (P-086)
+
+---
+
+## 2026-09-25 (sesi P-084)
+
+`T-100` DONE + **C-083 FIXED** (83/82/1): Dashboard tahan backend lama via `normalizeDashboardData`. Akar: binary `:8081` 23 Sep pra-P-076 (milik sesi lain, tak disentuh). Frontend **352 test / 34 berkas** (+2).
+
+### Added
+
+- `docs/progress/prompts/P-084-2026-09-25-dashboard-normalisasi-respons.md` — log sesi (P-084)
+
+### Changed
+
+- `frontend/src/services/analytics.ts` — `normalizeDashboardData` + pakai (P-084)
+- `frontend/src/services/analytics.test.ts` — tulis ulang + regresi warisan (P-084)
+- `frontend/src/pages/Dashboard/Dashboard.test.tsx` — regresi halaman payload lama (P-084)
+- `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` — baris C-083 + 83/82/1 (P-084)
+- `docs/progress/audits/README.md` — marker + prosa 83/82/1 (P-084)
+- `AGENTS.md` — marker + angka 83/82/1 (P-084)
+- `CONTINUE.md` — marker + angka + §0 P-084 (P-084)
+- `docs/progress/STATE.md` — marker + angka + §0 P-084 (P-084)
+- `docs/progress/TASKS.md` — `T-100` DONE (P-084)
+- `docs/progress/TRACEABILITY.md` — FR-DASH-02 bukti P-084 (P-084)
+
+---
+
+## 2026-09-24 (sesi P-083)
+
+`T-097` DONE: utas komentar di detail dokumen (keputusan cakupan: timeline minimal penuh). Frontend **350 test / 34 berkas** (+11). Tanpa backend.
+
+### Added
+
+- `frontend/src/services/comments.ts` — tipe + CRUD + validasi (P-083)
+- `frontend/src/services/comments.test.ts` — 5 test (P-083)
+- `frontend/src/queries/comments.ts` — kunci + list + 3 mutasi (P-083)
+- `frontend/src/pages/Documents/CommentThread.tsx` — utas + penanda + balas/ubah/hapus (P-083)
+- `frontend/src/pages/Documents/CommentThread.test.tsx` — 6 test incl. axe (P-083)
+- `docs/progress/prompts/P-083-2026-09-24-utas-komentar-ui.md` — log sesi (P-083)
+
+### Changed
+
+- `frontend/src/pages/Documents/DocumentDetail.tsx` — kabel thread, Comments keluar pending (P-083)
+- `frontend/src/pages/Documents/DocumentDetail.test.tsx` — mock komentar + 1 test (P-083)
+- `docs/progress/TASKS.md` — `T-097` DONE (P-083)
+- `docs/progress/TRACEABILITY.md` — FR-CMT-01/03 bukti P-083 (P-083)
+
+---
+
+## 2026-09-24 (sesi P-082)
+
+`T-096` DONE + **C-050 FIXED** (81/1): threading datar — migrasi 013, ADR-0032, API berbalas, test pengunci diganti. Backend **296 test** (+3 net). Tanpa frontend.
+
+### Added
+
+- `backend/internal/migration/013_comment_parent_id.sql` — kolom + indeks (P-082)
+- `docs/adr/0032-komentar-threaded-parent-id-datar.md` — keputusan (P-082)
+- `docs/progress/prompts/P-082-2026-09-24-komentar-threaded-parent-id.md` — log sesi (P-082)
+
+### Changed
+
+- `backend/internal/model/comment.go` — `ParentID` (P-082)
+- `backend/internal/repository/comment_repository.go` — select/scan/create + `FindOnEntity` + `CountReplies` (P-082)
+- `backend/internal/service/comment_service.go` — input + validasi + audit + hapus hitung (P-082)
+- `backend/internal/dto/comment_dto.go` — request/response/mapping (P-082)
+- `backend/internal/handler/comment_handler.go` — teruskan + nil-UUID + mapping 422 (P-082)
+- `backend/internal/service/comment_service_test.go` — 3 test ganti pengunci (P-082)
+- `backend/internal/handler/comment_handler_test.go` — `TestCommentReplyOverHTTP` (P-082)
+- `docs/design/42-API.md` — §7 POST/GET/DELETE threading (P-082)
+- `docs/design/50-FSD.md` — §7 didukung ADR-0032 (P-082)
+- `docs/design/41-DATABASE.md` — §2.5 kolom + §4 baris 013 (P-082)
+- `docs/adr/README.md` — tabel dilengkapi 0027-0032 (P-082)
+- `docs/progress/audits/AUDIT-001-2026-09-17-kontradiksi-dokumen.md` — C-050 FIXED + 81/1 (P-082)
+- `README.md` — migrasi 001–013 (P-082)
+- `AGENTS.md` — marker + prosa 81/1, threading ada, skema 001–013 (P-082)
+- `CONTINUE.md` — marker + §0 P-082 (P-082)
+- `docs/progress/STATE.md` — marker + Q-019 + §0 P-082 (P-082)
+- `docs/progress/TASKS.md` — `T-096` DONE (P-082)
+- `docs/progress/TRACEABILITY.md` — FR-CMT-01 bukti P-082 (P-082)
+
+---
+
+## 2026-09-24 (sesi P-081)
+
+Jawaban pemilik: threading implementasi datar (Q-019), cookie HttpOnly (Q-021), label turunan UI (published). `T-099` DONE; `T-096`/`T-097`/`T-098` TODO baru. Frontend **339 test / 32 berkas** (+7). Tanpa perubahan backend.
+
+### Added
+
+- `docs/progress/prompts/P-081-2026-09-24-label-published-obsolete.md` — log sesi (P-081)
+
+### Changed
+
+- `frontend/src/types/status.ts` — `documentLifecycle()` (P-081)
+- `frontend/src/types/status.test.ts` — 6 test turunan (P-081)
+- `frontend/src/pages/Documents/DocumentDetail.tsx` — header override + fallback (P-081)
+- `frontend/src/pages/Documents/DocumentDetail.test.tsx` — 1 test header (P-081)
+- `docs/progress/OPEN-QUESTIONS.md` — jawaban Q-019/Q-021 (P-081)
+- `docs/progress/TASKS.md` — T-096/097/098 TODO, T-099 DONE (P-081)
+
+---
+
+## 2026-09-24 (sesi P-080)
+
+`T-050` DONE: Q-023 butir (c) diputuskan pemilik (internal saja) — Q-023 tertutup penuh, papan BLOCKED kosong. Klaim basi (T-050 BLOCKED, lisensi menunda) dibersihkan. Tanpa perubahan kode.
+
+### Added
+
+- `docs/progress/prompts/P-080-2026-09-24-tutup-t050-kontribusi-internal.md` — log sesi (P-080)
+
+### Changed
+
+- `docs/progress/OPEN-QUESTIONS.md` — jawaban butir (c) P-080 (P-080)
+- `README.md` — §12 callout + §12.6 internal (P-080)
+- `docs/progress/TASKS.md` — `T-050` DONE, BLOCKED kosong (P-080)
+- `docs/progress/STATE.md` — §4 Q-023 RESOLVED penuh (P-080)
+- `CONTINUE.md` — Blocker + §0 P-080 (P-080)
+
+---
+
+## 2026-09-24 (sesi P-079)
+
+`T-095` DONE: filter `owner` dokumen — `?owner_id=` server + tab `Milik saya` dikabelkan (keputusan pemilik: tanpa endpoint daftar pengguna, tanpa dropdown). FR-DOC-07 DONE penuh. Backend **293 test** (+1), frontend **332 test / 32 berkas** (2 ditulis ulang).
+
+### Added
+
+- `docs/progress/prompts/P-079-2026-09-24-filter-owner-milik-saya.md` — log sesi (P-079)
+
+### Changed
+
+- `docs/design/42-API.md` — §4 `?owner_id=` (P-079)
+- `backend/internal/repository/document_repository.go` — `OwnerID`, `$10`, renumber $11/$12 (P-079)
+- `backend/internal/service/document_service.go` — `OwnerID` filter + teruskan (P-079)
+- `backend/internal/handler/document_handler.go` — parse `owner_id` 422 (P-079)
+- `backend/internal/handler/document_handler_test.go` — `TestDocumentListOwnerFilter` (P-079)
+- `frontend/src/services/documents.ts` — `owner_id?` + params (P-079)
+- `frontend/src/pages/Documents/index.tsx` — kabel Milik saya, status baru (P-079)
+- `frontend/src/pages/Documents/Documents.test.tsx` — 2 test ditulis ulang (P-079)
+- `scripts/responsive-evidence.mjs` — ekspektasi status Milik saya baru (P-079)
+- `docs/progress/TASKS.md` — `T-095` DONE (P-079)
+- `docs/progress/TRACEABILITY.md` — FR-DOC-07 PARTIAL → DONE (P-079)
+- `docs/progress/OPEN-QUESTIONS.md` — catatan P-079 di Q-016 (P-079)
+
+---
+
+## 2026-09-24 (sesi P-078)
+
+`T-094` DONE: pengosongan tanggal/departemen (`null` eksplisit → NULL) + perbaiki tipe `updateProject` klien. Kontrak `42-API.md` §3/§4. Backend **292 test** (+2), frontend **332 test / 32 berkas** (+2). Filter `owner` tetap menunggu Q-016/Q-024.
+
+### Added
+
+- `docs/progress/prompts/P-078-2026-09-24-pengosongan-tanggal-departemen.md` — log sesi (P-078)
+
+### Changed
+
+- `docs/design/42-API.md` — §3/§4 null eksplisit mengosongkan (P-078)
+- `backend/internal/handler/project_handler.go` — body direstore + disimpan, `isExplicitNull` (P-078)
+- `backend/internal/handler/document_handler.go` — teruskan 3 Clear flags (P-078)
+- `backend/internal/service/document_service.go` — `Clear*` input + repo + audit null (P-078)
+- `backend/internal/repository/document_repository.go` — `Clear*` + SET NULL (P-078)
+- `backend/internal/service/project_service.go` — `ClearDepartmentID` + repo + audit null (P-078)
+- `backend/internal/repository/project_repository.go` — `ClearDepartmentID` + SET NULL (P-078)
+- `backend/internal/handler/document_handler_test.go` — `TestUpdateDocumentClearsDates` (P-078)
+- `backend/internal/handler/project_handler_test.go` — `TestPatchProjectClearsDepartment` (P-078)
+- `frontend/src/pages/Documents/EditDocumentDialog.tsx` — tombol Kosongkan ×3 (P-078)
+- `frontend/src/pages/Projects/ProjectDetail.tsx` — opsi kosong → null (P-078)
+- `frontend/src/services/documents.ts` — `string | null` di input (P-078)
+- `frontend/src/services/projects.ts` — `department_id?: string | null`, tipe `ProjectDetail` (P-078)
+- `frontend/src/pages/Documents/DocumentDetail.test.tsx` — test Kosongkan (P-078)
+- `frontend/src/pages/Projects/ProjectDetail.test.tsx` — test unassign (P-078)
+- `docs/progress/TASKS.md` — `T-094` DONE (P-078)
+- `docs/progress/TRACEABILITY.md` — FR-DOC-02, FR-DASH-04 bukti P-078 (P-078)
+
+---
+
+## 2026-09-24 (sesi P-077)
+
+Sisa antrean P-076: `T-092` (`PATCH /documents/:id` + dialog Ubah) + `T-093` (penugasan dept) DONE; `LICENSE` Apache-2.0 tertulis (Q-023 tertutup penuh); `52-*` diamandemen. Kontrak dulu (`42-API.md` §3/§4). Lubang P-076 ditutup: `NewDocumentResponse` kini membawa 3 tanggal. Backend **290 test** (+2), frontend **330 test / 32 berkas** (+5), route **54** (document 9), endpoint **58** (Izin 51).
+
+### Added
+
+- `LICENSE` — teks Apache-2.0 + `Copyright 2026 BSA` (P-077)
+- `frontend/src/pages/Documents/EditDocumentDialog.tsx` — dialog Ubah (P-077)
+- `docs/progress/prompts/P-077-2026-09-24-tulis-dokumen-departemen-lisensi.md` — log sesi (P-077)
+
+### Changed
+
+- `docs/design/42-API.md` — §3 `department_id` + §4 `PATCH /documents/:id` (P-077)
+- `backend/internal/dto/document_dto.go` — `UpdateDocumentRequest`, 3 tanggal di response + mapping (P-077)
+- `backend/internal/service/document_service.go` — `UpdateDocumentInput`, `Update()`, 2 error, `DOCUMENT_UPDATED` (P-077)
+- `backend/internal/repository/document_repository.go` — `DocumentUpdate`, `Update()` whitelist (P-077)
+- `backend/internal/handler/document_handler.go` — `Update`, `validateUpdateDocument`, error→field (P-077)
+- `backend/internal/handler/router.go` — `PATCH /documents/:id` (P-077)
+- `backend/internal/model/project.go` — `DepartmentID`, `DepartmentName` (P-077)
+- `backend/internal/repository/project_repository.go` — select JOIN dept, scans, `ProjectUpdate.DepartmentID`, `DepartmentExists` (P-077)
+- `backend/internal/dto/project_dto.go` — request/response/mapping dept (P-077)
+- `backend/internal/service/project_service.go` — input + validasi + audit dept (P-077)
+- `backend/internal/handler/project_handler.go` — teruskan dept + validasi + mapping error (P-077)
+- `backend/internal/handler/document_handler_test.go` — `TestUpdateDocumentEndToEnd` (P-077)
+- `backend/internal/handler/project_handler_test.go` — `TestPatchProjectDepartmentAssignment` (P-077)
+- `frontend/src/services/documents.ts` — `UpdateDocumentInput`, `updateDocument` (P-077)
+- `frontend/src/queries/documents.ts` — `useUpdateDocument` (P-077)
+- `frontend/src/pages/Documents/DocumentDetail.tsx` — tombol + dialog Ubah (P-077)
+- `frontend/src/services/projects.ts` — dept di tipe + input (P-077)
+- `frontend/src/pages/Projects/ProjectDetail.tsx` — pemilih Departemen (P-077)
+- `frontend/src/services/documents.test.ts` — mock patch + test (P-077)
+- `frontend/src/pages/Documents/DocumentDetail.test.tsx` — mock update/kategori + 2 test (P-077)
+- `frontend/src/pages/Projects/ProjectDetail.test.tsx` — mock dept + 2 test (P-077)
+- `frontend/package.json` — `license: Apache-2.0` (P-077)
+- `docs/design/52-DASHBOARD-ANALYTICS.md` — amandemen P-076 + P-077 (P-077)
+- `README.md` — §13 lisensi hidup, route 54, modul Document 9 (P-077)
+- `AGENTS.md` — Izin 51/58 (P-077)
+- `docs/progress/TASKS.md` — `T-092` + `T-093` DONE (P-077)
+- `docs/progress/TRACEABILITY.md` — FR-DOC-02, FR-DASH-04 bukti P-077 (P-077)
+- `docs/progress/OPEN-QUESTIONS.md` — catatan LICENSE P-077 (P-077)
+
+### Fixed
+
+- `NewDocumentResponse` membuang 3 tanggal siklus hidup sehingga metadata detail P-076 tak pernah terisi (P-077)
+- Komentar `Upload` yang tertimpa saat menyisipkan handler `Update` + baris ganda (P-077)
+
+---
+
+## 2026-09-24 (sesi P-076)
+
+Analitik penuh `T-074` + Dashboard finalization `T-087` DONE (Q-DASH-01..04 + Q-023 dijawab pemilik: dept Opsi B, SLA Opsi B, review/expiry Opsi A, stage Opsi B, lisensi Apache-2.0). Backend: migrasi `012` (departments+seed, sla_status+trigger, 3 kolom documents, workflow_stage_transitions+trigger; goose v12), `parseScopeIDs` + filter dept 14 kueri, `avgTimePerStage` presisi, 6 method baru, `GET /analytics/departments` (`report:read`), bootstrap seed 4 dept, document select/scan 3 kolom. Frontend: types + `useDepartments`, dropdown dept di URL, 5 panel KPI, 3 chart, metadata review/expiry/published di detail. Dokumen: `41-DATABASE.md` §2/§4 (baris 011/012), `42-API.md` §13 hidup, README (migrasi 001–012, 53 route), AGENTS (Izin 50/57). Backend **288 test** (+4: 2 endpoint/seed + 2 trigger SLA/stage), frontend **325 test / 32 berkas** (+1).
+
+### Added
+
+- `backend/internal/migration/012_create_departments_sla_review_published_stage_history.sql` — ADR-0027..0030 (P-076)
+- `backend/internal/repository/analytics_repository.go` — `parseScopeIDs`, `countSlaBreakdown`, `countReviewDue`, `countExpired`, `slaBreakdown`, `byDepartment`, `reviewDueTrend`, `ListDepartments` (P-076)
+- `backend/internal/handler/analytics_handler.go` — `ListDepartments`, parse `department_id` (P-076)
+- `backend/internal/service/analytics_service.go` — `ListDepartments` (P-076)
+- `frontend/src/services/analytics.ts` — `fetchDepartments`, `DepartmentOption`, KPI/chart Phase 5 (P-076)
+- `docs/progress/prompts/P-076-2026-09-24-analitik-penuh-department-sla-review-stage.md` — log sesi (P-076)
+
+### Changed
+
+- `backend/internal/handler/router.go` — `GET /analytics/departments` (`report:read`) (P-076)
+- `backend/internal/repository/document_repository.go` — select+scan `review_due_at`/`expiry_at`/`published_at` (P-076)
+- `backend/internal/bootstrap/bootstrap.go` — seed 4 departemen org baru (P-076)
+- `backend/internal/migration/migration_test.go` — want += 2 tabel (P-076)
+- `backend/internal/handler/analytics_handler_test.go` — 422 dept, `TestAnalyticsDepartments`, asersi chart Phase 5 (P-076)
+- `backend/internal/bootstrap/bootstrap_test.go` — `TestEnsureAdminFirstRun_CreatesDepartments` (P-076)
+- `frontend/src/queries/analytics.ts` — `useDepartments` (P-076)
+- `frontend/src/pages/Dashboard/index.tsx` — dropdown dept, 5 KPI, 3 chart (P-076)
+- `frontend/src/pages/Dashboard/Dashboard.test.tsx` — mock dept + test filter/KPI baru (P-076)
+- `frontend/src/services/documents.ts` — `DocumentRecord` += 3 field (P-076)
+- `frontend/src/pages/Documents/DocumentDetail.tsx` — metadata review/expiry/published (P-076)
+- `docs/design/41-DATABASE.md` — §2.2/§2.3/§2.4 + §4 baris 011/012 (P-076)
+- `docs/design/42-API.md` — §13 hidup + `GET /analytics/departments` (P-076)
+- `README.md` — migrasi 001–012, 53 route (analytics 2) (P-076)
+- `AGENTS.md` — Izin 50/57 (P-076)
+- `docs/progress/TASKS.md` — `T-087` + `T-074` DONE (P-076)
+- `docs/progress/TRACEABILITY.md` — FR-DASH-02/03 bukti P-076 + baris FR-DASH-04 (P-076)
+- `docs/progress/OPEN-QUESTIONS.md` — Q-DASH-01..04 + Q-023 RESOLVED (P-076)
+- `backend/internal/service/workflow_service_test.go` — `TestWorkflowSlaStatusComputedOnComplete` + `TestWorkflowStageTransitionsInsertedOnTransition` (P-076)
+
+### Fixed
+
+- Migrasi 012: `NEW.workflow_definition_id` → `NEW.workflow_def_id` (kolom aktual migrasi 005); body fungsi dibungkus `StatementBegin/End` (C-031) (P-076)
+- Test Dashboard `getByText("3")` ganda sesudah KPI baru (`review_due` 3→9, nilai unik) (P-076)
+
+---
+
 ## 2026-09-24 (sesi P-075)
 
 Dashboard KPI +2 `T-087` IN PROGRESS. Backend: `DashboardKPIs` += `open_tasks`/`overdue_tasks`, repository `countOpenTasks`/`countOverdueTasks` (scope project, tanpa date range). Frontend: grid KPI 6→8 (`lg:grid-cols-4`), panel Open Tasks + Overdue Tasks dengan drill-down `/tasks?status=open` + `/tasks?overdue=true`. Test dashboard diperbarui. Backend **284 test** tetap, frontend **324 test / 32 berkas** tetap, enam pemeriksa hijau.

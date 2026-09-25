@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,7 @@ import type {
   DocumentDetail,
   DocumentVersion,
 } from "@/services/documents";
+import { toRfc3339FromLocal } from "@/services/documents";
 import { ApiError } from "@/services/http";
 import { useAuthStore } from "@/store/auth";
 import { runAxe } from "@/test/a11y";
@@ -17,12 +18,18 @@ const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   versions: vi.fn(),
   upload: vi.fn(),
+  update: vi.fn(),
+  categories: vi.fn(),
   archive: vi.fn(),
   download: vi.fn(),
   saveBlob: vi.fn(),
   submit: vi.fn(),
   resubmit: vi.fn(),
   definitions: vi.fn(),
+  listComments: vi.fn(),
+  createComment: vi.fn(),
+  updateComment: vi.fn(),
+  deleteComment: vi.fn(),
 }));
 
 vi.mock("@/services/documents", async (importOriginal) => {
@@ -32,7 +39,9 @@ vi.mock("@/services/documents", async (importOriginal) => {
     archiveDocument: mocks.archive,
     downloadDocumentVersion: mocks.download,
     fetchDocument: mocks.fetch,
+    listDocumentCategories: mocks.categories,
     listDocumentVersions: mocks.versions,
+    updateDocument: mocks.update,
     uploadDocumentVersion: mocks.upload,
   };
 });
@@ -44,6 +53,17 @@ vi.mock("@/services/workflows", async (importOriginal) => {
     resubmitWorkflowInstance: mocks.resubmit,
     submitWorkflowInstance: mocks.submit,
     listWorkflowDefinitions: mocks.definitions,
+  };
+});
+
+vi.mock("@/services/comments", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/comments")>();
+  return {
+    ...actual,
+    listComments: mocks.listComments,
+    createComment: mocks.createComment,
+    updateComment: mocks.updateComment,
+    deleteComment: mocks.deleteComment,
   };
 });
 
@@ -144,6 +164,11 @@ beforeEach(() => {
   mocks.fetch.mockResolvedValue(detail);
   // Server mengirim versi terbaru lebih dulu (FR-VER-04).
   mocks.versions.mockResolvedValue([version, olderVersion]);
+  mocks.categories.mockResolvedValue([]);
+  mocks.listComments.mockResolvedValue({
+    items: [],
+    meta: { page: 1, limit: 100, total: 0, total_page: 0 },
+  });
   useAuthStore.setState({
     status: "authenticated",
     profile: profileWith(allPermissions),
@@ -209,12 +234,14 @@ describe("halaman detail dokumen", () => {
   it("menyatakan bagian yang belum dibangun beserta alasannya per bagian", async () => {
     renderPage();
 
-    // Tiga bagian × dua kemunculan ("belum dibangun" di judul dan di alasan),
-    // ditambah satu di catatan panel.
-    expect((await screen.findAllByText(/belum dibangun/))).toHaveLength(6);
-    for (const label of ["Comments", "Activity", "Related Tasks"]) {
+    // Dua bagian × dua kemunculan ("belum dibangun" di judul dan di alasan),
+    // ditambah satu di catatan panel. Comments keluar dari daftar ini sejak
+    // T-097 (utasnya hidup sebagai CommentThread di bawah).
+    expect((await screen.findAllByText(/belum dibangun/))).toHaveLength(4);
+    for (const label of ["Activity", "Related Tasks"]) {
       expect(screen.getAllByText(label, { exact: false }).length).toBeGreaterThan(0);
     }
+    expect(screen.queryByText(/antarmuka utas komentar belum dibangun/)).toBeNull();
     // Workflow bukan lagi bagian "belum dibangun": panelnya hidup di bawah.
     expect(screen.getByText("Workflow")).toBeInTheDocument();
     expect(screen.queryByText(/Submit for Review dan Resubmit belum tersedia/)).toBeNull();
@@ -559,6 +586,100 @@ describe("arsip dokumen", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "dokumen masih memiliki workflow yang berjalan",
+    );
+  });
+
+  it("mengubah metadata lewat dialog Ubah (T-092)", async () => {
+    const user = userEvent.setup();
+    mocks.categories.mockResolvedValue([{ id: "c1", name: "SOP", code: "SOP" }]);
+    mocks.update.mockImplementation(async (_id: string, input: Record<string, string>) => ({
+      document: { ...detail.document, title: input.title, review_due_at: "2026-10-24T00:00:00+07:00" },
+      current_version: version,
+    }));
+
+    renderPage();
+    await screen.findByRole("heading", { name: "BRD", level: 1 });
+    await user.click(screen.getByRole("button", { name: "Ubah" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.clear(within(dialog).getByLabelText("Judul"));
+    await user.type(within(dialog).getByLabelText("Judul"), "BRD Revisi");
+    // fireEvent untuk datetime-local: userEvent.type tidak cocok untuk mask waktu.
+    fireEvent.change(within(dialog).getByLabelText("Perlu review pada"), {
+      target: { value: "2026-10-24T00:00" },
+    });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Simpan perubahan" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.update).toHaveBeenCalledWith(
+        "d1",
+        expect.objectContaining({
+          title: "BRD Revisi",
+          // Zona waktu mesin test tidak diasumsikan: bandingkan lewat fungsi
+          // yang sama dengan kode produksi.
+          review_due_at: toRfc3339FromLocal("2026-10-24T00:00"),
+        }),
+      ),
+    );
+    expect(await screen.findByText("WEB-001 diperbarui.")).toBeInTheDocument();
+  });
+
+  it("tombol Ubah hilang pada dokumen terarsip", async () => {
+    mocks.fetch.mockResolvedValue({
+      document: { ...detail.document, status: "archived" },
+      current_version: version,
+    });
+
+    renderPage();
+    await screen.findByRole("heading", { name: "BRD", level: 1 });
+    expect(screen.queryByRole("button", { name: "Ubah" })).toBeNull();
+  });
+
+  it("header menampilkan Published untuk approved yang terbit (T-099)", async () => {
+    mocks.fetch.mockResolvedValue({
+      document: {
+        ...detail.document,
+        status: "approved",
+        published_at: "2026-09-20T00:00:00+07:00",
+      },
+      current_version: version,
+    });
+
+    renderPage();
+    await screen.findByRole("heading", { name: "BRD", level: 1 });
+    expect(screen.getByText("Published")).toBeInTheDocument();
+  });
+
+  it("tombol Kosongkan mengirim null eksplisit (T-094)", async () => {
+    const user = userEvent.setup();
+    mocks.fetch.mockResolvedValue({
+      document: { ...detail.document, review_due_at: "2026-10-24T00:00:00+07:00" },
+      current_version: version,
+    });
+    mocks.update.mockImplementation(async (id: string, input: Record<string, unknown>) => ({
+      document: { ...detail.document, review_due_at: undefined },
+      current_version: version,
+      cleared: input,
+      id,
+    }));
+
+    renderPage();
+    await screen.findByRole("heading", { name: "BRD", level: 1 });
+    await user.click(screen.getByRole("button", { name: "Ubah" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Kosongkan tanggal review" }));
+    await user.click(
+      within(dialog).getByRole("button", { name: "Simpan perubahan" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.update).toHaveBeenCalledWith(
+        "d1",
+        expect.objectContaining({ review_due_at: null }),
+      ),
     );
   });
 });

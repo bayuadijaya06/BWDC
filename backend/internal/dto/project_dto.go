@@ -81,6 +81,7 @@ type UpdateProjectRequest struct {
 	OwnerID       *uuid.UUID `json:"owner_id"`
 	StartDate     *Date      `json:"start_date"`
 	TargetEndDate *Date      `json:"target_end_date"`
+	DepartmentID  *uuid.UUID `json:"department_id"`
 }
 
 // AddProjectMemberRequest adalah body `POST /projects/:id/members`.
@@ -91,18 +92,20 @@ type AddProjectMemberRequest struct {
 
 // ProjectResponse adalah bentuk project pada response `42-API.md` §3.
 type ProjectResponse struct {
-	ID            uuid.UUID `json:"id"`
-	Code          string    `json:"code"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description"`
-	OwnerID       uuid.UUID `json:"owner_id"`
-	OwnerUsername string    `json:"owner_username,omitempty"`
-	Status        string    `json:"status"`
-	StartDate     *string   `json:"start_date"`
-	TargetEndDate *string   `json:"target_end_date"`
-	MemberCount   int       `json:"member_count"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID             uuid.UUID  `json:"id"`
+	Code           string     `json:"code"`
+	Name           string     `json:"name"`
+	Description    string     `json:"description"`
+	OwnerID        uuid.UUID  `json:"owner_id"`
+	OwnerUsername  string     `json:"owner_username,omitempty"`
+	Status         string     `json:"status"`
+	StartDate      *string    `json:"start_date"`
+	TargetEndDate  *string    `json:"target_end_date"`
+	DepartmentID   *uuid.UUID `json:"department_id,omitempty"`
+	DepartmentName string     `json:"department_name,omitempty"`
+	MemberCount    int        `json:"member_count"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // ProjectMemberResponse adalah satu anggota pada response
@@ -124,18 +127,20 @@ type ProjectDetailResponse struct {
 // NewProjectResponse memetakan model project ke bentuk response.
 func NewProjectResponse(project *model.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:            project.ID,
-		Code:          project.Code,
-		Name:          project.Name,
-		Description:   project.Description,
-		OwnerID:       project.OwnerID,
-		OwnerUsername: project.OwnerUsername,
-		Status:        project.Status,
-		StartDate:     formatDate(project.StartDate),
-		TargetEndDate: formatDate(project.TargetEndDate),
-		MemberCount:   project.MemberCount,
-		CreatedAt:     project.CreatedAt,
-		UpdatedAt:     project.UpdatedAt,
+		ID:             project.ID,
+		Code:           project.Code,
+		Name:           project.Name,
+		Description:    project.Description,
+		OwnerID:        project.OwnerID,
+		OwnerUsername:  project.OwnerUsername,
+		Status:         project.Status,
+		StartDate:      formatDate(project.StartDate),
+		TargetEndDate:  formatDate(project.TargetEndDate),
+		DepartmentID:   project.DepartmentID,
+		DepartmentName: project.DepartmentName,
+		MemberCount:    project.MemberCount,
+		CreatedAt:      project.CreatedAt,
+		UpdatedAt:      project.UpdatedAt,
 	}
 }
 

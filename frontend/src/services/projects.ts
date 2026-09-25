@@ -48,6 +48,9 @@ export interface Project {
   /** Tanggal kalender `YYYY-MM-DD`, bukan RFC 3339 (`42-API.md` §3). */
   start_date: string | null;
   target_end_date: string | null;
+  /** Departemen pemilik (ADR-0027); tidak ada berarti belum ditugaskan. */
+  department_id?: string;
+  department_name?: string;
   member_count: number;
   created_at: string;
   updated_at: string;
@@ -95,6 +98,11 @@ export interface UpdateProjectInput {
   owner_id?: string;
   start_date?: string | null;
   target_end_date?: string | null;
+  /**
+   * UUID departemen, atau `null` eksplisit untuk melepas penugasan
+   * (`42-API.md` §3). Tidak dikirim = tidak diubah.
+   */
+  department_id?: string | null;
 }
 
 export async function listProjects(
@@ -137,8 +145,8 @@ export async function createProject(
 export async function updateProject(
   id: string,
   input: UpdateProjectInput,
-): Promise<Project> {
-  const response = await http.patch<ApiSuccess<Project>>(
+): Promise<ProjectDetail> {
+  const response = await http.patch<ApiSuccess<ProjectDetail>>(
     `/projects/${encodeURIComponent(id)}`,
     input,
   );

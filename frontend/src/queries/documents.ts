@@ -12,9 +12,11 @@ import {
   listDocumentCategories,
   listDocumentVersions,
   listDocuments,
+  updateDocument,
   uploadDocumentVersion,
   type CreateDocumentInput,
   type DocumentListQuery,
+  type UpdateDocumentInput,
   type UploadVersionInput,
 } from "@/services/documents";
 
@@ -90,6 +92,19 @@ export function useUploadDocumentVersion(id: string) {
       // klien berarti dua sumber kebenaran untuk penomoran versi.
       void queryClient.invalidateQueries({ queryKey: documentKeys.detail(id) });
       void queryClient.invalidateQueries({ queryKey: documentKeys.versions(id) });
+      void queryClient.invalidateQueries({ queryKey: documentKeys.lists() });
+    },
+  });
+}
+
+export function useUpdateDocument(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateDocumentInput) => updateDocument(id, input),
+    onSuccess: (detail) => {
+      // Cache detail ditimpa utuh dari server (bukan ditambal per field):
+      // `updated_at` dan metadata turunan dihitung server.
+      queryClient.setQueryData(documentKeys.detail(detail.document.id), detail);
       void queryClient.invalidateQueries({ queryKey: documentKeys.lists() });
     },
   });

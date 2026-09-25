@@ -189,6 +189,28 @@ func TestEnsureAdminFirstRun_CreatesOrgAdminAndRole(t *testing.T) {
 	}
 }
 
+func TestEnsureAdminFirstRun_CreatesDepartments(t *testing.T) {
+	ctx, tx := newCleanTx(t)
+	s := seed()
+
+	created, err := bootstrap.EnsureAdminFirstRun(ctx, tx, s, discardLogger())
+	if err != nil || !created {
+		t.Fatalf("bootstrap pertama gagal: created=%v err=%v", created, err)
+	}
+
+	// Empat departemen default (ADR-0027): organisasi yang lahir lewat
+	// bootstrap mendapat seed yang sama dengan backfill migrasi 012.
+	var count int
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM departments d JOIN organizations o ON o.id = d.organization_id WHERE o.code = $1`,
+		s.OrgCode).Scan(&count); err != nil {
+		t.Fatalf("hitung departemen: %v", err)
+	}
+	if count != 4 {
+		t.Fatalf("departemen = %d, diharapkan 4 (SDM, IT, Finance, Ops)", count)
+	}
+}
+
 func TestEnsureAdminFirstRun_IsIdempotent(t *testing.T) {
 	ctx, tx := newCleanTx(t)
 	s := seed()

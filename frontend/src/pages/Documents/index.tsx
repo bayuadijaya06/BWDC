@@ -39,9 +39,9 @@ const documentStatuses: DocumentStatus[] = [
  * Baris tab ini dulu hidup di sidebar. Ia dipindahkan ke halaman yang memiliki
  * daftarnya (`51-UX.md` §2.1) karena penyaring status sudah ada di form bawah;
  * dua tempat memilih untuk hal yang sama membuat menu panjang tanpa menambah
- * kemampuan. Yang **tidak** boleh hilang adalah penyaring `Milik saya`: ia
- * tetap dapat dibuka dari sini, dan halaman menyatakan alasannya tidak dapat
- * dijalankan (Q-016) alih-alih diam-diam menampilkan seluruh dokumen.
+ * kemampuan. Penyaring `Milik saya` mengirim ID user login sebagai `?owner_id=`
+ * (`42-API.md` §4, keputusan P-079) — tanpa endpoint daftar pengguna, inilah
+ * satu-satunya pilihan pemilik yang dapat dijalankan jujur dari klien.
  */
 const subPages: {
   label: string;
@@ -108,6 +108,9 @@ export function DocumentsPage() {
   const updatedTo = params.get("updated_to") ?? "";
   const onlyMine = params.get("view") === "mine";
   const openUpload = params.get("upload") === "1";
+  // ID pemilik untuk tab Milik saya dibaca dari profil login — tidak perlu
+  // endpoint daftar pengguna (keputusan P-079, Q-016/Q-024).
+  const currentUserId = useAuthStore((state) => state.profile?.id ?? "");
 
   const [searchDraft, setSearchDraft] = useState(search);
   const [updatedFromDraft, setUpdatedFromDraft] = useState(
@@ -125,6 +128,7 @@ export function DocumentsPage() {
     search,
     project_id: projectId,
     category_id: categoryId,
+    owner_id: onlyMine && currentUserId !== "" ? currentUserId : undefined,
     updated_from: updatedFrom,
     updated_to: updatedTo,
   });
@@ -144,7 +148,8 @@ export function DocumentsPage() {
     projectId !== "" ||
     categoryId !== "" ||
     updatedFrom !== "" ||
-    updatedTo !== "";
+    updatedTo !== "" ||
+    onlyMine;
   /** Menulis parameter baru; nilai kosong dibuang supaya URL tetap pendek. */
   function navigate(next: Record<string, string | null>) {
     const updated = new URLSearchParams(params);
@@ -305,16 +310,13 @@ export function DocumentsPage() {
       </nav>
 
       {onlyMine ? (
-        // Jujur di layar, bukan diam-diam diabaikan: `50-FSD.md` §4.1 menyebut
-        // penyaring Owner, sedangkan `42-API.md` §4 belum memuat parameternya.
-        // Menyaring di klien akan salah menghitung `total` halaman.
         <p
           role="status"
           className="rounded-panel border border-line bg-surface-sunken px-3 py-2.5 text-13 text-text"
         >
-          Penyaring Milik saya belum dapat dijalankan: kontrak GET /documents
-          belum memuat parameter pemilik (Q-016). Daftar di bawah memuat
-          seluruh dokumen dalam cakupan Anda.
+          Menampilkan dokumen yang Anda buat (`?owner_id=` milik Anda). Tanpa
+          endpoint daftar pengguna, pemilik lain tidak dapat dipilih dari sini
+          (keputusan P-079).
         </p>
       ) : null}
 

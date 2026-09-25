@@ -141,8 +141,9 @@ type Profile struct {
 // dibaca ulang berikut role-nya, karena yang dikembalikan ke klien hanyalah
 // token (dan masa berlakunya).
 type PasswordChanged struct {
-	Token     jwt.Token
-	ExpiresAt time.Time
+	Token        jwt.Token
+	RefreshToken jwt.Token
+	ExpiresAt    time.Time
 }
 
 // Refreshed adalah hasil `POST /auth/refresh`: sepasang token pengganti.
@@ -492,9 +493,19 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldP
 		return nil, err
 	}
 
+	// Cookie refresh ikut diganti seperti access token-nya (ADR-0033): revokasi
+	// massal di atas mematikan cookie lama, dan tanpa pengganti sesi yang
+	// dipakai ikut mati. Diterbitkan sesudah commit dengan alasan yang sama.
+	refresh, err := s.tokens.GenerateRefresh(user.ID, user.OrganizationID, user.Username)
+	if err != nil {
+		s.logger.Error("password berubah tetapi penerbitan refresh pengganti gagal",
+			"user_id", user.ID.String(), "error", err.Error())
+		return nil, err
+	}
+
 	s.logger.Info("password diubah; seluruh sesi lain dicabut",
 		"user_id", user.ID.String(), "username", user.Username, "jti", token.JTI.String())
-	return &PasswordChanged{Token: token, ExpiresAt: token.ExpiresAt}, nil
+	return &PasswordChanged{Token: token, RefreshToken: refresh, ExpiresAt: token.ExpiresAt}, nil
 }
 
 // Refresh menjalankan `POST /auth/refresh` (ADR-0023): menukar refresh token

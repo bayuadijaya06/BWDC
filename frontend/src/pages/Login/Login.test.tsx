@@ -25,8 +25,6 @@ const { LoginPage } = await import("./index");
 const authSession: AuthSession = {
   token: "access-1",
   expires_at: "2026-09-21T10:15:00Z",
-  refresh_token: "refresh-1",
-  refresh_expires_at: "2026-09-28T10:00:00Z",
   user: {
     id: "u1",
     username: "admin",
@@ -98,7 +96,7 @@ describe("halaman login", () => {
       expect(useAuthStore.getState().status).toBe("authenticated"),
     );
     expect(mocks.login).toHaveBeenCalledWith("admin", "rahasia");
-    expect(session.getRefreshToken()).toBe("refresh-1");
+    expect(session.getAccessToken()).toBe("access-1");
   });
 
   it("menampilkan pesan server apa adanya saat kredensial salah", async () => {

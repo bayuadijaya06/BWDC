@@ -13,8 +13,6 @@ export interface UserSummary {
 export interface AuthSession {
   token: string;
   expires_at: string;
-  refresh_token: string;
-  refresh_expires_at: string;
   user: UserSummary;
 }
 
@@ -37,6 +35,24 @@ export async function login(
     username,
     password,
   });
+  return response.data.data;
+}
+
+/** Hasil `POST /auth/refresh`: hanya access token di body (ADR-0033). */
+export interface RefreshResult {
+  token: string;
+  expires_at: string;
+}
+
+/**
+ * Menukar cookie refresh menjadi access token baru. Cookie dilampirkan
+ * peramban (`withCredentials`); tidak ada token yang dibaca dari storage.
+ */
+export async function refreshSession(): Promise<RefreshResult> {
+  const response = await http.post<ApiSuccess<RefreshResult>>(
+    "/auth/refresh",
+    {},
+  );
   return response.data.data;
 }
 

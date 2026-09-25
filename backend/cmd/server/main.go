@@ -225,7 +225,7 @@ func run() error {
 		Logger:       logger,
 		IsProduction: cfg.Server.IsProduction(),
 		Health:       handler.NewHealthHandler(pool, store),
-		Auth:         handler.NewAuthHandler(authService, logger),
+		Auth:         handler.NewAuthHandler(authService, logger, cfg.Server.IsProduction()),
 		Project:      handler.NewProjectHandler(projectService, logger),
 		Document:     handler.NewDocumentHandler(documentService, logger),
 		Task:         handler.NewTaskHandler(taskService, permissionChecker, logger),

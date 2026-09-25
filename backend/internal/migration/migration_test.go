@@ -32,6 +32,8 @@ func TestSchemaTablesExist(t *testing.T) {
 		"token_revocations",
 		// 010 (ADR-0022)
 		"login_attempts",
+		// 012 (ADR-0027, ADR-0030)
+		"departments", "workflow_stage_transitions",
 	}
 
 	rows, err := db.Query(`SELECT table_name FROM information_schema.tables

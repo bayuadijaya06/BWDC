@@ -1,9 +1,8 @@
 import { create } from "zustand";
 
-import { ApiError, http, onSessionLost } from "@/services/http";
+import { ApiError, onSessionLost } from "@/services/http";
 import { session } from "@/services/session";
-import { fetchProfile, login, logout, type UserProfile } from "@/services/auth";
-import type { ApiSuccess } from "@/types/api";
+import { fetchProfile, login, logout, refreshSession, type UserProfile } from "@/services/auth";
 
 export type AuthStatus = "unknown" | "anonymous" | "authenticated";
 
@@ -35,21 +34,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   restore: async () => {
     if (!session.hasStoredSession()) {
-      set({ status: "anonymous", profile: null });
-      return;
-    }
-    // Jika hanya refresh token yang tersisa (access token hilang setelah reload
-    // tab), segarkan dulu tanpa memanggil `GET /auth/me` yang pasti 401 dan
-    // memenuhi console dengan error XHR. Ini menghindari log 401 yang terlihat
-    // sebagai error padahal ditangani interceptor.
-    if (session.getAccessToken() === null && session.getRefreshToken() !== null) {
+      // Tanpa access token di memori, satu-satunya harapan adalah cookie
+      // refresh (ADR-0033). Coba tukar dulu tanpa memanggil `GET /auth/me`
+      // yang pasti 401 dan memenuhi console dengan error XHR — perilaku yang
+      // sama dengan sesi sebelumnya, hanya sumber tokennya yang berpindah dari
+      // `sessionStorage` ke cookie. Gagal berarti anonim, bukan error halaman.
       try {
-        const refreshToken = session.getRefreshToken() as string;
-        const resp = await http.post<ApiSuccess<{ token: string; refresh_token: string }>>(
-          "/auth/refresh",
-          { refresh_token: refreshToken },
-        );
-        session.setTokens(resp.data.data.token, resp.data.data.refresh_token);
+        const refreshed = await refreshSession();
+        session.setTokens(refreshed.token);
       } catch {
         session.clear();
         set({ status: "anonymous", profile: null, error: null });
@@ -76,7 +68,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ pending: true, error: null });
     try {
       const authSession = await login(username, password);
-      session.setTokens(authSession.token, authSession.refresh_token);
+      session.setTokens(authSession.token);
       const profile = await fetchProfile();
       set({ status: "authenticated", profile, pending: false, error: null });
       return true;

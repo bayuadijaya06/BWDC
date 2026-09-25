@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -178,12 +179,14 @@ func (h *ProjectHandler) Update(c *gin.Context) {
 	}
 
 	detail, err := h.projects.Update(c.Request.Context(), actor, projectID, service.UpdateProjectInput{
-		Code:          req.Code,
-		Name:          trimmedOrNil(req.Name),
-		Description:   trimmedOrNil(req.Description),
-		OwnerID:       req.OwnerID,
-		StartDate:     dateOrNil(req.StartDate),
-		TargetEndDate: dateOrNil(req.TargetEndDate),
+		Code:              req.Code,
+		Name:              trimmedOrNil(req.Name),
+		Description:       trimmedOrNil(req.Description),
+		OwnerID:           req.OwnerID,
+		StartDate:         dateOrNil(req.StartDate),
+		TargetEndDate:     dateOrNil(req.TargetEndDate),
+		DepartmentID:      req.DepartmentID,
+		ClearDepartmentID: isExplicitNull(c, "department_id"),
 	})
 	if err != nil {
 		h.writeServiceError(c, err, "owner_id")
@@ -352,6 +355,12 @@ func (h *ProjectHandler) writeServiceError(c *gin.Context, err error, field stri
 			Error: "tidak ada field yang dapat diperbarui",
 		}})
 
+	case errors.Is(err, service.ErrProjectDepartmentInvalid):
+		response.Validation(c, []response.FieldError{{
+			Field: "department_id",
+			Error: "departemen tidak ditemukan di organisasi ini",
+		}})
+
 	default:
 		h.logger.Error("permintaan project gagal",
 			"error", err.Error(),
@@ -385,6 +394,34 @@ func projectIDParam(c *gin.Context) (uuid.UUID, bool) {
 	return id, true
 }
 
+// contextKeyRawBody adalah kunci byte body mentah di konteks Gin, ditulis
+// `bindJSON` setiap kali body berhasil dibaca.
+const contextKeyRawBody = "bwdcs.requestBodyRaw"
+
+// isExplicitNull menjawab apakah field ada di body JSON dengan nilai `null`
+// eksplisit — berbeda dari "tidak dikirim", yang sama-sama tiba sebagai
+// pointer nil di struct target. Dipakai PATCH yang mendukung pengosongan
+// (`42-API.md` §3 `department_id`, §4 tiga tanggal dokumen).
+func isExplicitNull(c *gin.Context, jsonName string) bool {
+	raw, ok := c.Get(contextKeyRawBody)
+	if !ok {
+		return false
+	}
+	rawBytes, ok := raw.([]byte)
+	if !ok {
+		return false
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(rawBytes, &body); err != nil {
+		return false
+	}
+	value, ok := body[jsonName]
+	if !ok {
+		return false
+	}
+	return string(bytes.TrimSpace(value)) == "null"
+}
+
 // bindJSON membaca body dan memetakan kegagalan decode ke `422` beserta nama
 // field yang benar-benar bermasalah (`42-API.md` §12 memakai daftar
 // `{field, error}` justru untuk itu).
@@ -411,6 +448,12 @@ func bindJSON(c *gin.Context, target any) bool {
 		response.Validation(c, []response.FieldError{{Field: "body", Error: "body tidak dapat dibaca"}})
 		return false
 	}
+	// Kembalikan body untuk pembaca berikutnya, dan simpan byte mentahnya:
+	// `encoding/json` memetakan "tidak dikirim" dan "null eksplisit" ke pointer
+	// nil yang sama, sehingga PATCH yang mendukung pengosongan (`42-API.md`
+	// §3/`§4`) membutuhkan bentuk mentahnya (`isExplicitNull`).
+	c.Request.Body = io.NopCloser(bytes.NewReader(raw))
+	c.Set(contextKeyRawBody, raw)
 
 	if err := json.Unmarshal(raw, target); err != nil {
 		var typeErr *json.UnmarshalTypeError
@@ -600,6 +643,10 @@ func validateUpdateProject(req dto.UpdateProjectRequest) []response.FieldError {
 
 	if req.OwnerID != nil && *req.OwnerID == uuid.Nil {
 		fields = append(fields, response.FieldError{Field: "owner_id", Error: "tidak boleh UUID kosong"})
+	}
+
+	if req.DepartmentID != nil && *req.DepartmentID == uuid.Nil {
+		fields = append(fields, response.FieldError{Field: "department_id", Error: "tidak boleh UUID kosong"})
 	}
 
 	fields = append(fields, validateDateRange(req.StartDate, req.TargetEndDate)...)

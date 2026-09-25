@@ -32,15 +32,13 @@ type UserSummary struct {
 
 // LoginResponse adalah response 200 `POST /auth/login`.
 //
-// `refresh_token` + `refresh_expires_at` ikut dikirim sejak ADR-0023: itulah
-// modal yang diperlukan `POST /auth/refresh`, dan tanpanya endpoint itu tidak
-// dapat dipakai klien mana pun.
+// Refresh token TIDAK ada di body sejak ADR-0033: ia dipasang sebagai cookie
+// `refresh_token` (`HttpOnly`), dan salinan body akan menggagalkan tujuan
+// perpindahan (dapat dibaca JS). Klien menyimpan access token di memori.
 type LoginResponse struct {
-	Token            string      `json:"token"`
-	ExpiresAt        time.Time   `json:"expires_at"`
-	RefreshToken     string      `json:"refresh_token"`
-	RefreshExpiresAt time.Time   `json:"refresh_expires_at"`
-	User             UserSummary `json:"user"`
+	Token     string      `json:"token"`
+	ExpiresAt time.Time   `json:"expires_at"`
+	User      UserSummary `json:"user"`
 }
 
 // ChangePasswordRequest adalah body `POST /auth/change-password` (`42-API.md` §2).
@@ -65,24 +63,15 @@ type ChangePasswordResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// RefreshRequest adalah body `POST /auth/refresh` (`42-API.md` §2).
+// RefreshResponse adalah response 200 `POST /auth/refresh`: access token baru
+// di body + cookie refresh baru (rotasi bergulir, ADR-0023 butir 4).
 //
-// Yang dikirim adalah **refresh token** dari login/refresh sebelumnya, bukan
-// access token yang sedang dipakai header `Authorization`.
-type RefreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
-}
-
-// RefreshResponse adalah response 200 `POST /auth/refresh`: sepasang token baru.
-//
-// Bentuknya memuat kedua masa berlaku (`expires_at` untuk access token,
-// `refresh_expires_at` untuk refresh token) supaya klien tahu kapan harus
-// memperpanjang lagi tanpa membedah tokennya.
+// Bentuknya hanya memuat masa berlaku access token (`expires_at`) supaya klien
+// tahu kapan memperpanjang lagi tanpa membedah tokennya. Umur cookie dibaca
+// dari atribut `Max-Age`-nya, bukan dari body.
 type RefreshResponse struct {
-	Token            string    `json:"token"`
-	ExpiresAt        time.Time `json:"expires_at"`
-	RefreshToken     string    `json:"refresh_token"`
-	RefreshExpiresAt time.Time `json:"refresh_expires_at"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // LockedDetails adalah `details` pada `423 LOCKED` (`42-API.md` §12). Bentuknya

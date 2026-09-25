@@ -107,6 +107,20 @@ func EnsureAdminFirstRun(ctx context.Context, db Querier, seed AdminSeed, logger
 		return false, fmt.Errorf("buat organisasi %q: %w", seed.OrgCode, err)
 	}
 
+	// Departemen default organisasi baru (ADR-0027): migrasi 012 hanya mengisi
+	// untuk organisasi yang sudah ada saat migrasi berjalan; organisasi yang
+	// lahir sesudahnya lewat bootstrap ini mendapat empat yang sama.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO departments (organization_id, name, code) VALUES
+			($1::uuid, 'SDM', 'SDM'),
+			($1::uuid, 'IT', 'IT'),
+			($1::uuid, 'Finance', 'FIN'),
+			($1::uuid, 'Ops', 'OPS')`,
+		orgID,
+	); err != nil {
+		return false, fmt.Errorf("buat departemen default organisasi %q: %w", seed.OrgCode, err)
+	}
+
 	var userID string
 	if err := tx.QueryRow(ctx,
 		`INSERT INTO users (organization_id, username, email, password_hash)

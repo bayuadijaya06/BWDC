@@ -45,14 +45,19 @@ type Project struct {
 	Status         string     `json:"status"`
 	StartDate      *time.Time `json:"start_date"`
 	TargetEndDate  *time.Time `json:"target_end_date"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// Departemen pemilik project (ADR-0027, migrasi 012). Nullable: project
+	// yang belum ditugaskan sah dan masuk bucket "Tanpa departemen" di chart.
+	DepartmentID *uuid.UUID `json:"department_id,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 
 	// OwnerUsername dan MemberCount adalah kolom turunan untuk daftar project
 	// (kolom "Owner" dan "Members count" di `50-FSD.md` §3.1). Keduanya dibaca
 	// lewat JOIN/subquery, tidak disimpan di tabel.
 	OwnerUsername string `json:"owner_username,omitempty"`
 	MemberCount   int    `json:"member_count"`
+	// DepartmentName turunan dari JOIN yang sama (`LEFT JOIN departments`).
+	DepartmentName string `json:"department_name,omitempty"`
 }
 
 // IsArchived adalah pembanding nilai kanonik status, dipakai supaya pemanggil

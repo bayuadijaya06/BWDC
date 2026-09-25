@@ -57,6 +57,10 @@ var (
 	// menunjuk user yang tidak ada di organisasi aktor. User organisasi lain
 	// tidak boleh dibedakan dari user yang tidak ada.
 	ErrUserNotInOrganization = errors.New("user tidak ditemukan di organisasi ini")
+
+	// ErrProjectDepartmentInvalid → `422 VALIDATION_ERROR`: `department_id`
+	// tidak menunjuk departemen di organisasi aktor (pola kategori dokumen).
+	ErrProjectDepartmentInvalid = errors.New("departemen tidak ditemukan di organisasi ini")
 )
 
 // ProjectListFilter adalah penyaring daftar project yang sudah divalidasi
@@ -80,13 +84,19 @@ type CreateProjectInput struct {
 
 // UpdateProjectInput adalah input `PATCH /projects/:id`. `Code` hanya dipakai
 // untuk menolak permintaan yang mencoba mengubahnya.
+//
+// `ClearDepartmentID` berarti `department_id` dikirim sebagai `null` eksplisit:
+// penugasan dilepas (kolom kembali NULL). Tidak-dikirim vs null dibedakan
+// handler dari body mentah (`isExplicitNull`).
 type UpdateProjectInput struct {
-	Code          *string
-	Name          *string
-	Description   *string
-	OwnerID       *uuid.UUID
-	StartDate     *time.Time
-	TargetEndDate *time.Time
+	Code              *string
+	Name              *string
+	Description       *string
+	OwnerID           *uuid.UUID
+	StartDate         *time.Time
+	TargetEndDate     *time.Time
+	DepartmentID      *uuid.UUID
+	ClearDepartmentID bool
 }
 
 // ProjectDetail adalah isi `GET /projects/:id`: project + anggotanya.
@@ -264,6 +274,20 @@ func (s *ProjectService) Update(ctx context.Context, actor Actor, projectID uuid
 		}
 	}
 
+	// Departemen harus milik organisasi aktor — departemen organisasi lain
+	// diperlakukan tidak ada supaya keberadaannya tidak bocor (pola kategori).
+	if input.DepartmentID != nil {
+		exists, err := s.projects.DepartmentExists(ctx, actor.OrganizationID, *input.DepartmentID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, ErrProjectDepartmentInvalid
+		}
+	}
+	// Melepas penugasan tidak butuh pemeriksaan keberadaan: tidak ada id yang
+	// dirujuk.
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("mulai transaksi pembaruan project: %w", err)
@@ -272,11 +296,13 @@ func (s *ProjectService) Update(ctx context.Context, actor Actor, projectID uuid
 
 	projects := s.projects.WithTx(tx)
 	affected, err := projects.Update(ctx, scope, projectID, repository.ProjectUpdate{
-		Name:          input.Name,
-		Description:   input.Description,
-		OwnerID:       input.OwnerID,
-		StartDate:     formatTimestamp(input.StartDate),
-		TargetEndDate: formatTimestamp(input.TargetEndDate),
+		Name:              input.Name,
+		Description:       input.Description,
+		OwnerID:           input.OwnerID,
+		StartDate:         formatTimestamp(input.StartDate),
+		TargetEndDate:     formatTimestamp(input.TargetEndDate),
+		DepartmentID:      input.DepartmentID,
+		ClearDepartmentID: input.ClearDepartmentID,
 	})
 	if err != nil {
 		switch {
@@ -317,6 +343,12 @@ func (s *ProjectService) Update(ctx context.Context, actor Actor, projectID uuid
 	}
 	if input.TargetEndDate != nil {
 		changed["target_end_date"] = formatAuditDate(input.TargetEndDate)
+	}
+	if input.DepartmentID != nil {
+		changed["department_id"] = input.DepartmentID.String()
+	}
+	if input.ClearDepartmentID {
+		changed["department_id"] = nil
 	}
 
 	if err := NewAuditService(tx).Log(ctx, actor.ID, ActionProjectUpdated, EntityProject, projectID.String(),

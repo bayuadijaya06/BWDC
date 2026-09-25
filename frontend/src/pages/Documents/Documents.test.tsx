@@ -308,17 +308,20 @@ describe("halaman Documents — daftar", () => {
     }
   });
 
-  it("menyatakan penyaring Milik saya belum dapat dijalankan, tanpa mengarang penyaring", async () => {
+  it("menjalankan penyaring Milik saya lewat owner_id user login (T-095)", async () => {
     renderWithProviders(<DocumentsPage />, { route: "/documents?view=mine" });
 
+    // ID user login (u1 di profil uji) dikirim sebagai penyaring pemilik —
+    // tanpa endpoint daftar pengguna, inilah satu-satunya pilihan pemilik yang
+    // jujur (keputusan P-079).
+    await waitFor(() =>
+      expect(mocks.list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ owner_id: "u1" }),
+      ),
+    );
     expect(
-      await screen.findByText(/Penyaring Milik saya belum dapat dijalankan/),
+      await screen.findByText(/Menampilkan dokumen yang Anda buat/),
     ).toBeInTheDocument();
-    // Tidak ada parameter pemilik yang dikirim: kontraknya belum memuatnya
-    // (Q-016), dan menyaring satu halaman di klien akan salah menghitung total.
-    const query = mocks.list.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(query).not.toHaveProperty("owner_id");
-    expect(query).not.toHaveProperty("view");
   });
 
   it("menaruh sub-halaman sebagai tab di halaman, bukan sebagai item menu sidebar", async () => {
@@ -343,7 +346,7 @@ describe("halaman Documents — daftar", () => {
     );
   });
 
-  it("membuka Milik saya dari tab, sehingga alasannya tetap terbaca di layar", async () => {
+  it("membuka Milik saya dari tab dan menyaring ke pemilik login", async () => {
     const user = userEvent.setup();
     renderWithProviders(<DocumentsPage />, { route: "/documents" });
     await screen.findByRole("link", { name: "BRD" });
@@ -351,15 +354,14 @@ describe("halaman Documents — daftar", () => {
     const tabs = screen.getByRole("navigation", { name: "Sub-halaman dokumen" });
     await user.click(within(tabs).getByRole("link", { name: "Milik saya" }));
 
-    // Tab ini sempat hanya dapat dicapai dari sidebar. Kalau tautannya hilang,
-    // penyaring yang tidak dapat dijalankan itu tidak lagi dapat ditemukan
-    // pengguna, dan penjelasan Q-016 ikut tenggelam.
-    expect(
-      await screen.findByText(/Penyaring Milik saya belum dapat dijalankan/),
-    ).toBeInTheDocument();
     expect(
       within(tabs).getByRole("link", { name: "Milik saya" }),
     ).toHaveAttribute("aria-current", "page");
+    await waitFor(() =>
+      expect(mocks.list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ owner_id: "u1" }),
+      ),
+    );
   });
 
   it("membedakan keadaan kosong karena penyaring dan karena memang belum ada", async () => {

@@ -1,12 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"path/filepath"
 	"strings"
 
@@ -27,15 +29,22 @@ const MaxDocumentFileSize int64 = 100 << 20
 var (
 	allowedDocumentExtensions = map[string]bool{
 		".pdf": true, ".txt": true, ".csv": true,
-		".xls": true, ".xlsx": true, ".jpg": true, ".jpeg": true, ".png": true,
+		".doc": true, ".docx": true,
+		".xls": true, ".xlsx": true,
+		".ppt": true, ".pptx": true,
+		".jpg": true, ".jpeg": true, ".png": true,
 	}
 
 	allowedDocumentMIMETypes = map[string]bool{
-		"application/pdf":          true,
-		"text/plain":               true,
-		"text/csv":                 true,
-		"application/vnd.ms-excel": true,
-		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": true,
+		"application/pdf":               true,
+		"text/plain":                    true,
+		"text/csv":                      true,
+		"application/msword":            true,
+		"application/vnd.ms-excel":      true,
+		"application/vnd.ms-powerpoint": true,
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   true,
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
 		"image/jpeg": true,
 		"image/png":  true,
 	}
@@ -44,7 +53,11 @@ var (
 // AllowedDocumentExtensions mengembalikan ekstensi yang diterima, dipakai pesan
 // validasi `422` supaya klien tahu batasnya tanpa membaca dokumen desain.
 func AllowedDocumentExtensions() []string {
-	return []string{".pdf", ".txt", ".csv", ".xls", ".xlsx", ".jpg", ".jpeg", ".png"}
+	return []string{
+		".pdf", ".txt", ".csv",
+		".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+		".jpg", ".jpeg", ".png",
+	}
 }
 
 // UploadVersionInput adalah satu unggahan versi dokumen.
@@ -285,6 +298,90 @@ func (s *DocumentService) auditDownload(ctx context.Context, actor Actor, docume
 func normalizeMimeType(value string) string {
 	base, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(value)), ";")
 	return strings.TrimSpace(base)
+}
+
+// Sihir berkas dan penanda yang dipakai `DetectUploadMimeType`.
+var (
+	// Kepala Compound File Binary (OLE): wadah `.doc`/`.xls`/`.ppt` lama.
+	oleCFBMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+)
+
+// Nama stream yang membedakan tiga sepupu OLE. Disimpan UTF-16LE di entri
+// direktori CFB, sehingga pencariannya memakai bentuk itu (lihat
+// `utf16LEMarker`). Ketiganya ASCII, jadi penyandiannya sebaris tanpa tabel.
+var oleStreamMIMEs = []struct {
+	stream string
+	mime   string
+}{
+	{"WordDocument", "application/msword"},
+	{"Workbook", "application/vnd.ms-excel"},
+	{"PowerPoint Document", "application/vnd.ms-powerpoint"},
+}
+
+// Nama part yang membedakan tiga sepupu Office Open XML di dalam kontainer
+// ZIP. Muncul di header lokal ZIP di awal berkas, sehingga terbaca dari
+// jendela intip handler tanpa mengurai arsip.
+var ooxmlPartMIMEs = []struct {
+	part string
+	mime string
+}{
+	{"word/document.xml", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+	{"xl/workbook.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+	{"ppt/presentation.xml", "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
+}
+
+func utf16LEMarker(s string) []byte {
+	marker := make([]byte, 0, len(s)*2)
+	for i := 0; i < len(s); i++ {
+		marker = append(marker, s[i], 0)
+	}
+	return marker
+}
+
+// DetectUploadMimeType mengenali tipe berkas dari isinya (Q-008, Opsi A).
+//
+// `http.DetectContentType` saja tidak cukup untuk keluarga Office: kontainer
+// ZIP (`.docx`/`.pptx`/`.xlsx` asli) terdeteksi `application/zip`, dan biner
+// OLE CFB (`.doc`/`.xls`/`.ppt` asli) terdeteksi `application/octet-stream`
+// (keduanya terukur, bukan tebakan). Keduanya tidak boleh masuk daftar
+// `allowedDocumentMIMETypes` apa adanya — `application/zip` akan meloloskan
+// arsip ZIP apa pun, dan `application/octet-stream` akan meloloskan semua
+// biner tak dikenal. Karena itu fungsi ini memurnikan dari isi, bukan dari
+// nama: ZIP yang memuat nama part OOXML dipetakan ke MIME Office-nya, OLE
+// bersihir CFB dipetakan lewat nama stream-nya, dan sisanya dibiarkan apa
+// adanya (ZIP polos dan OLE tak dikenal tetap jatuh di luar daftar, jadi
+// tetap ditolak — termasuk berekstensi `.docx`).
+//
+// Bila beberapa penanda OLE muncul sekaligus (mis. objek tempelan), yang
+// paling awal menang: stream utama biasanya entri direktori pertama,
+// sedangkan tempelan tinggal di storage `MBD…` sesudahnya.
+func DetectUploadMimeType(header []byte) string {
+	detected := http.DetectContentType(header)
+
+	if detected == "application/zip" {
+		for _, part := range ooxmlPartMIMEs {
+			if bytes.Contains(header, []byte(part.part)) {
+				return part.mime
+			}
+		}
+		return detected
+	}
+
+	if detected == "application/octet-stream" && bytes.HasPrefix(header, oleCFBMagic) {
+		earliest := -1
+		mime := ""
+		for _, stream := range oleStreamMIMEs {
+			if at := bytes.Index(header, utf16LEMarker(stream.stream)); at >= 0 && (earliest < 0 || at < earliest) {
+				earliest = at
+				mime = stream.mime
+			}
+		}
+		if mime != "" {
+			return mime
+		}
+	}
+
+	return detected
 }
 
 // validateUpload memeriksa ekstensi, MIME, dan ukuran yang diklaim header.

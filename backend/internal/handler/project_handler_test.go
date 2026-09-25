@@ -178,15 +178,17 @@ type envelope struct {
 // projectDetail adalah bentuk `data` pada `POST /projects` dan `GET /projects/:id`.
 type projectDetail struct {
 	Project struct {
-		ID            string  `json:"id"`
-		Code          string  `json:"code"`
-		Name          string  `json:"name"`
-		Status        string  `json:"status"`
-		OwnerID       string  `json:"owner_id"`
-		OwnerUsername string  `json:"owner_username"`
-		MemberCount   int     `json:"member_count"`
-		StartDate     *string `json:"start_date"`
-		TargetEndDate *string `json:"target_end_date"`
+		ID             string  `json:"id"`
+		Code           string  `json:"code"`
+		Name           string  `json:"name"`
+		Status         string  `json:"status"`
+		OwnerID        string  `json:"owner_id"`
+		OwnerUsername  string  `json:"owner_username"`
+		MemberCount    int     `json:"member_count"`
+		StartDate      *string `json:"start_date"`
+		TargetEndDate  *string `json:"target_end_date"`
+		DepartmentID   *string `json:"department_id"`
+		DepartmentName string  `json:"department_name"`
 	} `json:"project"`
 	Members []struct {
 		UserID   string `json:"user_id"`
@@ -776,4 +778,109 @@ func TestProjectListQueryValidation(t *testing.T) {
 
 	rec := doJSON(t, engine, http.MethodGet, "/api/v1/projects?page=1&limit=100", token, "")
 	requireStatus(t, rec, http.StatusOK)
+}
+
+// TestPatchProjectDepartmentAssignment menutup `department_id` pada
+// `PATCH /projects/:id` (ADR-0027, T-093): departemen organisasi sendiri →
+// 200 dan terbaca di detail; organisasi lain → 422; UUID kosong → 422.
+func TestPatchProjectDepartmentAssignment(t *testing.T) {
+	fixture := newProjectHTTPFixture(t)
+	manager := fixture.createActor("manager")
+	engine := newEngine(t, 5)
+	token := loginToken(t, engine, manager)
+
+	rec := doJSON(t, engine, http.MethodPost, "/api/v1/projects", token, createProjectBody(manager.ID, "DEPT"))
+	requireStatus(t, rec, http.StatusCreated)
+	var created envelope
+	decodeBody(t, rec, &created)
+	var detail projectDetail
+	if err := json.Unmarshal(created.Data, &detail); err != nil {
+		t.Fatalf("baca detail: %v", err)
+	}
+	base := "/api/v1/projects/" + detail.Project.ID
+
+	var departmentID uuid.UUID
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO departments (organization_id, name, code) VALUES ($1, 'Uji Dept', 'UJI-DEPT') RETURNING id`,
+		manager.OrgID).Scan(&departmentID); err != nil {
+		t.Fatalf("buat departemen uji: %v", err)
+	}
+
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{"department_id":"`+departmentID.String()+`"}`)
+	requireStatus(t, rec, http.StatusOK)
+
+	rec = doJSON(t, engine, http.MethodGet, base, token, "")
+	requireStatus(t, rec, http.StatusOK)
+	var after envelope
+	decodeBody(t, rec, &after)
+	var afterDetail projectDetail
+	if err := json.Unmarshal(after.Data, &afterDetail); err != nil {
+		t.Fatalf("baca detail sesudah PATCH: %v", err)
+	}
+	if afterDetail.Project.DepartmentID == nil || *afterDetail.Project.DepartmentID != departmentID.String() {
+		t.Errorf("department_id detail %+v, diharapkan %s", afterDetail.Project, departmentID)
+	}
+	if afterDetail.Project.DepartmentName != "Uji Dept" {
+		t.Errorf("department_name %q, diharapkan Uji Dept", afterDetail.Project.DepartmentName)
+	}
+
+	// Departemen organisasi lain diperlakukan tidak ada → 422.
+	other := fixture.createActor("manager")
+	var foreignID uuid.UUID
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO departments (organization_id, name, code) VALUES ($1, 'Asing', 'ASING') RETURNING id`,
+		other.OrgID).Scan(&foreignID); err != nil {
+		t.Fatalf("buat departemen asing: %v", err)
+	}
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{"department_id":"`+foreignID.String()+`"}`)
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+
+	// UUID kosong → 422.
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{"department_id":"00000000-0000-0000-0000-000000000000"}`)
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+
+	if got := countProjectAudit(t, manager.ID, service.ActionProjectUpdated); got != 1 {
+		t.Errorf("entri audit PROJECT_UPDATED = %d, diharapkan 1", got)
+	}
+}
+
+// TestPatchProjectClearsDepartment menutup pengosongan penugasan (`42-API.md`
+// §3, T-094): `null` eksplisit melepas departemen (kolom kembali NULL).
+func TestPatchProjectClearsDepartment(t *testing.T) {
+	fixture := newProjectHTTPFixture(t)
+	manager := fixture.createActor("manager")
+	engine := newEngine(t, 5)
+	token := loginToken(t, engine, manager)
+
+	rec := doJSON(t, engine, http.MethodPost, "/api/v1/projects", token, createProjectBody(manager.ID, "LEPAS"))
+	requireStatus(t, rec, http.StatusCreated)
+	var created envelope
+	decodeBody(t, rec, &created)
+	var detail projectDetail
+	if err := json.Unmarshal(created.Data, &detail); err != nil {
+		t.Fatalf("baca detail: %v", err)
+	}
+	base := "/api/v1/projects/" + detail.Project.ID
+
+	var departmentID uuid.UUID
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO departments (organization_id, name, code) VALUES ($1, 'Lepas Dept', 'LEPAS-DEPT') RETURNING id`,
+		manager.OrgID).Scan(&departmentID); err != nil {
+		t.Fatalf("buat departemen uji: %v", err)
+	}
+
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{"department_id":"`+departmentID.String()+`"}`)
+	requireStatus(t, rec, http.StatusOK)
+
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{"department_id":null}`)
+	requireStatus(t, rec, http.StatusOK)
+	var after envelope
+	decodeBody(t, rec, &after)
+	var afterDetail projectDetail
+	if err := json.Unmarshal(after.Data, &afterDetail); err != nil {
+		t.Fatalf("baca detail sesudah clear: %v", err)
+	}
+	if afterDetail.Project.DepartmentID != nil {
+		t.Errorf("department_id detail %+v, diharapkan kosong sesudah clear", afterDetail.Project.DepartmentID)
+	}
 }

@@ -28,6 +28,9 @@ func CORS(isProduction bool) gin.HandlerFunc {
 				c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
 				c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, "+HeaderCorrelationID)
 				c.Header("Access-Control-Expose-Headers", HeaderCorrelationID)
+				// Kredensial (cookie refresh token, ADR-0033): hanya bersama
+				// origin eksplisit di atas — tidak pernah dengan `*`.
+				c.Header("Access-Control-Allow-Credentials", "true")
 				c.Header("Access-Control-Max-Age", "600")
 			}
 		}

@@ -160,6 +160,9 @@ CREATE TABLE projects (
     status         VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     start_date     DATE,
     target_end_date DATE,
+    -- Departemen pemilik project (ADR-0027, migrasi 012). Nullable supaya baris
+    -- lama tetap sah; penyaring dashboard `?department_id=` membaca kolom ini.
+    department_id  UUID REFERENCES departments(id),
     created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
@@ -167,6 +170,20 @@ CREATE TABLE projects (
 CREATE UNIQUE INDEX idx_projects_org_code ON projects(organization_id, code);
 CREATE INDEX idx_projects_org ON projects(organization_id);
 CREATE INDEX idx_projects_status ON projects(status);
+CREATE INDEX idx_projects_department ON projects(department_id);
+
+-- Departemen per organisasi (ADR-0027, migrasi 012). Bentuknya sama dengan
+-- `document_categories`: satu tabel master + FK nullable dari entitas utama.
+CREATE TABLE departments (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    name            VARCHAR(100) NOT NULL,
+    code            VARCHAR(50) NOT NULL,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(organization_id, code)
+);
+
+CREATE INDEX idx_departments_org ON departments(organization_id);
 
 CREATE TABLE project_members (
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -210,6 +227,12 @@ CREATE TABLE documents (
     -- FK ke workflow_instances dipasang migrasi 005, bukan 004: tabel tujuannya belum
     -- ada saat 004 berjalan (temuan C-029). Kolomnya sendiri milik tabel ini.
     workflow_instance_id UUID REFERENCES workflow_instances(id),
+    -- Siklus hidup dokumen eksplisit (ADR-0029, migrasi 012). Ketiganya nullable
+    -- dan tidak dihitung turunan: review yang dijadwalkan, kedaluwarsa, dan kapan
+    -- dokumen diterbitkan. Dashboard membaca widget Review Due / Expiry dari sini.
+    review_due_at  TIMESTAMP WITH TIME ZONE,
+    expiry_at      TIMESTAMP WITH TIME ZONE,
+    published_at   TIMESTAMP WITH TIME ZONE,
     created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
@@ -219,6 +242,9 @@ CREATE INDEX idx_documents_project ON documents(project_id);
 CREATE INDEX idx_documents_status ON documents(status);
 CREATE INDEX idx_documents_owner ON documents(owner_id);
 CREATE INDEX idx_documents_title ON documents USING gin(to_tsvector('simple', title));
+CREATE INDEX idx_documents_review_due ON documents(review_due_at) WHERE review_due_at IS NOT NULL;
+CREATE INDEX idx_documents_expiry ON documents(expiry_at) WHERE expiry_at IS NOT NULL;
+CREATE INDEX idx_documents_published ON documents(published_at) WHERE published_at IS NOT NULL;
 
 -- Penomoran dokumen per project (ADR-0017). Nilai hanya naik, tidak pernah dipakai ulang.
 CREATE TABLE document_sequences (
@@ -290,6 +316,11 @@ CREATE TABLE workflow_instances (
     -- guard optimistic locking, dinaikkan tepat 1 pada setiap transisi state yang diterima (ADR-0015).
     -- Bukan nomor versi dokumen dan tidak pernah diisi klien.
     version        INTEGER NOT NULL DEFAULT 0,
+    -- Hasil SLA per instance (ADR-0028, migrasi 012). NULL selama `running`;
+    -- diisi trigger `trg_workflow_sla_status` saat status menjadi `completed`
+    -- atau `rejected`: `on_time` (selesai tidak melewati deadline step terakhir),
+    -- `late` (melewati deadline), `overdue` (`rejected`).
+    sla_status     VARCHAR(20) CHECK (sla_status IN ('on_time', 'late', 'overdue')),
     created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     completed_at   TIMESTAMP WITH TIME ZONE
 );
@@ -297,6 +328,27 @@ CREATE TABLE workflow_instances (
 CREATE INDEX idx_workflow_instances_doc ON workflow_instances(document_id);
 CREATE INDEX idx_workflow_instances_deadline ON workflow_instances(current_step_deadline)
     WHERE status = 'running';
+
+-- Riwayat stage presisi (ADR-0030, migrasi 012). Satu baris per kunjungan step:
+-- ditulis trigger `trg_stage_transition_insert` setiap `current_step` berubah
+-- (baris baru untuk step tujuan + `completed_at` untuk baris sebelumnya) dan
+-- `trg_stage_transition_init` saat instance lahir (baris step pertama — `INSERT`
+-- tidak menyentuh `current_step` sehingga trigger pertama tidak menyala di sana),
+-- bukan estimasi selisih dua baris `workflow_actions`. Chart Avg Time per Stage
+-- membaca `AVG(completed_at - started_at)` dari tabel ini.
+CREATE TABLE workflow_stage_transitions (
+    id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workflow_instance_id   UUID NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+    step_id                UUID NOT NULL REFERENCES workflow_steps(id),
+    stage_order            INTEGER NOT NULL,
+    started_at             TIMESTAMP WITH TIME ZONE NOT NULL,
+    completed_at           TIMESTAMP WITH TIME ZONE,
+    deadline               TIMESTAMP WITH TIME ZONE,
+    created_at             TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_stage_transitions_instance ON workflow_stage_transitions(workflow_instance_id);
+CREATE INDEX idx_stage_transitions_step ON workflow_stage_transitions(step_id);
 
 CREATE TABLE workflow_actions (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -366,11 +418,16 @@ CREATE TABLE comments (
     entity_type VARCHAR(20) NOT NULL CHECK (entity_type IN ('project', 'document', 'task', 'workflow')),
     content     TEXT NOT NULL,
     created_by_id UUID NOT NULL REFERENCES users(id),
+    -- Balasan menunjuk komentar induk pada entitas yang SAMA (ADR-0032,
+    -- migrasi 013, Q-019). NULL = komentar tingkat atas. Hapus induk menghapus
+    -- cabangnya (CASCADE); daftar tetap kronologis datar.
+    parent_id   UUID REFERENCES comments(id) ON DELETE CASCADE,
     created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_comments_entity ON comments(entity_type, entity_id);
 CREATE INDEX idx_comments_created_by ON comments(created_by_id);
+CREATE INDEX idx_comments_parent ON comments(parent_id) WHERE parent_id IS NOT NULL;
 
 CREATE TABLE notifications (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -471,7 +528,10 @@ backend/internal/migration/
 ├── 007_create_comments_notifications_audit.sql
 ├── 008_seed_default_roles.sql
 ├── 009_create_token_revocations.sql
-└── 010_session_revocation_login_attempts_document_archive.sql
+├── 010_session_revocation_login_attempts_document_archive.sql
+├── 011_append_only_message_names_table.sql
+├── 012_create_departments_sla_review_published_stage_history.sql
+└── 013_comment_parent_id.sql
 ```
 
 **Pembagian isi tiap berkas** (satu tabel hanya muncul di satu berkas; nama berkas tidak berubah):
@@ -488,6 +548,9 @@ backend/internal/migration/
 | `008_seed_default_roles.sql` | 4 baris `roles` + 104 baris `role_permissions` (ADR-0014) |
 | `009_create_token_revocations.sql` | `token_revocations` (§2.1, ADR-0009) |
 | `010_session_revocation_login_attempts_document_archive.sql` | `users.tokens_invalid_before` + `users.locked_until` (§2.1, ADR-0021/ADR-0022), tabel `login_attempts` (§2.1, ADR-0022), `documents.archived_at` + nilai kanonik `archived` (§2.3, ADR-0019), dan dua trigger append-only pada `document_versions` (`44-SECURITY.md` §6, ADR-0019 butir 2) |
+| `011_append_only_message_names_table.sql` | Tanpa perubahan skema: `CREATE OR REPLACE FUNCTION prevent_audit_modification()` memakai `TG_TABLE_NAME` supaya pesan penolakan menyebut tabel sasaran yang benar (temuan C-071, `44-SECURITY.md` §6) |
+| `012_create_departments_sla_review_published_stage_history.sql` | Tabel `departments` + `projects.department_id` (§2.2, ADR-0027), kolom `workflow_instances.sla_status` + trigger `trg_workflow_sla_status` (§2.4, ADR-0028), kolom `documents.review_due_at`/`expiry_at`/`published_at` (§2.3, ADR-0029), dan tabel `workflow_stage_transitions` + trigger `trg_stage_transition_insert` (§2.4, ADR-0030) |
+| `013_comment_parent_id.sql` | Kolom `comments.parent_id` + indeks parsial (§2.5, ADR-0032, Q-019) |
 
 > **Catatan penempatan `system_settings` (temuan C-030).** Daftar berkas di atas tidak menetapkan rumahnya, padahal tabel itu bagian skema yang harus ada — jadi implementasi pertama harus memilih, dan itu dicatat sebagai temuan alih-alih dibiarkan mengambang. Pilihannya: ikut `002` karena tidak punya dependensi ke tabel lain dan setting dasar (`file.max_upload_mb`, dst.) dibutuhkan lebih awal daripada `009`. Bila tempat lain dinilai lebih tepat, pindahkan lewat temuan itu; **jangan** menambah berkas `010` hanya untuk tabel yang belum pernah dipasang di lingkungan mana pun.
 

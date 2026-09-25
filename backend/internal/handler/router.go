@@ -159,6 +159,9 @@ func Setup(r *gin.Engine, deps RouterDeps) {
 		documents.GET("/:id",
 			middleware.RequirePermission(deps.Permission, "document", "read"),
 			deps.Document.Get)
+		documents.PATCH("/:id",
+			middleware.RequirePermission(deps.Permission, "document", "update"),
+			deps.Document.Update)
 		documents.POST("/:id/archive",
 			middleware.RequirePermission(deps.Permission, "document", "update"),
 			deps.Document.Archive)
@@ -332,6 +335,13 @@ func Setup(r *gin.Engine, deps RouterDeps) {
 		analytics.GET("/dashboard",
 			middleware.RequirePermission(deps.Permission, "report", "read"),
 			deps.Analytics.Dashboard)
+		// Daftar departemen untuk opsi penyaring `?department_id=` dashboard
+		// (`42-API.md` §13, ADR-0027). Menumpang group ini supaya tidak menambah
+		// receiver route baru; izinnya sama dengan dashboard (`report:read`) —
+		// pasangan baru `department:read` tidak dibuat (ADR-0014).
+		analytics.GET("/departments",
+			middleware.RequirePermission(deps.Permission, "report", "read"),
+			deps.Analytics.ListDepartments)
 	}
 
 	// --- Notifications (`42-API.md` §8) ---

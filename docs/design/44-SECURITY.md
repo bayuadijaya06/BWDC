@@ -55,10 +55,11 @@ type JWTClaims struct {
 - Token expiration: 24 jam default (`JWT_EXPIRY`)
 - Setiap access token memuat klaim `jti` (UUID unik per token) sebagai kunci revokasi
 
-**Refresh token (ADR-0023).** Bentuknya ditetapkan agar tidak lagi ambigu:
+**Refresh token (ADR-0023, transpor ADR-0033).** Bentuknya ditetapkan agar tidak lagi ambigu:
 
 - JWT kedua dari penerbit yang sama, bertanda klaim **`typ: refresh`** (access token: `typ: access`), berumur **7 hari** sebagai konstanta kode `jwt.RefreshExpiry`. `typ` bersifat **wajib**: token tanpa `typ` ditolak.
 - **Tidak disimpan di server** dan **tidak ada tabelnya** — tidak ada token buram, tidak ada rotasi berdeteksi, dan karena itu tidak ada migrasi untuknya.
+- **Diantar lewat cookie `refresh_token`** (`HttpOnly`, `Path=/api/v1/auth`, `Max-Age` 7 hari, `SameSite=Lax`, `Secure` produksi-saja) — tidak pernah di body respons, tidak pernah di `sessionStorage`/`localStorage`. CSRF ditahan `SameSite` (refresh adalah POST); tanpa token anti-CSRF di MVP.
 - **Tidak dapat saling tukar:** refresh token tidak pernah diterima middleware sebagai bearer token, dan access token tidak pernah diterima `POST /auth/refresh`. Keduanya ditolak `401 UNAUTHORIZED`. Inilah alasan klaim `typ` ada: tanpanya, satu refresh token yang bocor menjadi akses penuh selama sepekan.
 - **Pencabutannya memakai pemeriksaan yang sama** dengan access token (`jti` di `token_revocations` **atau** `iat < users.tokens_invalid_before`), sehingga `logout_all` dan `change-password` juga mematikan refresh token lama tanpa aturan tambahan.
 - **Diterbitkan bersama access token saat login**, dan setiap penukaran mengembalikan sepasang token baru sehingga jendela 7 hari bergulir.
@@ -321,17 +322,20 @@ Catatan (ADR-0017):
 ```go
 func validateFileUpload(file multipart.File) error {
     // 1. Check file size (max 100MB)
-    header := make([]byte, 512)
+    header := make([]byte, 8192)
     file.Read(header)
 
-    // 2. MIME type validation (magic bytes)
-    mimeType := http.DetectContentType(header)
+    // 2. MIME type validation (magic bytes + pemurnian format Office, Q-008)
+    mimeType := DetectUploadMimeType(header)
     allowed := map[string]bool{
         "application/pdf": true,
         "text/plain":      true,
         "text/csv":        true,
+        "application/msword": true,
         "application/vnd.ms-excel": true,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": true,
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
         "image/jpeg":    true,
         "image/png":     true,
     }
@@ -343,7 +347,10 @@ func validateFileUpload(file multipart.File) error {
     ext := strings.ToLower(filepath.Ext(file.Name))
     allowedExts := map[string]bool{
         ".pdf": true, ".txt": true, ".csv": true,
-        ".xls": true, ".xlsx": true, ".jpg": true, ".jpeg": true, ".png": true,
+        ".doc": true, ".docx": true,
+        ".xls": true, ".xlsx": true,
+        ".ppt": true, ".pptx": true,
+        ".jpg": true, ".jpeg": true, ".png": true,
     }
     if !allowedExts[ext] {
         return fmt.Errorf("unsupported file extension: %s", ext)
@@ -360,20 +367,40 @@ Sketsa di atas adalah **daftar kebijakan**, bukan kode yang dipakai apa adanya. 
    lebih dulu, lalu ditegakkan ulang saat berkas mengalir lewat `limitedReader`: pembaca itu
    mengembalikan `ErrDocumentFileTooLarge` ketika isinya melampaui batas, bukan memotongnya diam-diam
    (`io.LimitReader` akan memotong dan membuat `size`/`checksum` yang tersimpan menipu).
-2. **MIME dari isi berkas.** Handler membaca 512 byte pertama, memanggil `http.DetectContentType`,
-   lalu mengembalikan posisi pembaca ke awal supaya isi berkas utuh. Daftar yang diterima sama
-   dengan sketsa di atas (pdf, txt, csv, xls, xlsx, jpg, png). **Parameternya dibuang lebih dulu**
+2. **MIME dari isi berkas.** Handler membaca 8 KB pertama, memanggil `DetectUploadMimeType`
+   (`internal/service/document_service_upload.go`), lalu mengembalikan posisi pembaca ke awal
+   supaya isi berkas utuh. Daftar yang diterima sama dengan sketsa di atas (pdf, txt, csv,
+   doc, docx, xls, xlsx, ppt, pptx, jpg, png). **Parameternya dibuang lebih dulu**
    (`normalizeMimeType`): `http.DetectContentType` mengembalikan `text/plain; charset=utf-8` untuk
    berkas teks, sedangkan daftar ini memuat `text/plain`, sehingga perbandingan yang tidak membuang
    parameter menolak **setiap** `.txt` dan `.csv` yang justru dijanjikan (`50-FSD.md` §4.2). Sketsa
    `allowed[mimeType]` di atas **tidak** memuat langkah itu — ia sumber kekeliruannya, dan temuan
    **C-072** mencatatnya supaya tidak dikembalikan.
+2a. **Pemurnian format Office (Q-008, Opsi A).** `http.DetectContentType` saja tidak cukup untuk
+   keluarga Office: kontainer ZIP (`.docx`/`.pptx`/`.xlsx` asli) terdeteksi `application/zip`,
+   dan biner OLE CFB (`.doc`/`.xls`/`.ppt` asli) terdeteksi `application/octet-stream` (terukur
+   P-090, bukan tebakan). Keduanya tidak boleh masuk daftar apa adanya — `application/zip`
+   akan meloloskan arsip ZIP apa pun, dan `application/octet-stream` akan meloloskan **semua**
+   biner tak dikenal. Karena itu `DetectUploadMimeType` memurnikan dari isi, bukan dari nama:
+   ZIP yang memuat nama part OOXML dipetakan ke MIME Office-nya (`word/document.xml`,
+   `xl/workbook.xml`, `ppt/presentation.xml`); OLE bersihir CFB (`D0 CF 11 E0 A1 B1 1A E1`)
+   dipetakan lewat nama stream UTF-16LE (`WordDocument`, `Workbook`, `PowerPoint Document`),
+   dan bila beberapa penanda muncul, **yang paling awal menang** (stream utama biasanya entri
+   direktori pertama; objek tempelan tinggal di storage `MBD…` sesudahnya). ZIP polos tanpa
+   part Office dan OLE tanpa penanda yang dikenal tetap jatuh ke `application/zip` /
+   `application/octet-stream` — keduanya di luar daftar, jadi tetap ditolak. Jendela 8 KB
+   (bukan 512 byte) karena nama part ZIP dan entri direktori CFB hidup sesudah byte ke-512;
+   yang menentukan tetap isi berkas, bukan namanya. Efek samping yang disengaja dan dikunci
+   test: `.xlsx`/`.xls` asli yang selama ini diam-diam tertolak (kelas C-072 yang belum
+   dilaporkan) kini diterima.
 3. **Ekstensi** dari nama berkas diperiksa sebagai penjaga kedua; `.jpeg` diterima. Kedua penjaga
    **tidak berpasangan**: yang diperiksa adalah keanggotaan masing-masing nilai di daftarnya, bukan
    kesesuaian keduanya. Berkas `.pdf` yang isinya teks karena itu **tidak** ditolak (isinya masih
    berada di daftar tipe yang diterima) — dan itu memang disengaja, sebab aturan pasangan akan
    menolak `.csv` yang isinya teks biasa, yang justru kasus paling umum. Yang menentukan adalah isi
-   berkasnya, bukan namanya: berkas berisi arsip ZIP bernama apa pun tetap ditolak dari tipe isinya.
+   berkasnya, bukan namanya: berkas berisi arsip ZIP polos (tanpa part Office) bernama apa pun —
+   termasuk berekstensi `.docx` — tetap ditolak dari tipe isinya (`application/zip` tidak ada di
+   daftar). Sejak Q-008 pengecualiannya hanya ZIP yang terbukti kontainer Office lewat butir 2a.
 4. **Penolakan** dibalas `422 VALIDATION_ERROR` dengan `details[].field = "file"` (`42-API.md` §4),
    bukan `413`: bab Error Responses `42-API.md` §12 tidak memuat `413`, dan menambahkannya berarti
    menambah kode status baru untuk satu kasus.

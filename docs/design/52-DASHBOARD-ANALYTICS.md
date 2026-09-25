@@ -4,6 +4,7 @@
 **Versi:** 0.2.0 — **DIKUNCI ADR-0026**  
 **Tanggal:** 2026-09-23  
 **Status:** `PROPOSED` — hasil telaah `Dashboard.md` (434 baris, 10 bagian) terhadap sistem yang sudah berjalan. Tidak ada kode yang menyentuh endpoint atau widget sebelum ADR mengikatnya. Diikat **ADR-0026 ACCEPTED** 2026-09-23 (T-071).  
+**Amandemen implementasi (P-076, 2026-09-24):** backlog §4 hidup seluruhnya — Q-DASH-01..04 dijawab pemilik (dept Opsi B, SLA Opsi B, review/expiry Opsi A, stage Opsi B) → ADR-0027..0030 + migrasi `012`; dashboard kini 13 KPI + 11 chart (`42-API.md` §13). **Amandemen P-077:** pengisian manual field §4.1 (`PATCH /documents/:id`) dan penugasan project→departemen (`PATCH /projects/:id` + `department_id`) hidup (`T-092`/`T-093`). Yang masih ditahan: kosakata status `published`/`obsolete` (ADR-0012) dan pengosongan kembali field tanggal/departemen (kontrak mencatat "belum didukung").
 **Sumber masukan:** `Dashboard.md` (10-09-2026), `IDEA.md` §K, `50-FSD.md` §9 (widget lama 7 baris), `51-UX.md` §6.4, `41-DATABASE.md`, `42-API.md`, `43-WORKFLOW.md`, ADR-0012 (status kanonik).
 
 ---
@@ -186,7 +187,7 @@ Merujuk `51-UX.md` §11 (baru) dan `DESIGN.md` §2-§3:
 1. **Metric dictionary** (dokumen ini) → **ADR-0026** (Dashboard MVP: metrik mana yang hidup tanpa migrasi, dan apa yang ditahan).
 2. **Backend Analytics API** (`42-API.md` §14, satu `GET /analytics/dashboard`, izin `report:read`, cakupan di kueri) — tanpa tabel baru.
 3. **Frontend Dashboard MVP** (KPI cards 6 + charts 8 di atas, satu filter global `?from=&to=`, drill-down ke daftar).
-4. **Backlog penuh** — department, review_due, SLA, published/obsolete, stage history presisi — masuk `80-ROADMAP.md` Phase 5, menunggu jawaban Q-DASH-01..04.
+4. **Backlog penuh** — department, review_due, SLA, published/obsolete, stage history presisi — masuk `80-ROADMAP.md` Phase 5, menunggu jawaban Q-DASH-01..04. **Selesai P-076** kecuali kosakata `published`/`obsolete` yang tetap ditahan (ADR-0012); pengisian manual dan penugasan menyusul di **P-077** (`T-092`/`T-093`).
 
 Semua langkah di atas **tidak menyuntik dependensi baru** kecuali satu library charting ringan (`recharts` atau setara) — dipin melalui ADR setelah dipilih, karena tiap library membawa dial visual (DESIGN.md §5) dan bundel.
 

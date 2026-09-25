@@ -28,6 +28,7 @@ const (
 	ActionDocumentVersionCreated = "DOCUMENT_VERSION_CREATED"
 	ActionDocumentDownloaded     = "DOCUMENT_DOWNLOADED"
 	ActionDocumentArchived       = "DOCUMENT_ARCHIVED"
+	ActionDocumentUpdated        = "DOCUMENT_UPDATED"
 )
 
 // EntityDocument adalah nilai kolom `audit_logs.entity` untuk semua aksi di atas.
@@ -80,6 +81,15 @@ var (
 	// database, tetapi berkasnya tidak ada di storage. Ini ketidakcocokan di
 	// sisi server, bukan permintaan klien yang salah, sehingga tidak dibalas 404.
 	ErrDocumentFileMissing = errors.New("berkas versi dokumen tidak ada di penyimpanan")
+
+	// ErrDocumentNoUpdateFields → `422 VALIDATION_ERROR`: PATCH tanpa satu pun
+	// field yang dapat diubah (pola `ErrProjectNoUpdateFields`).
+	ErrDocumentNoUpdateFields = errors.New("tidak ada field yang dapat diperbarui")
+
+	// ErrDocumentImmutableField → `422 VALIDATION_ERROR`: `status`,
+	// `project_id`, `owner_id`, atau `document_number` dikirim ke PATCH.
+	// Status hanya bergerak lewat endpoint lifecycle; tiga lainnya immutable.
+	ErrDocumentImmutableField = errors.New("field tidak dapat diubah lewat endpoint ini")
 )
 
 // DocumentListFilter adalah penyaring daftar dokumen yang sudah divalidasi
@@ -99,8 +109,12 @@ type DocumentListFilter struct {
 	UpdatedFrom *time.Time
 	UpdatedTo   *time.Time
 	CategoryID  *uuid.UUID
-	Page        int
-	Limit       int
+	// OwnerID menyaring `documents.owner_id` (`42-API.md` §4, keputusan P-079).
+	// Berjalan di dalam cakupan seperti penyaring lain: dokumen milik aktor di
+	// project yang tidak diikutinya tetap tidak terlihat.
+	OwnerID *uuid.UUID
+	Page    int
+	Limit   int
 }
 
 // CreateDocumentInput adalah input `POST /documents` yang sudah dinormalisasi.
@@ -121,6 +135,30 @@ type CreateDocumentInput struct {
 type DocumentDetail struct {
 	Document       *model.Document
 	CurrentVersion *model.DocumentVersion
+}
+
+// UpdateDocumentInput adalah input `PATCH /documents/:id` (`42-API.md` §4).
+// Field `nil` berarti "tidak dikirim" dan tidak diubah. `Status`, `ProjectID`,
+// `OwnerID`, dan `DocumentNumber` hanya dipakai untuk menolak kiriman yang
+// mencoba mengubahnya (pola `Code` pada `UpdateProjectInput`).
+//
+// `Clear*` berarti field dikirim sebagai `null` eksplisit: kolom kembali NULL.
+// Tidak-dikirim vs null dibedakan handler dari body mentah (`isExplicitNull`),
+// karena `encoding/json` memetakan keduanya ke pointer nil.
+type UpdateDocumentInput struct {
+	Title            *string
+	Description      *string
+	CategoryID       *uuid.UUID
+	ReviewDueAt      *time.Time
+	ExpiryAt         *time.Time
+	PublishedAt      *time.Time
+	ClearReviewDueAt bool
+	ClearExpiryAt    bool
+	ClearPublishedAt bool
+	Status           *string
+	ProjectID        *uuid.UUID
+	OwnerID          *uuid.UUID
+	DocumentNumber   *string
 }
 
 // DocumentDownload adalah hasil `GET /documents/:id/download/:versionId`:
@@ -187,6 +225,7 @@ func (s *DocumentService) List(ctx context.Context, actor Actor, filter Document
 		UpdatedFrom: filter.UpdatedFrom,
 		UpdatedTo:   filter.UpdatedTo,
 		CategoryID:  filter.CategoryID,
+		OwnerID:     filter.OwnerID,
 		Page:        filter.Page,
 		Limit:       filter.Limit,
 	})
@@ -388,6 +427,119 @@ func (s *DocumentService) Archive(ctx context.Context, actor Actor, documentID u
 // Dipakai endpoint `GET /documents/categories` untuk mengisi dropdown penyaring.
 func (s *DocumentService) ListCategories(ctx context.Context, actor Actor) ([]model.DocumentCategory, error) {
 	return s.documents.ListCategories(ctx, actor.OrganizationID)
+}
+
+// Update menerapkan perubahan parsial `PATCH /documents/:id` (`42-API.md` §4,
+// aksi Edit `50-FSD.md` §4.3).
+//
+// Dokumen terarsip ditolak `409`: arsip bersifat terminal di MVP (tidak ada
+// un-archive), konsisten dengan penolakan unggahan versi baru dan submit pada
+// dokumen terarsip. Perubahan dan entri audit `DOCUMENT_UPDATED` berjalan dalam
+// satu transaksi (ADR-0011).
+func (s *DocumentService) Update(ctx context.Context, actor Actor, documentID uuid.UUID, input UpdateDocumentInput) (*DocumentDetail, error) {
+	if input.Status != nil || input.ProjectID != nil || input.OwnerID != nil || input.DocumentNumber != nil {
+		return nil, ErrDocumentImmutableField
+	}
+
+	scope, err := s.Scope(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+
+	document, err := s.documents.FindByID(ctx, scope, documentID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrDocumentNotFound
+		}
+		return nil, err
+	}
+	if document.Status == model.DocumentStatusArchived {
+		return nil, ErrDocumentArchived
+	}
+
+	if input.CategoryID != nil {
+		exists, err := s.documents.CategoryExists(ctx, actor.OrganizationID, *input.CategoryID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, ErrDocumentCategoryInvalid
+		}
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("mulai transaksi pembaruan dokumen: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	documents := s.documents.WithTx(tx)
+	affected, err := documents.Update(ctx, scope, documentID, repository.DocumentUpdate{
+		Title:            input.Title,
+		Description:      input.Description,
+		CategoryID:       input.CategoryID,
+		ReviewDueAt:      input.ReviewDueAt,
+		ExpiryAt:         input.ExpiryAt,
+		PublishedAt:      input.PublishedAt,
+		ClearReviewDueAt: input.ClearReviewDueAt,
+		ClearExpiryAt:    input.ClearExpiryAt,
+		ClearPublishedAt: input.ClearPublishedAt,
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrNoUpdateFields) {
+			return nil, ErrDocumentNoUpdateFields
+		}
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, ErrDocumentNotFound
+	}
+
+	changed := map[string]any{}
+	if input.Title != nil {
+		changed["title"] = *input.Title
+	}
+	if input.Description != nil {
+		changed["description"] = *input.Description
+	}
+	if input.CategoryID != nil {
+		changed["category_id"] = input.CategoryID.String()
+	}
+	if input.ReviewDueAt != nil {
+		changed["review_due_at"] = input.ReviewDueAt.Format(time.RFC3339)
+	}
+	if input.ClearReviewDueAt {
+		changed["review_due_at"] = nil
+	}
+	if input.ExpiryAt != nil {
+		changed["expiry_at"] = input.ExpiryAt.Format(time.RFC3339)
+	}
+	if input.ClearExpiryAt {
+		changed["expiry_at"] = nil
+	}
+	if input.PublishedAt != nil {
+		changed["published_at"] = input.PublishedAt.Format(time.RFC3339)
+	}
+	if input.ClearPublishedAt {
+		changed["published_at"] = nil
+	}
+
+	if err := NewAuditService(tx).Log(ctx, actor.ID, ActionDocumentUpdated, EntityDocument, document.DocumentNumber,
+		"Dokumen "+document.DocumentNumber+" diperbarui", changed); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit pembaruan dokumen: %w", err)
+	}
+
+	s.logger.Info("dokumen diperbarui",
+		"document_id", documentID.String(),
+		"document_number", document.DocumentNumber,
+		"actor_id", actor.ID.String(),
+	)
+
+	return s.Get(ctx, actor, documentID)
 }
 
 // formatDocumentNumber menyusun nomor dokumen `{PROJECT_CODE}-{NNN}` (ADR-0017).

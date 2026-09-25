@@ -153,7 +153,7 @@ func newEngineParts(t *testing.T, maxLoginAttempts int) engineParts {
 		Logger:       discardLogger(),
 		IsProduction: false,
 		Health:       handler.NewHealthHandler(testPool, stubStorage{}),
-		Auth:         handler.NewAuthHandler(authService, discardLogger()),
+		Auth:         handler.NewAuthHandler(authService, discardLogger(), false),
 		Project:      handler.NewProjectHandler(projectService, discardLogger()),
 		Document:     handler.NewDocumentHandler(documentService, discardLogger()),
 		Task:         handler.NewTaskHandler(taskService, permissionChecker, discardLogger()),
@@ -318,11 +318,9 @@ type apiResponse struct {
 	Data    struct {
 		Token     string    `json:"token"`
 		ExpiresAt time.Time `json:"expires_at"`
-		// `refresh_token` + `refresh_expires_at` datang dari login dan refresh
-		// (ADR-0023); keduanya dibaca test supaya bentuk response-nya terkunci.
-		RefreshToken     string    `json:"refresh_token"`
-		RefreshExpiresAt time.Time `json:"refresh_expires_at"`
-		User             struct {
+		// Refresh token TIDAK ada di body sejak ADR-0033: ia dipasang sebagai
+		// cookie `HttpOnly`, dan test membacanya dari header `Set-Cookie`.
+		User struct {
 			ID       string   `json:"id"`
 			Username string   `json:"username"`
 			Roles    []string `json:"roles"`

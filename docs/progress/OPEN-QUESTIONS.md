@@ -203,6 +203,11 @@ kode error baru, mis. `409`).
 > `?view=mine` dipindahkan ke **baris tab di halaman Documents** (`51-UX.md` §2.1). Deep link-nya tetap
 > berjalan seperti sebelumnya, dan karena tabnya kini terlihat di halaman, alasan butir (8) tetap terbaca
 > oleh siapa pun — bukan hanya oleh orang yang menghafal URL-nya. Status pertanyaan ini **tidak berubah**.
+>
+> **Catatan P-079 (filter `owner` hidup):** butir (8) sisi owner tertutup — `GET /documents` mendukung
+> `?owner_id=` (`42-API.md` §4) dan tab `Milik saya` mengirim ID user login (keputusan pemilik P-079:
+> tanpa endpoint daftar pengguna, tanpa dropdown pilih-pengguna). Sisi kategori selesai P-071/P-073,
+> sisi tanggal selesai P-052.
 
 - **Asumsi sementara:** kedelapan butir berlaku seperti yang diimplementasikan pada P-023 dan sudah
   ditulis di `42-API.md` §4, `44-SECURITY.md` §3.1.3/§4.2, `50-FSD.md` §4.2/§4.3, dan `40-TSD.md` §2.3-§2.6.
@@ -303,7 +308,7 @@ Penyebabnya `bindJSON` bersama (`internal/handler/project_handler.go`). Pilihann
   Pertanyaan yang tersisa hanya urutan **sesudahnya**: Workflow (Phase 2) atau modul admin/notification.
 - **Terkait:** `80-ROADMAP.md` §1/§3, `TASKS.md` backlog fase 2/3, temuan C-047.
 
-### Q-019 — Apakah balasan komentar ber-thread (`Reply`) perlu dihidupkan? (NON-BLOCKING)
+### Q-019 — Apakah balasan komentar ber-thread (`Reply`) perlu dihidupkan? → **RESOLVED: implementasikan (datar + parent_id)** (2026-09-24, P-081)
 
 - **Konteks:** `50-FSD.md` §7 mencantumkan field "Reply (optional, threaded)", sedangkan tabel `comments`
   (`41-DATABASE.md` §2.5, migrasi `007`) tidak punya kolom induk (`parent_id`/`reply_to_id`). Tabel itu
@@ -321,16 +326,27 @@ Penyebabnya `bindJSON` bersama (`internal/handler/project_handler.go`). Pilihann
   "membalas…" — migrasi kecil, tetapi tetap butuh ADR karena mengubah skema.
 - **Asumsi sementara:** balasan ditulis sebagai komentar biasa pada entitas yang sama dan ditampilkan
   dalam satu timeline datar; `50-FSD.md` §7 sudah menyatakannya sebagai **belum didukung** sehingga tidak
-  ada janji dokumen yang menggantung. Perilaku itu dikunci test
-  (`TestCommentThreadingIsNotSupported`, yang gagal bila kelak kolom induk muncul).
+  ada janji dokumen yang menggantung. Perilaku itu dikunci test (yang gagal bila kelak kolom induk muncul).
+- **Jawaban pemilik (2026-09-24, P-081): implementasikan threading.** Bentuk: kolom `parent_id UUID NULL
+  REFERENCES comments(id)` + tampilan **datar** dengan penanda "membalas…" (opsi harga-tetap di atas),
+  bukan bersarang rekursif. Dikerjakan bertahap: migrasi + ADR + API (`T-096`), lalu UI (`T-097`).
+  Test pengunci lama dicabut saat kolomnya hidup (diganti `TestCommentReplyLinksToParent`,
+  `TestCommentReplyRequiresParentOnSameEntity`, `TestCommentDeleteParentCascadesReplies`,
+  `TestCommentReplyOverHTTP`).
 - **Terkait:** `50-FSD.md` §7/§8.1, `41-DATABASE.md` §2.5, `42-API.md` §7, temuan C-050, `70-TESTING.md` §3.13.
 
-### Q-021 — Refresh token di klien: `sessionStorage` atau cookie `HttpOnly`? (NON-BLOCKING)
+### Q-021 — Refresh token di klien: `sessionStorage` atau cookie `HttpOnly`? → **RESOLVED: pindah ke cookie HttpOnly** (2026-09-24, P-081)
 
 - **Konteks:** `42-API.md` §2/ADR-0023 mengembalikan refresh token **di body respons**, dan backend tidak memasang cookie. `frontend/src/services/session.ts` karena itu menyimpan refresh token di `sessionStorage` (`localStorage` ditolak supaya sesi berakhir saat tab ditutup), sedangkan **access token hanya di memori** agar tidak dapat dibaca dari penyimpanan. Praktik yang dituju (OWASP) adalah refresh token di cookie `HttpOnly` + `Secure` + `SameSite`, dengan access token tetap di memori.
 - **Kenapa belum dikerjakan:** memindahkannya **mengubah kontrak backend** (`Set-Cookie` di `login`/`refresh`, `credentials: true`, aturan CORS dengan origin eksplisit, dan `/auth/refresh` menerima token dari cookie alih-alih body). Itu keputusan yang menyentuh ADR-0023 dan `42-API.md`, jadi tidak dikerjakan sendiri oleh agen pada sesi scaffold.
 - **Risiko bila dibiarkan:** XSS yang berhasil berjalan di halaman dapat membaca refresh token dari `sessionStorage` dan mempertahankan sesi lebih lama. Dampaknya dibatasi klaim `typ` (refresh token **tidak** dapat dipakai sebagai bearer — sudah dibuktikan test) dan umur 7 hari, tetapi tetap lebih lemah daripada cookie `HttpOnly`.
 - **Asumsi sementara:** `sessionStorage` sebagai jembatan, terisolasi di **satu berkas** (`services/session.ts`) supaya perpindahan ke cookie hanya menyentuh berkas itu plus `http.ts` (`withCredentials: false`).
+- **Jawaban pemilik (2026-09-24, P-081): pindah ke cookie `HttpOnly`.** Dikerjakan sebagai `T-098`:
+  `Set-Cookie` di login/refresh, `credentials: true`, CORS origin eksplisit, `/auth/refresh` baca dari
+  cookie, amandemen ADR-0023 + `42-API.md` §2 + `44-SECURITY.md` §2.2.
+- **Dikerjakan P-086 (`T-098` DONE, ADR-0033):** cookie `refresh_token` (`HttpOnly`,
+  `Path=/api/v1/auth`, 7 hari, `SameSite=Lax`, `Secure` produksi); body tanpa salinan; refresh baca
+  cookie (hilang → 401); logout/change-password tulis/hapus cookie; klien tanpa storage.
 - **Terkait:** ADR-0009/0021/0023, `42-API.md` §2, `44-SECURITY.md` §2.2, `frontend/src/services/session.ts`.
 
 ### Q-022 — Konvensi frontend yang diputuskan agen saat scaffold (NON-BLOCKING)
@@ -348,7 +364,7 @@ Penyebabnya `bindJSON` bersama (`internal/handler/project_handler.go`). Pilihann
 - **Risiko bila salah:** semuanya konvensi internal yang murah dibalik; yang paling mahal adalah (1) dan (6) karena menyentuh banyak berkas.
 - **Terkait:** `30-ARCHITECTURE.md` §2.1/§2.2, ADR-0024, `60-DEPLOYMENT.md` §3.2, `frontend/src/services/*`.
 
-### Q-023 — Lisensi proyek dan kebijakan kontribusi pihak ketiga (BLOCKING untuk distribusi, NON-BLOCKING untuk pengembangan)
+### Q-023 — Lisensi proyek dan kebijakan kontribusi pihak ketiga → **RESOLVED: Apache-2.0, pemegang hak cipta BSA** (2026-09-24, P-076)
 
 - **Konteks:** `README.md` §13 menyatakan status lisensi **belum ditetapkan**, dan repositori ini memang
 tidak punya berkas `LICENSE`, tidak punya field `license` di `frontend/package.json`, dan tidak punya
@@ -363,9 +379,16 @@ dibuat — dan pemilik memilih **menunda keputusan itu** sambil tetap menjawab s
     bawaan yang sudah berlaku), **MIT** (paling ringkas dan umum untuk proyek publik), atau **Apache-2.0**
     (permisif plus pemberian lisensi paten eksplisit). Sampai diputuskan, **tidak ada** yang boleh
     menganggap proyek ini open source, dan agen tidak boleh membuat berkas `LICENSE` sendiri.
+- **Jawaban pemilik (2026-09-24, P-076): Opsi C — Apache-2.0**, pemegang hak cipta BSA (butir b sudah
+  diputuskan P-038). Dicatat **ADR-0031 ACCEPTED**. Berkas `LICENSE` ditulis pada **P-077** (teks
+  standar Apache-2.0 + `Copyright 2026 BSA`); `README.md` §13 dan `frontend/package.json` (`license:
+  Apache-2.0`, tetap `private`) diperbarui di sesi yang sama.
   - **Butir (c) — apakah kontribusi pihak ketiga diterima**, dan lewat kanal apa (pelacak isu, surel,
     atau pull request). Saat ini jalur satu-satunya adalah ledger: entri di `TASKS.md` untuk usulan kerja
     dan `OPEN-QUESTIONS.md` untuk hal yang butuh keputusan pemilik.
+- **Jawaban pemilik (2026-09-24, P-080): butir (c) — internal saja.** Kontribusi hanya dari pemilik dan
+  agen; kontribusi pihak luar tidak diterima. `README.md` §12 ditegaskan internal di sesi yang sama.
+  Q-023 tertutup penuh; `T-050` DONE.
 - **Konsekuensi bila ditunda terus:** tidak ada perubahan pada pengembangan (build, test, dan migrasi
   tidak bergantung pada lisensi). Yang tertahan hanya **distribusi dan penerimaan kontribusi luar**:
   tanpa lisensi, pihak ketiga tidak punya hak apa pun atas kode ini — termasuk hak untuk ikut
@@ -401,7 +424,7 @@ dibuat — dan pemilik memilih **menunda keputusan itu** sambil tetap menjawab s
 - **Rekomendasi agen:** **(a) sekarang, (b) saat berkas baru ditulis** — karena teks yang benar-benar
   sampai ke pengguna sudah dijaga mesin, sedangkan (c) paling baik dikerjakan bersamaan dengan sesi yang
   memang menyentuh dokumen itu, bukan sebagai gelombang tersendiri yang menenggelamkan perubahan lain.
-- **Keputusan Anda:** _(belum dijawab)_
+- **Keputusan pemilik (2026-09-25, P-090): Opsi A — biarkan.** Cakupan R-02 tetap teks yang dibaca pengguna (`frontend/src`, tanpa komentar, dijaga `check-antislop-refs.sh` butir 8). Q-025 `RESOLVED`; tanpa perubahan kode.
 
 ### Q-026 — Target sentuh di desktop: pertahankan 36px (padat) atau naikkan ke 44px? (NON-BLOCKING)
 
@@ -424,7 +447,7 @@ dibuat — dan pemilik memilih **menunda keputusan itu** sambil tetap menjawab s
     diperiksa mesin, jadi ia menambah aturan yang harus diingat manusia.
 - **Rekomendasi agen:** **(a)**, karena alasan kepadatannya memang tertulis dan kini diukur, dan karena
   (b) mengubah tata letak demi memenuhi ambang yang jelas-jelas dimaksudkan untuk layar sentuh.
-- **Keputusan Anda:** _(belum dijawab)_
+- **Keputusan pemilik (2026-09-25, P-090): Opsi A — pertahankan dua register** (44px sentuh, 36px desktop, `51-UX.md` §9 + `tokens.css`). Q-026 `RESOLVED`; tanpa perubahan kode.
 
 ### Q-024 — Bagaimana klien memilih **pengguna** (field `Owner` project) tanpa endpoint daftar pengguna? (NON-BLOCKING)
 
@@ -547,7 +570,7 @@ task **`T-045`** `DONE`, dan `POST /auth/login` kini juga mengembalikan `refresh
 - **Bukti:** ADR-0010 (ACCEPTED), `41-DATABASE.md` §4.1, `40-TSD.md` §2.7, `60-DEPLOYMENT.md` §2 & §4.2 (termasuk penambahan `ADMIN_ORG_NAME` dan `ADMIN_ORG_CODE`).
 - **Membuka:** `T-004` dan bagian login pada `T-005`.
 
-### Q-008 — Kebijakan file upload untuk dokumen kantor (NON-BLOCKING, menyentuh Phase 1)
+### Q-008 — Kebijakan file upload untuk dokumen kantor → **RESOLVED: Opsi A (tambah .doc/.docx/.ppt/.pptx)** (2026-09-25, P-090)
 
 > Catatan: masih terbuka. Tidak menghalangi Phase 0.
 
@@ -557,6 +580,7 @@ task **`T-045`** `DONE`, dan `POST /auth/login` kini juga mengembalikan `refresh
   - **B. Pertahankan daftar sekarang** dan minta pengguna mengonversi ke PDF.
   - **C. Daftar dapat dikonfigurasi admin** lewat `system_settings` (`41-DATABASE.md` sudah punya tabel setelan) sebagai pekerjaan lanjutan.
 - **Dampak bila tidak dijawab:** baru terasa di Phase 1 (document module), tidak menghalangi Phase 0.
+- **Keputusan pemilik (2026-09-25, P-090): Opsi A.** Empat ekstensi hidup dengan validasi magic bytes: `.docx`/`.pptx`/`.xlsx` dikenali dari kontainer ZIP lewat nama part OOXML (`word/document.xml`, `xl/workbook.xml`, `ppt/presentation.xml`); `.doc`/`.xls`/`.ppt` dikenali dari sihir OLE CFB + nama stream (`WordDocument`, `Workbook`, `PowerPoint Document`, penanda paling awal menang). ZIP polos tanpa part Office tetap ditolak (`palsu.pdf` berisi zip tetap `422`). Tanpa pasangan izin baru dan tanpa migrasi — Q-008 `RESOLVED`, dikerjakan sebagai `T-101`.
 - **Terkait:** `44-SECURITY.md` §4.2, `50-FSD.md` §4.2, task Phase 1.
 
 ### Q-004 — Repositori git belum diinisialisasi → **RESOLVED: DIIZINKAN** (2026-09-18, sesi P-018)
@@ -579,31 +603,35 @@ task **`T-045`** `DONE`, dan `POST /auth/login` kini juga mengembalikan `refresh
 ---
 
 
-### Q-DASH-01 — Department / organisasi unit untuk filter & chart (NON-BLOCKING, Phase 5)
+### Q-DASH-01 — Department / organisasi unit untuk filter & chart → **RESOLVED: Opsi B (tabel `departments` + `projects.department_id`)** (2026-09-24, P-076)
 
 - **Konteks:** `Dashboard.md` §1.7/§2.7/§6 meminta `Documents by Department`, `Workflow Volume by Department`, filter `Department`. Skema `41-DATABASE.md` hanya punya `organizations` (tenant) dan `projects` — tidak ada hierarki department. MVP dashboard (`52-DASHBOARD-ANALYTICS.md` §4.1) menahan chart itu sampai struktur didefinisikan.
 - **Pertanyaan:** apakah department = subset `projects` (mis. `projects.department` ENUM), tabel baru `departments` + `project_department_id`, atau `users.department` + `documents.owner.department`? Masing-masing menambah DDL berbeda.
 - **Rekomendasi agen:** tunda sampai kebutuhan organisasi nyata ada; untuk MVP gunakan `project` sebagai proxy department, jangan menambah kolom nullable yang tidak jelas dipakai.
 - **Dampak bila ditunda:** chart by Department di Dashboard.md akan kosong di MVP, tetapi 8 chart MVP lain tetap hidup.
 - **Terkait:** `Dashboard.md` §1.7, `52-DASHBOARD-ANALYTICS.md` §4.1, task `T-074`.
+- **Jawaban pemilik (2026-09-24, P-076): Opsi B** — tabel `departments` + FK `projects.department_id`. Dijalankan lewat **ADR-0027** + migrasi `012` (tabel + seed 4 + trigger? tidak — tanpa trigger; seed backfill + bootstrap org baru) + `GET /analytics/departments` + filter `?department_id=` + chart `byDepartment`. Selesai di `T-074`/`T-087`.
 
-### Q-DASH-02 — Definisi SLA Compliance (On Time / Late / Overdue) (NON-BLOCKING)
+### Q-DASH-02 — Definisi SLA Compliance (On Time / Late / Overdue) → **RESOLVED: Opsi B (`sla_status` per-step)** (2026-09-24, P-076)
 
 - **Konteks:** KPI `SLA Compliance Rate` dan chart `SLA Compliance`/`SLA Trend` (`Dashboard.md` §1.6, §2.4) menulis tiga bucket tanpa rumus. `workflow_steps.deadline_days` dan `workflow_instances.current_step_deadline` sudah ada (ADR-0015), tetapi kapan sebuah workflow dianggap Late? `completed_at > deadline` pertama? `current_step_deadline` lewat saat masih `running`? Butuh ADR.
 - **Opsi:** (a) `On Time = completed_at <= max(step deadines) OR still running && deadline not passed`, (b) per-step Late, (c) definisi tenant-specific via `system_settings`.
 - **Rekomendasi:** (a) sederhana + dapat dihitung dari kolom yang ada — `completed_at` vs `current_step_deadline` + `workflow_actions` — tanpa `stage_history` baru.
 - **Terkait:** `52-DASHBOARD-ANALYTICS.md` §2.1, task `T-071` (ADR-0026 akan mengikatnya).
+- **Jawaban pemilik (2026-09-24, P-076): Opsi B** — kolom `sla_status` per-step. Dijalankan lewat **ADR-0028** + migrasi `012` (kolom + trigger `trg_workflow_sla_status`: `on_time`/`late`/`overdue`, NULL selama running) + KPI + chart `slaBreakdown`. Selesai di `T-074`/`T-087`.
 
-### Q-DASH-03 — `review_due_at` / `expiry_at` / `published_at` untuk Document Control (NON-BLOCKING)
+### Q-DASH-03 — `review_due_at` / `expiry_at` / `published_at` untuk Document Control → **RESOLVED: Opsi A (kolom eksplisit)** (2026-09-24, P-076)
 
 - **Konteks:** `Dashboard.md` §3 `Review Due / Overdue`, `Document Expiry / Review Calendar`, `Obsolete Documents` meminta field `review_due_at`, `expiry_at`, `published_at` pada `documents` yang tidak ada di `41-DATABASE.md` §2.3 (hanya `created_at`/`updated_at`/`archived_at`). MVP dashboard menggantikan "Due for Review" dengan "Revised This Month" dari `document_versions` — sisa masuk backlog.
 - **Pertanyaan:** apakah review due dihitung `created_at + N hari` (tanpa kolom) atau disimpan eksplisit? Apakah `Published` = `approved + published_at` terisi?
 - **Rekomendasi:** tunda; masuk Phase 5 dengan migrasi `012` bila keputusan ada — jangan meniru `updated_at + 30 hari` tanpa keputusan.
+- **Jawaban pemilik (2026-09-24, P-076): Opsi A** — kolom eksplisit nullable. Dijalankan lewat **ADR-0029** + migrasi `012` + KPI `review_due`/`expired` + chart `reviewDueTrend` + metadata `DocumentDetail`. Pengisian manual (endpoint tulis + UI) menyusul. Selesai di `T-074`/`T-087`.
 
-### Q-DASH-04 — `workflow_stage_history` presisi untuk Average Time per Stage (NON-BLOCKING)
+### Q-DASH-04 — `workflow_stage_history` presisi untuk Average Time per Stage → **RESOLVED: Opsi B (tabel `workflow_stage_transitions`)** (2026-09-24, P-076)
 
 - **Konteks:** `Dashboard.md` §2.2 `Average Time per Workflow Stage` butuh durasi per stage. Sumber yang ada: `workflow_instances` (satu `current_step`, satu deadline) + `workflow_actions` (aksi). Durasi stage presisi butuh `stage_started_at`/`stage_completed_at` per langkah, yang tidak ada. MVP memakai selisih dua aksi berturut (`52-*` §3.1) — estimasi, bukan ukuran.
 - **Rekomendasi:** terima estimasi untuk MVP; bila presisi diminta, buat tabel `workflow_stage_transitions` baru (Phase 5) — jangan menambah trigger history tanpa ADR.
+- **Jawaban pemilik (2026-09-24, P-076): Opsi B** — tabel `workflow_stage_transitions`. Dijalankan lewat **ADR-0030** + migrasi `012` (tabel + trigger `trg_stage_transition_insert`); `avgTimePerStage` kini `AVG(completed_at - started_at)`. Selesai di `T-074`/`T-087`.
 
 ## 2. Temuan Inkonsistensi Dokumen
 

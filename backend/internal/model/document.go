@@ -85,6 +85,11 @@ type Document struct {
 	WorkflowInstanceID *uuid.UUID `json:"workflow_instance_id,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
+	// Field eksplisit untuk document control (ADR-0029): nullable, diisi manual
+	// atau otomatis saat status approved.
+	ReviewDueAt *time.Time `json:"review_due_at,omitempty"`
+	ExpiryAt    *time.Time `json:"expiry_at,omitempty"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
 
 	// Kolom turunan untuk daftar/detail (`50-FSD.md` §4.1 kolom tabel dan §4.3
 	// metadata). Dibaca lewat JOIN/subquery, tidak disimpan di tabel.
@@ -94,6 +99,7 @@ type Document struct {
 	// baru di project arsip sampai Q-016 butir 6 diputuskan user.
 	ProjectCode      string `json:"project_code,omitempty"`
 	ProjectName      string `json:"project_name,omitempty"`
+	DepartmentName   string `json:"department_name,omitempty"`
 	CategoryName     string `json:"category_name,omitempty"`
 	OwnerUsername    string `json:"owner_username,omitempty"`
 	LatestVersion    string `json:"latest_version,omitempty"`

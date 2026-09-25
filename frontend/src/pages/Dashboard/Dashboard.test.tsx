@@ -10,12 +10,13 @@ import { renderWithProviders } from "@/test/render";
 
 const mocks = vi.hoisted(() => ({
   fetchDashboard: vi.fn(),
+  fetchDepartments: vi.fn(),
   listProjects: vi.fn(),
 }));
 
 vi.mock("@/services/analytics", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/analytics")>();
-  return { ...actual, fetchDashboard: mocks.fetchDashboard };
+  return { ...actual, fetchDashboard: mocks.fetchDashboard, fetchDepartments: mocks.fetchDepartments };
 });
 
 vi.mock("@/services/projects", async (importOriginal) => {
@@ -24,6 +25,7 @@ vi.mock("@/services/projects", async (importOriginal) => {
 });
 
 const { DashboardPage } = await import("./index");
+const { normalizeDashboardData } = await import("@/services/analytics");
 
 const dashboardData = {
   kpis: {
@@ -35,6 +37,11 @@ const dashboardData = {
     revised_this_month: 5,
     open_tasks: 12,
     overdue_tasks: 4,
+    sla_on_time: 6,
+    sla_late: 2,
+    sla_overdue: 1,
+    review_due: 9,
+    expired: 1,
   },
   charts: {
     statusDist: [
@@ -48,6 +55,9 @@ const dashboardData = {
     avgTimePerStage: [{ stage: "Technical Review", hours: 18.5 }],
     byCategory: [{ category: "Belum dikategorikan", count: 42 }],
     activityTrend: [{ date: "2026-09-01", created: 2, submitted: 1, approved: 1, revised: 0 }],
+    slaBreakdown: [{ week: "2026-W38", on_time: 6, late: 2, overdue: 1 }],
+    byDepartment: [{ department: "IT", count: 20 }],
+    reviewDueTrend: [{ week: "2026-W40", review_due: 3, expired: 1, published: 2 }],
   },
 };
 
@@ -66,6 +76,10 @@ function profileWith(permissions: string[]): UserProfile {
 beforeEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
   mocks.fetchDashboard.mockResolvedValue(dashboardData);
+  mocks.fetchDepartments.mockResolvedValue([
+    { id: "dep-it", name: "IT", code: "IT" },
+    { id: "dep-fin", name: "Finance", code: "FIN" },
+  ]);
   mocks.listProjects.mockResolvedValue({ items: [], meta: { page: 1, limit: 100, total: 0, total_page: 0 } });
   useAuthStore.setState({
     status: "authenticated",
@@ -94,12 +108,33 @@ describe("halaman Dashboard — MVP analytics", () => {
     await userEvent.setup().click(screen.getByRole("tab", { name: /Workflow/ }));
     expect(await screen.findByText("Workflow Volume Trend")).toBeInTheDocument();
     expect(screen.getByText("Activity Trend")).toBeInTheDocument();
+    expect(screen.getByText("SLA Compliance")).toBeInTheDocument();
     expect(screen.queryByText("Sebaran Status Dokumen")).not.toBeInTheDocument();
     // Pindah ke Antrian
     await userEvent.setup().click(screen.getByRole("tab", { name: /Antrian/ }));
     expect(await screen.findByText("Pending Aging")).toBeInTheDocument();
     expect(screen.getByText("Avg Time per Stage")).toBeInTheDocument();
     expect(await runAxe(container)).toEqual([]);
+  });
+
+  it("menampilkan KPI SLA/review dan filter departemen", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DashboardPage />, { route: "/" });
+    // KPI Phase 5
+    expect(await screen.findByText("SLA On Time")).toBeInTheDocument();
+    expect(screen.getByText("SLA Late")).toBeInTheDocument();
+    expect(screen.getByText("SLA Overdue")).toBeInTheDocument();
+    expect(screen.getByText("Review Due")).toBeInTheDocument();
+    expect(screen.getByText("Expired")).toBeInTheDocument();
+    // Dropdown departemen terisi dari GET /analytics/departments
+    const deptSelect = screen.getByLabelText("Departemen") as HTMLSelectElement;
+    expect(deptSelect).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("option", { name: "IT" })).toBeInTheDocument());
+    // Memilih departemen mengirim department_id ke server
+    await user.selectOptions(deptSelect, "dep-it");
+    await waitFor(() =>
+      expect(mocks.fetchDashboard).toHaveBeenCalledWith(expect.objectContaining({ department_id: "dep-it" })),
+    );
   });
 
   it("membatasi akses bila tanpa report:read", async () => {
@@ -138,7 +173,7 @@ describe("halaman Dashboard — MVP analytics", () => {
 
   it("menampilkan pesan kosong saat belum ada data", async () => {
     mocks.fetchDashboard.mockResolvedValue({
-      kpis: { total_documents: 0, active_workflows: 0, pending_approvals: 0, overdue_workflows: 0, avg_approval_time_hours: 0, revised_this_month: 0, open_tasks: 0, overdue_tasks: 0 },
+      kpis: { total_documents: 0, active_workflows: 0, pending_approvals: 0, overdue_workflows: 0, avg_approval_time_hours: 0, revised_this_month: 0, open_tasks: 0, overdue_tasks: 0, sla_on_time: 0, sla_late: 0, sla_overdue: 0, review_due: 0, expired: 0 },
       charts: {
         statusDist: [],
         volumeTrend: [],
@@ -148,10 +183,32 @@ describe("halaman Dashboard — MVP analytics", () => {
         avgTimePerStage: [],
         byCategory: [],
         activityTrend: [],
+        slaBreakdown: [],
+        byDepartment: [],
+        reviewDueTrend: [],
       },
     });
     renderWithProviders(<DashboardPage />, { route: "/" });
     expect((await screen.findAllByText("0")).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Belum ada dokumen")).toBeInTheDocument();
+  });
+
+  it("tidak putih saat backend lama tanpa chart/KPI Phase 5 (temuan P-084)", async () => {
+    // Mensimulasikan backend sebelum migrasi 012: normalisasi nyata dipakai
+    // supaya yang diuji adalah perilaku produksi, bukan tiruan yang longgar.
+    mocks.fetchDashboard.mockImplementation(async () =>
+      normalizeDashboardData({
+        kpis: { total_documents: 42 },
+        charts: { statusDist: [{ status: "draft", count: 10 }] },
+      } as never),
+    );
+    renderWithProviders(<DashboardPage />, { route: "/" });
+
+    // KPI lama tampil, KPI baru nol, chart baru menampilkan keadaan kosong —
+    // tanpa TypeError.
+    expect(await screen.findByText("42")).toBeInTheDocument();
+    expect(screen.getByText("SLA On Time")).toBeInTheDocument();
+    expect(screen.getByText("Dokumen per Departemen")).toBeInTheDocument();
+    expect(screen.getByText("Belum ada departemen")).toBeInTheDocument();
   });
 });

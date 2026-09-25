@@ -27,21 +27,23 @@ Request:
 ```json
 { "username": "admin", "password": "secret" }
 ```
-Response 200:
+Response 200 (+ `Set-Cookie`):
 ```json
 {
   "success": true,
   "data": {
     "token": "eyJ...",
     "expires_at": "2026-09-18T13:30:00+07:00",
-    "refresh_token": "eyJ...",
-    "refresh_expires_at": "2026-09-25T13:30:00+07:00",
     "user": { "id": "...", "username": "admin", "email": "...", "roles": ["administrator"] }
   }
 }
 ```
 
-`refresh_token` + `refresh_expires_at` dikirim sejak **ADR-0023**: itulah modal yang diperlukan `POST /auth/refresh`, dan tanpanya endpoint itu tidak dapat dipakai klien mana pun.
+Refresh token **tidak lagi** dikirim di body sejak **ADR-0033**: ia dipasang sebagai cookie
+`refresh_token` (`HttpOnly`, `Path=/api/v1/auth`, `Max-Age` 7 hari, `SameSite=Lax`,
+`Secure` hanya bila `APP_ENV=production`) — salinan body yang dapat dibaca JS akan menggagalkan
+tujuan perpindahan (Q-021). Klien menyimpan access token di memori dan tidak menyimpan apa pun
+di `sessionStorage`/`localStorage`.
 
 Izin: **tidak ada** — endpoint publik (hanya autentikasi kredensial). Yang membatasinya adalah FR-AUTH-06: ambang `auth.max_login_attempts` (default 5) percobaan gagal per 15 menit per username, dibaca dari `system_settings`, plus batas per alamat klien di middleware. Username yang tidak ada dan password yang salah memakai pesan dan status yang **sama** (`401 INVALID_CREDENTIALS`).
 
@@ -61,6 +63,9 @@ Request (opsional): `{"logout_all": true}`
 Response 200: `{"success": true}`
 
 Perilaku (ADR-0009):
+
+> Sejak **ADR-0033**, logout juga menghapus cookie `refresh_token` (k kedaluwarsa, `Path` sama) — berlaku untuk logout biasa maupun `logout_all`.
+
 - `jti` token yang dikirim dicabut seketika; token itu tidak dapat dipakai lagi walaupun belum `exp`.
 - Dengan `logout_all: true`, seluruh token aktif milik user dicabut (mis. perangkat lain).
 - Idempotent: memanggil ulang dengan token yang sudah dicabut tetap mengembalikan 200, bukan error.
@@ -81,38 +86,34 @@ Response 200: user profile + permissions
 Izin: **hanya autentikasi**.
 
 ### POST /auth/refresh
-Headers: **tidak ada** `Authorization` — yang dikirim adalah refresh token di body
-Request:
-```json
-{ "refresh_token": "eyJ..." }
-```
-Response 200:
+Headers: **tidak ada** `Authorization` — yang dikirim adalah cookie `refresh_token` (otomatis oleh peramban; CORS dev mengizinkan kredensial, produksi same-origin). Body **diabaikan**.
+Request: `{}` (boleh kosong; tidak ada field yang dibaca)
+
+Response 200 (+ `Set-Cookie` refresh baru — rotasi bergulir):
 ```json
 {
   "success": true,
   "data": {
     "token": "eyJ...",
-    "expires_at": "2026-09-21T13:30:00+07:00",
-    "refresh_token": "eyJ...",
-    "refresh_expires_at": "2026-09-28T13:30:00+07:00"
+    "expires_at": "2026-09-21T13:30:00+07:00"
   }
 }
 ```
 
-Bentuk tokennya ditetapkan **ADR-0023**: refresh token adalah JWT kedua dari penerbit yang sama, dibedakan oleh klaim **`typ: refresh`** (access token memakai `typ: access`), berumur **7 hari**, dan **tidak disimpan di server**. Access token tetap `JWT_EXPIRY` (default 24 jam).
+Bentuk tokennya ditetapkan **ADR-0023**: refresh token adalah JWT kedua dari penerbit yang sama, dibedakan oleh klaim **`typ: refresh`** (access token memakai `typ: access`), berumur **7 hari**, dan **tidak disimpan di server**. Access token tetap `JWT_EXPIRY` (default 24 jam). Transportnya ditetapkan **ADR-0033**: cookie `refresh_token` (`HttpOnly`, `Path=/api/v1/auth`, `Max-Age` 7 hari, `SameSite=Lax`, `Secure` produksi-saja) — bukan body.
 
 Aturan yang mengikat:
 
 - **`typ` wajib.** Token tanpa `typ` ditolak, dan tipe yang salah juga: refresh token **tidak dapat** dipakai sebagai bearer token di endpoint terproteksi, dan access token **tidak dapat** ditukar di sini. Keduanya berbalas `401 UNAUTHORIZED`. Tanpa pemeriksaan itu, satu refresh token yang bocor menjadi akses penuh selama sepekan.
-- **Endpoint ini tidak memakai `AuthMiddleware`.** Yang dikirim adalah refresh token di body, bukan access token di header — access token yang sudah kedaluwarsa justru keadaan yang membuat endpoint ini dipanggil.
+- **Endpoint ini tidak memakai `AuthMiddleware`.** Yang dikirim adalah cookie refresh token, bukan access token di header — access token yang sudah kedaluwarsa justru keadaan yang membuat endpoint ini dipanggil.
 - **Pemeriksaan pencabutannya satu dan sama** dengan endpoint terproteksi lain: sesi dianggap mati bila `jti` token itu ada di `token_revocations` **atau** `iat`-nya lebih tua daripada `users.tokens_invalid_before` (ADR-0009 butir 7, ADR-0021 butir 6). Karena itu `logout_all` dan `change-password` otomatis membuat refresh token lama tidak berguna. Sesi tercabut dibalas `401 TOKEN_REVOKED` — kode yang **sama** dengan yang dipakai middleware.
 - **Akunnya harus masih aktif.** Akun yang dinonaktifkan (FR-AUTH-07) dibalas `403 ACCOUNT_INACTIVE`, supaya penonaktifan berlaku sampai token terakhir alih-alih menunggu 7 hari. User yang barisnya sudah tidak ada juga tidak dapat memperpanjang sesinya (`401 TOKEN_REVOKED`).
-- **Setiap penukaran mengembalikan sepasang token baru**, sehingga jendela 7 hari bergulir mengikuti pemakaian.
+- **Setiap penukaran mengembalikan access token baru dan cookie refresh baru**, sehingga jendela 7 hari bergulir mengikuti pemakaian.
 - **Token lama tidak dicabut saat rotasi.** Ini keterbatasan yang disadari ADR-0023: bentuknya stateless, jadi pemakaian ulang tidak dapat dideteksi. Yang menutupinya adalah masa berlaku access token yang pendek dan pencabutan lewat `tokens_invalid_before`.
 - Jendela satu detik berlaku sama seperti logout: refresh token yang terbit pada detik yang sama dengan `logout_all` ikut selamat (temuan **C-053**).
 - **Tidak ada entri `audit_logs`** untuk refresh: ia tidak mengubah data dan tidak ada di kosakata aksi audit (§12, `44-SECURITY.md` §6.1); sesinya sudah tercatat sebagai `LOGIN`.
 
-Kode error: `422 VALIDATION_ERROR` (`refresh_token` kosong/tidak dikirim, `details.field = refresh_token`) · `401 UNAUTHORIZED` (tidak sah, tanda tangan/`exp`/tipe salah) · `401 TOKEN_REVOKED` (sesi tercabut) · `403 ACCOUNT_INACTIVE` (akun dinonaktifkan).
+Kode error: `401 UNAUTHORIZED` (cookie hilang/kosong, tidak sah, tanda tangan/`exp`/tipe salah) · `401 TOKEN_REVOKED` (sesi tercabut) · `403 ACCOUNT_INACTIVE` (akun dinonaktifkan).
 
 Izin: **hanya autentikasi** (refresh token menggantikan bearer token).
 
@@ -122,7 +123,7 @@ Request:
 ```json
 { "old_password": "lama", "new_password": "baru-minimal-8" }
 ```
-Response 200:
+Response 200 (+ cookie refresh baru — sesi yang dipakai ikut selamat dari pencabutan massalnya sendiri):
 ```json
 {
   "success": true,
@@ -233,13 +234,14 @@ Izin: `project:create` (Administrator, Manager).
 
 ### PATCH /projects/:id
 
-Request: sebagian field — `name`, `description`, `owner_id`, `start_date`, `target_end_date`. Field yang tidak dikirim tidak diubah.
+Request: sebagian field — `name`, `description`, `owner_id`, `start_date`, `target_end_date`, `department_id`. Field yang tidak dikirim tidak diubah.
 
 Aturan:
 
 - `code` **tidak dapat diubah**; mengirimkannya (walau nilainya sama) → `409 CONFLICT` (ADR-0017). Hanya field itu yang dikenai aturan ini.
 - Body tanpa satu pun field yang dapat diubah → `422 VALIDATION_ERROR` pada `details.field` = `body`.
 - `owner_id` baru harus user di organisasi aktor (`422` bila tidak) dan **langsung dijadikan anggota berrole `owner`** dalam transaksi yang sama — alasannya sama dengan `POST /projects`. Owner lama **tetap anggota** (role-nya tidak diubah otomatis): pemindahan kepemilikan bukan pencabutan keanggotaan.
+- `department_id` harus departemen di organisasi aktor (`422` bila tidak). `null` eksplisit **melepas** penugasan (kolom kembali `NULL`); tidak dikirim berarti tidak diubah. Keduanya dibedakan dari body mentah karena `encoding/json` memetakan keduanya ke pointer nil.
 - Bila hanya salah satu tanggal dikirim, pembandingnya diambil dari nilai yang tersimpan, sehingga pasangannya tidak bisa menjadi terbalik tanpa terdeteksi.
 - Entri audit `PROJECT_UPDATED` memuat field yang berubah beserta nilai barunya.
 
@@ -326,7 +328,7 @@ project-nya ia ikuti.
 
 ### GET /documents
 
-Query: `?project_id=uuid&category_id=uuid&status=draft&search=title&updated_from=2026-03-01T00:00:00Z&updated_to=2026-03-31T23:59:59Z&page=1&limit=20`
+Query: `?project_id=uuid&category_id=uuid&owner_id=uuid&status=draft&search=title&updated_from=2026-03-01T00:00:00Z&updated_to=2026-03-31T23:59:59Z&page=1&limit=20`
 
 - `status` hanya menerima enam nilai kanonik `draft`, `in_review`, `revision_required`, `approved`,
   `rejected`, `archived` (FR-DOC-03, ADR-0012, ADR-0019); nilai lain → `422 VALIDATION_ERROR`.
@@ -334,7 +336,7 @@ Query: `?project_id=uuid&category_id=uuid&status=draft&search=title&updated_from
   diarsipkan, sedangkan `?status=archived` menampilkan yang terarsip. Aturan itu dijalankan di kueri
   repository, bukan di handler (ADR-0019 butir 5).
 - `search` mencocokkan `title` **atau** `document_number` (FR-DOC-06).
-- `project_id` / `category_id` tidak sah → `422` (`field` menyebut yang salah); `page` ≥ 1 dan `limit` 1–100 (di luar rentang → `422`).
+- `project_id` / `category_id` / `owner_id` tidak sah → `422` (`field` menyebut yang salah); `page` ≥ 1 dan `limit` 1–100 (di luar rentang → `422`).
 - `updated_from`/`updated_to` membatasi `documents.updated_at` dengan interval **tertutup**
   `[updated_from, updated_to]` — kedua batas inklusif, `updated_to == updated_from` sah dan berarti
   satu instan, `updated_to < updated_from` → `422` dengan `field=updated_to`. Semantiknya sama
@@ -347,7 +349,7 @@ turunan `project_code`, `project_name`, `project_archived`, `category_name`, `ow
 `latest_version`, `workflow_instance_status` — semuanya dibaca lewat JOIN/subquery, bukan kolom tabel —
 plus `archived_at` (terisi hanya pada dokumen terarsip, `null` untuk sisanya).
 
-Filter `category` kini hidup sebagai `?category_id=` (UUID) — `50-FSD.md` §4.1 Category (Q-016, tanpa migrasi baru karena `document_categories` sudah ada `41-DATABASE.md` §2.3). Filter `owner` **belum** ada (Q-016, menunggu Q-024 `GET /users`). Rentang tanggal §4.1 telah ada sebagai `updated_from`/`updated_to` (menutup sisi tanggal Q-016).
+Filter `category` hidup sebagai `?category_id=` (UUID) — `50-FSD.md` §4.1 Category (Q-016, tanpa migrasi baru karena `document_categories` sudah ada `41-DATABASE.md` §2.3). Filter `owner` hidup sebagai `?owner_id=` (UUID) — `50-FSD.md` §4.1 Owner (Q-016/Q-024, keputusan P-079: tanpa endpoint daftar pengguna; tab `Milik saya` di klien mengirim ID user login yang sudah diketahuinya, dan dropdown pilih-pengguna tetap di luar cakupan). Penyaring berjalan **di dalam cakupan** (`44-SECURITY.md` §3.1.3): dokumen milik aktor di project yang tidak diikutinya tetap tidak terlihat, bukan `403`. Rentang tanggal §4.1 telah ada sebagai `updated_from`/`updated_to` (menutup sisi tanggal Q-016).
 
 ### GET /documents/:id
 
@@ -429,8 +431,8 @@ Validasi berkas (`44-SECURITY.md` §4.2) — semuanya dibalas `422 VALIDATION_ER
 | Aturan | Nilai |
 |---|---|
 | Ukuran maksimal | 100 MB (`50-FSD.md` §4.2). Diperiksa dari header multipart **dan** saat berkas mengalir, sehingga header yang berbohong tidak lolos |
-| Tipe dari isi berkas | `http.DetectContentType` (magic bytes, 512 byte pertama) harus salah satu dari `application/pdf`, `text/plain`, `text/csv`, `application/vnd.ms-excel`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `image/jpeg`, `image/png`. **Parameter header dibuang sebelum dibandingkan** (RFC 7231): Go mengembalikan `text/plain; charset=utf-8` untuk berkas teks, dan daftar ini menulis tipe medianya saja — perbandingan yang utuh menolak `.txt`/`.csv` (temuan **C-072**) |
-| Ekstensi nama berkas | `.pdf`, `.txt`, `.csv`, `.xls`, `.xlsx`, `.jpg`, `.jpeg`, `.png` |
+| Tipe dari isi berkas | `DetectUploadMimeType` (magic bytes, 8 KB pertama: `http.DetectContentType` + pemurnian Office butir 2a `44-SECURITY.md` §4.2) harus salah satu dari `application/pdf`, `text/plain`, `text/csv`, `application/msword`, `application/vnd.ms-excel`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `application/vnd.openxmlformats-officedocument.presentationml.presentation`, `image/jpeg`, `image/png`. **Parameter header dibuang sebelum dibandingkan** (RFC 7231): Go mengembalikan `text/plain; charset=utf-8` untuk berkas teks, dan daftar ini menulis tipe medianya saja — perbandingan yang utuh menolak `.txt`/`.csv` (temuan **C-072**). ZIP polos dan OLE tak dikenal jatuh ke `application/zip`/`application/octet-stream` — keduanya di luar daftar, jadi tetap `422` (Q-008) |
+| Ekstensi nama berkas | `.pdf`, `.txt`, `.csv`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx`, `.jpg`, `.jpeg`, `.png` |
 
 Penomoran versi (FR-VER-02) ditentukan **server**, tanpa field jenis versi dari klien:
 
@@ -553,6 +555,39 @@ sehingga fungsi arsipnya mengembalikan `undefined` saat dijalankan **sementara s
 > `archived` ada di kosakata kanonik sekaligus di `CHECK` kolomnya (migrasi `010`). Temuan **C-004**
 > karena itu berstatus `FIXED`, bukan lagi `APPROVED`. Jalur lama sengaja **tidak** dibiarkan sebagai
 > alias: klien yang memanggil `DELETE` menerima `404` dari router, bukan `200` dengan semantik berbeda.
+
+### PATCH /documents/:id
+
+Aksi **Edit** di `50-FSD.md` §4.3 (Contributor+) tidak punya endpoint sampai kontrak ini ditulis —
+itulah yang ditutupnya (`T-092`, P-077).
+
+Request: sebagian field — `title`, `description`, `category_id`, `review_due_at`, `expiry_at`,
+`published_at` (tiga terakhir string RFC 3339 ber-offset). Field yang tidak dikirim tidak diubah.
+
+Response 200: amplop yang **sama** dengan `GET /documents/:id` (`data.document` + `data.current_version`).
+
+Aturan:
+
+- `status`, `project_id`, `owner_id`, `document_number` **tidak dapat diubah lewat sini**; mengirim
+  `status` → `422 VALIDATION_ERROR` (status hanya bergerak lewat endpoint lifecycle: submit, aksi
+  workflow, arsip). Tiga lainnya diabaikan? Tidak — diabaikan diam-diam berarti klien mengira
+  berhasil: `project_id`/`owner_id`/`document_number` yang dikirim juga → `422` pada field-nya.
+- Body tanpa satu pun field yang dapat diubah → `422 VALIDATION_ERROR` pada `details.field` = `body`.
+- `title` kosong → `422`; `description` maksimal 5000 karakter (sama dengan `POST /documents`).
+- `category_id` harus kategori di organisasi aktor (`422` bila tidak).
+- Tiga tanggal harus RFC 3339 yang sah (`422` pada field-nya); string kosong juga `422`. `null`
+  eksplisit **mengosongkan** tanggal yang sudah terisi (kolom kembali `NULL`); tidak dikirim berarti
+  tidak diubah. Hanya ketiga tanggal dan `department_id` (§3) yang mendukung pengosongan — `null` pada
+  field lain diperlakukan sama dengan tidak dikirim. Tidak-dikirim vs null dibedakan dari body mentah
+  karena `encoding/json` memetakan keduanya ke pointer nil.
+- Dokumen terarsip → `409 CONFLICT`: arsip bersifat terminal (tidak ada un-archive di MVP),
+  konsisten dengan penolakan unggahan versi baru dan submit pada dokumen terarsip.
+- Entri audit `DOCUMENT_UPDATED` memuat field yang berubah beserta nilai barunya, ditulis di
+  transaksi yang sama dengan pembaruan baris (ADR-0011).
+- Cakupan berlaku: dokumen di luar cakupan → `404`.
+
+Izin: `document:update` (Administrator, Manager, Contributor — sama dengan arsip, dan sama dengan
+aktor "Contributor+" di `50-FSD.md` §4.3).
 
 ---
 
@@ -976,7 +1011,7 @@ Response 200: daftar komentar ber-paginasi (`meta` memuat `page`, `limit`, `tota
 }
 ```
 
-`created_by_username` adalah kolom turunan: tampilan komentar selalu menampilkan penulis (`50-FSD.md` §7), dan tanpa kolom itu klien harus memanggil endpoint user terpisah untuk setiap baris. **`updated_at` tidak ada** — kolomnya tidak ada di tabel `comments`; jejak penyuntingan ada di `audit_logs` (`COMMENT_UPDATED`).
+`created_by_username` adalah kolom turunan: tampilan komentar selalu menampilkan penulis (`50-FSD.md` §7), dan tanpa kolom itu klien harus memanggil endpoint user terpisah untuk setiap baris. **`updated_at` tidak ada** — kolomnya tidak ada di tabel `comments`; jejak penyuntingan ada di `audit_logs` (`COMMENT_UPDATED`). **`parent_id`** ada (nullable) sejak ADR-0032: balasan menunjuk komentar induk pada entitas yang sama; daftar tetap kronologis datar dan klien memetakan penanda "membalas…" sendiri.
 
 `meta.total` adalah jumlah **seluruh** komentar yang boleh dibaca aktor untuk entitas itu, termasuk saat halaman yang diminta di luar rentang (`data: []`). Sejak **`T-043`** jaminan yang sama berlaku di **seluruh** endpoint daftar (§3 project, §4 document, §6 task): permintaan halaman di luar rentang menjawab `data: []` dengan `meta.total` tetap jumlah sebenarnya. Sebelumnya hanya modul komentar yang menjaminnya (temuan **C-048**, kini `FIXED`).
 
@@ -997,7 +1032,8 @@ Request:
 {
   "entity_type": "project",
   "entity_id": "uuid",
-  "content": "This section needs clarification."
+  "content": "This section needs clarification.",
+  "parent_id": "uuid-opsional"
 }
 ```
 
@@ -1006,10 +1042,11 @@ Aturan input (`50-FSD.md` §7):
 - `entity_type` wajib dan harus salah satu dari empat nilai kanonik; selain itu → `422` pada `entity_type`.
 - `entity_id` wajib, UUID yang sah, dan **tidak boleh UUID kosong** (`00000000-…`) → `422` pada `entity_id`; bentuk bukan UUID ditolak `422` pada `entity_id` juga (bukan `body`), karena `bindJSON` menamai field yang nilainya gagal diurai (temuan C-045).
 - `content` wajib, maksimal **2000 karakter** (`50-FSD.md` §7), dihitung per rune setelah spasi tepi dibuang. Kosong, hanya spasi, atau melebihi batas → `422` pada `content`. Aturan isi ini hidup di **satu** fungsi service (`validateCommentContent`) supaya `POST` dan `PATCH` tidak dapat berbeda diam-diam.
+- `parent_id` opsional (balasan, ADR-0032): bila dikirim harus UUID yang sah dan bukan UUID kosong (`422` pada `parent_id`), serta menunjuk komentar yang **ada pada entitas yang sama** (`entity_type` + `entity_id`). Tidak-ada dan beda-entitas memakai **satu** pesan — "tidak ditemukan pada entitas ini" — supaya keberadaan komentar di entitas lain tidak dapat dipetakan. `parent_id` tidak dapat diubah lewat `PATCH` (hanya `content`).
 - Entitas yang tidak ada **atau** berada di luar cakupan project aktor → `404 NOT_FOUND` dengan pesan `entity not found`. Jawaban itu sama untuk kedua sebab, sehingga keberadaan entitas di organisasi lain tidak dapat dipetakan dari luar. Komentar pada komentar (balasan) bukan entitas yang sah: hanya empat jenis di atas.
-- Entri audit `COMMENT_CREATED` ditulis di transaksi yang sama (ADR-0011) dengan metadata `entity_type`, `entity_id`, `project_id`, dan `content_size` (jumlah rune, **bukan** isi komentar — audit bukan tempat menyalin isi percakapan).
+- Entri audit `COMMENT_CREATED` ditulis di transaksi yang sama (ADR-0011) dengan metadata `entity_type`, `entity_id`, `project_id`, dan `content_size` (jumlah rune, **bukan** isi komentar — audit bukan tempat menyalin isi percakapan), plus `parent_id` bila balasan.
 
-Response 201: bentuk yang sama dengan `GET /comments/:id`.
+Response 201: bentuk yang sama dengan `GET /comments/:id` (termasuk `parent_id` bila balasan).
 
 ### PATCH /comments/:id
 
@@ -1034,6 +1071,7 @@ Aturan:
 
 - Komentar yang bukan milik aktor → `404 NOT_FOUND`; komentar yang sudah tidak ada juga `404` (tidak idempoten, berbeda dari `POST /projects/:id/archive`).
 - Barisnya **benar-benar dihapus**, bukan diarsipkan: komentar adalah catatan diskusi, bukan artefak yang dirujuk dokumen lain — berbeda dari dokumen (**ADR-0019**). Jejak penghapusan tetap ada di `audit_logs` yang append-only (`COMMENT_DELETED`, metadata `entity_type`, `entity_id`, `content_size`).
+- Menghapus komentar induk menghapus **seluruh balasannya** (`ON DELETE CASCADE`, ADR-0032): hanya penulis induk yang dapat melakukannya (kepemilikan di `WHERE`, seperti biasa), dan entri `COMMENT_DELETED` induknya memuat `deleted_reply_count` — balasan yang ikut terhapus tidak mendapat entri masing-masing.
 
 Response 200: `{"success": true}` dengan `data: null` (pola yang sama dengan `DELETE /projects/:id/members/:userId`, bukan `204`).
 
@@ -1369,13 +1407,13 @@ Sebelum C-045 diperbaiki, ketiga sebab pertama dijawab sama (`field: "body"`, "h
 
 ---
 
-## 13. Analytics (Rencana — belum diimplementasikan)
+## 13. Analytics
 
-> Sumber: `52-DASHBOARD-ANALYTICS.md` (telaah `Dashboard.md`). Endpoint ini **belum hidup** — drafnya ada supaya filter global tidak diulang 8 kali.
+> Sumber: `52-DASHBOARD-ANALYTICS.md` (telaah `Dashboard.md`), ADR-0026 (MVP) + ADR-0027..0030 (analitik penuh: departemen, SLA, review/expiry, riwayat stage presisi).
 
 ### GET /analytics/dashboard
 
-Query: `?from=2026-09-01T00:00:00%2B07:00&to=2026-09-30T23:59:59%2B07:00&project_id=&status=`
+Query: `?from=2026-09-01T00:00:00%2B07:00&to=2026-09-30T23:59:59%2B07:00&project_id=&department_id=`
 
 Response 200:
 
@@ -1389,27 +1427,54 @@ Response 200:
       "pending_approvals": 3,
       "overdue_workflows": 1,
       "avg_approval_time_hours": 52.3,
-      "revised_this_month": 5
+      "revised_this_month": 5,
+      "open_tasks": 12,
+      "overdue_tasks": 4,
+      "sla_on_time": 6,
+      "sla_late": 2,
+      "sla_overdue": 1,
+      "review_due": 3,
+      "expired": 1
     },
     "charts": {
-      "statusDist": [{ "status": "draft", "count": 12 }, ...6],
+      "statusDist": [{ "status": "draft", "count": 12 }],
       "volumeTrend": [{ "date": "2026-09-01", "count": 1 }],
       "approvalTrend": [{ "week": "2026-W38", "approved": 2, "rejected": 1, "revision": 1 }],
       "funnel": { "draft": 12, "in_review": 7, "revision_required": 2, "approved": 5, "rejected": 1 },
       "pendingAging": [{ "bucket": "0-3", "count": 2 }],
       "avgTimePerStage": [{ "stage": "Technical Review", "hours": 18.5 }],
       "byCategory": [{ "category": "SOP", "count": 9 }],
-      "activityTrend": [{ "date": "2026-09-01", "created": 2, "submitted": 1, "approved": 1 }]
+      "activityTrend": [{ "date": "2026-09-01", "created": 2, "submitted": 1, "approved": 1, "revised": 0 }],
+      "slaBreakdown": [{ "week": "2026-W38", "on_time": 6, "late": 2, "overdue": 1 }],
+      "byDepartment": [{ "department": "IT", "count": 20 }],
+      "reviewDueTrend": [{ "week": "2026-W40", "review_due": 3, "expired": 1, "published": 2 }]
     }
   }
 }
 ```
 
-Izin: `report:read` (`44-SECURITY.md` §3.1.2 — Viewer+ dapat membaca dashboardnya sendiri). **Cakupan dihitung di kueri** (`44-SECURITY.md` §3.1.3) — non-Administrator hanya angka dari project tempat ia menjadi anggota; hitungan global tidak pernah dikirim.
+Izin: `report:read` (`44-SECURITY.md` §3.1.2 — Administrator dan Manager dapat membaca dashboardnya sendiri). **Cakupan dihitung di kueri** (`44-SECURITY.md` §3.1.3) — non-Administrator hanya angka dari project tempat ia menjadi anggota; hitungan global tidak pernah dikirim.
 
-Aturan: `from`/`to` — instan RFC 3339 ber-offset, interval tertutup (semantik `due_from`/`due_to` §6 / `updated_from`/`updated_to` §4); tanpa `from`/`to` seluruh rentang organisasi. Drill-down bukan endpoint baru: setiap titik chart menaut ke endpoint daftar yang sudah ada (`GET /documents`, `/workflows/instances`, `/tasks`, `GET /audit`) dengan query yang sama.
+Aturan: `from`/`to` — instan RFC 3339 ber-offset, interval tertutup (semantik `due_from`/`due_to` §6 / `updated_from`/`updated_to` §4); tanpa `from`/`to` seluruh rentang organisasi. `project_id`/`department_id` UUID menyaring seluruh KPI dan chart yang ber-JOIN ke `projects` — kecuali `activityTrend` yang membaca `audit_logs` tanpa tautan project. `avgTimePerStage` memakai durasi presisi `AVG(completed_at - started_at)` dari `workflow_stage_transitions` (ADR-0030), bukan estimasi selisih aksi. Drill-down bukan endpoint baru: setiap titik chart menaut ke endpoint daftar yang sudah ada (`GET /documents`, `/workflows/instances`, `/tasks`, `GET /audit`) dengan query yang sama.
 
 Alternatif yang ditolak: 8 endpoint terpisah (`/analytics/kpi/total`, `/analytics/chart/funnel`, …) — menambah 8 route dengan filter yang sama dan membuat konsistensi range lebih sulit dijaga.
+
+### GET /analytics/departments
+
+Daftar departemen organisasi aktor — opsi penyaring `?department_id=` dashboard (ADR-0027). Menumpang group `/analytics` supaya tidak menambah receiver route baru; izinnya sama dengan dashboard.
+
+Response 200:
+
+```json
+{
+  "success": true,
+  "data": [
+    { "id": "...", "name": "IT", "code": "IT" }
+  ]
+}
+```
+
+Izin: `report:read` (sama dengan dashboard — pasangan izin baru untuk departemen tidak dibuat, ADR-0014). Tanpa paginasi: jumlahnya kecil dan dipakai sebagai opsi dropdown, bukan daftar kelola.
 
 ---
 

@@ -280,6 +280,18 @@ func TestLogoutAllEndToEnd(t *testing.T) {
 			t.Errorf("token %s: kode error seharusnya TOKEN_REVOKED, dapat %s", name, after.Body.String())
 		}
 	}
+
+	// Cookie refresh ikut dihapus (ADR-0033): peramban tidak boleh menyimpan
+	// kredensial yang sesinya sudah mati.
+	cleared := false
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name == "refresh_token" && cookie.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("logout_all tidak menghapus cookie refresh_token")
+	}
 }
 
 func TestUnknownTokenIsUnauthorized(t *testing.T) {
@@ -340,6 +352,9 @@ func TestChangePasswordEndToEnd(t *testing.T) {
 	if body.Data.Token == current.Data.Token {
 		t.Error("token pengganti harus token baru, bukan token yang sama")
 	}
+	// Cookie refresh ikut diganti (ADR-0033): tanpa ini sesi yang dipakai ikut
+	// mati oleh revokasi massalnya sendiri.
+	refreshCookieValue(t, w)
 
 	// (1) Perangkat yang mengganti password tetap hidup, lewat token barunya.
 	if me := getWithToken(engine, "/api/v1/auth/me", body.Data.Token); me.Code != http.StatusOK {
@@ -430,17 +445,60 @@ func TestChangePasswordErrorMapping(t *testing.T) {
 	}
 }
 
-// refreshWithToken menukar refresh token lewat `POST /api/v1/auth/refresh`.
+// refreshCookieValue membaca cookie refresh token dari response login/refresh.
+// Hilangnya cookie adalah kegagalan, bukan nilai kosong: tanpa cookie, endpoint
+// refresh tidak punya modal apa pun (ADR-0033).
+func refreshCookieValue(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name == "refresh_token" {
+			if cookie.Value == "" {
+				t.Fatal("cookie refresh_token kosong")
+			}
+			return cookie.Value
+		}
+	}
+	t.Fatal("response tidak memasang cookie refresh_token")
+	return ""
+}
+
+// refreshCookieAttrs memeriksa atribut keamanan cookie (ADR-0033): HttpOnly,
+// Path, SameSite, dan umur — tanpa menebak nilainya dari ingatan.
+func refreshCookieAttrs(t *testing.T, w *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name != "refresh_token" {
+			continue
+		}
+		if !cookie.HttpOnly {
+			t.Error("cookie refresh_token tanpa HttpOnly")
+		}
+		if cookie.Path != "/api/v1/auth" {
+			t.Errorf("cookie Path = %q, diharapkan /api/v1/auth", cookie.Path)
+		}
+		if cookie.SameSite != http.SameSiteLaxMode {
+			t.Errorf("cookie SameSite = %v, diharapkan Lax", cookie.SameSite)
+		}
+		if cookie.MaxAge != 7*24*3600 {
+			t.Errorf("cookie MaxAge = %d, diharapkan 604800 (7 hari)", cookie.MaxAge)
+		}
+		return cookie
+	}
+	t.Fatal("response tidak memasang cookie refresh_token")
+	return nil
+}
+
+// refreshWithToken menukar refresh token lewat cookie `POST /api/v1/auth/refresh`
+// (ADR-0033). Token kosong berarti tanpa cookie — untuk jalur 401.
 func refreshWithToken(t *testing.T, engine *gin.Engine, refreshToken string) (*httptest.ResponseRecorder, apiResponse) {
 	t.Helper()
 
-	payload, err := json.Marshal(map[string]string{"refresh_token": refreshToken})
-	if err != nil {
-		t.Fatalf("encode body: %v", err)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	if refreshToken != "" {
+		req.AddCookie(&http.Cookie{Name: "refresh_token", Value: refreshToken})
 	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
@@ -451,9 +509,10 @@ func refreshWithToken(t *testing.T, engine *gin.Engine, refreshToken string) (*h
 	return w, parsed
 }
 
-// TestRefreshEndToEnd adalah bukti HTTP ADR-0023: login menyerahkan refresh
-// token, token itu dapat ditukar dengan sepasang token baru, dan access token
-// penggantinya benar-benar dipakai ke endpoint terproteksi.
+// TestRefreshEndToEnd adalah bukti HTTP ADR-0023 + ADR-0033: login memasang
+// cookie refresh token (bukan body), cookie itu dapat ditukar dengan access
+// token baru + cookie baru, dan access token penggantinya benar-benar dipakai
+// ke endpoint terproteksi.
 func TestRefreshEndToEnd(t *testing.T) {
 	actor := createActor(t, "viewer")
 	engine := newEngine(t, 5)
@@ -462,30 +521,30 @@ func TestRefreshEndToEnd(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("login: status %d, body %s", w.Code, w.Body.String())
 	}
-	if session.Data.RefreshToken == "" {
-		t.Fatal("response login tidak memuat refresh_token sehingga POST /auth/refresh tidak dapat dipakai")
+	// Body login TIDAK memuat refresh token sejak ADR-0033: salinan yang dapat
+	// dibaca JS akan menggagalkan tujuan perpindahan ke cookie HttpOnly.
+	if strings.Contains(w.Body.String(), "refresh_token") {
+		t.Fatalf("body login masih memuat refresh_token: %s", w.Body.String())
 	}
-	if session.Data.RefreshToken == session.Data.Token {
-		t.Error("refresh token tidak boleh sama dengan access token")
-	}
-	// Masa berlaku refresh token harus lebih panjang daripada access token,
-	// kalau tidak "memperpanjang sesi" tidak berarti apa pun.
-	if !session.Data.RefreshExpiresAt.After(session.Data.ExpiresAt) {
-		t.Errorf("refresh_expires_at %s seharusnya setelah expires_at %s",
-			session.Data.RefreshExpiresAt, session.Data.ExpiresAt)
+	refreshToken := refreshCookieValue(t, w)
+	refreshCookieAttrs(t, w)
+	if session.Data.Token == "" {
+		t.Fatal("response login tidak memuat access token")
 	}
 
-	w, refreshed := refreshWithToken(t, engine, session.Data.RefreshToken)
+	w, refreshed := refreshWithToken(t, engine, refreshToken)
 	if w.Code != http.StatusOK {
 		t.Fatalf("refresh: status %d, body %s", w.Code, w.Body.String())
 	}
-	if refreshed.Data.Token == "" || refreshed.Data.RefreshToken == "" {
-		t.Fatalf("refresh tidak mengembalikan sepasang token: %s", w.Body.String())
+	if refreshed.Data.Token == "" {
+		t.Fatalf("refresh tidak mengembalikan access token: %s", w.Body.String())
 	}
 	if refreshed.Data.Token == session.Data.Token {
 		t.Error("access token pengganti harus token baru")
 	}
-	if refreshed.Data.RefreshToken == session.Data.RefreshToken {
+	// Rotasi bergulir: cookie baru harus token baru (jendela 7 hari bergerak).
+	newRefreshToken := refreshCookieValue(t, w)
+	if newRefreshToken == refreshToken {
 		t.Error("refresh token pengganti harus token baru supaya jendela 7 hari bergulir")
 	}
 
@@ -494,8 +553,8 @@ func TestRefreshEndToEnd(t *testing.T) {
 		t.Fatalf("access token pengganti: status %d, body %s", me.Code, me.Body.String())
 	}
 
-	// Refresh kedua dengan token pengganti juga berjalan.
-	if w, _ := refreshWithToken(t, engine, refreshed.Data.RefreshToken); w.Code != http.StatusOK {
+	// Refresh kedua dengan cookie pengganti juga berjalan.
+	if w, _ := refreshWithToken(t, engine, newRefreshToken); w.Code != http.StatusOK {
 		t.Errorf("refresh kedua dengan token pengganti: status %d, body %s", w.Code, w.Body.String())
 	}
 }
@@ -506,9 +565,10 @@ func TestRefreshTokenIsNotABearerToken(t *testing.T) {
 	actor := createActor(t, "viewer")
 	engine := newEngine(t, 5)
 
-	_, session := logins(t, engine, actor.Username, actor.Password)
+	w, _ := logins(t, engine, actor.Username, actor.Password)
+	refreshToken := refreshCookieValue(t, w)
 
-	w := getWithToken(engine, "/api/v1/auth/me", session.Data.RefreshToken)
+	w = getWithToken(engine, "/api/v1/auth/me", refreshToken)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("refresh token sebagai bearer: status %d, diharapkan 401 (%s)", w.Code, w.Body.String())
 	}
@@ -517,26 +577,23 @@ func TestRefreshTokenIsNotABearerToken(t *testing.T) {
 	}
 }
 
-// TestRefreshErrorMapping mengunci pemetaan status `42-API.md` §2: body tanpa
-// `refresh_token` → `422` ber-field, token tidak sah atau bertipe salah → `401`
-// `UNAUTHORIZED`, dan sesi yang sudah dicabut → `401 TOKEN_REVOKED`.
+// TestRefreshErrorMapping mengunci pemetaan status `42-API.md` §2: tanpa cookie
+// → `401`, token tidak sah atau bertipe salah → `401 UNAUTHORIZED`, dan sesi
+// yang sudah dicabut → `401 TOKEN_REVOKED`.
 func TestRefreshErrorMapping(t *testing.T) {
 	actor := createActor(t, "viewer")
 	engine := newEngine(t, 5)
 
-	_, session := logins(t, engine, actor.Username, actor.Password)
+	w, session := logins(t, engine, actor.Username, actor.Password)
+	refreshToken := refreshCookieValue(t, w)
 
-	t.Run("body kosong", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewReader([]byte(`{}`)))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		engine.ServeHTTP(w, req)
-
-		if w.Code != http.StatusUnprocessableEntity {
-			t.Fatalf("status %d, diharapkan 422 (%s)", w.Code, w.Body.String())
+	t.Run("tanpa cookie", func(t *testing.T) {
+		w, body := refreshWithToken(t, engine, "")
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status %d, diharapkan 401 (%s)", w.Code, w.Body.String())
 		}
-		if !strings.Contains(w.Body.String(), `"field":"refresh_token"`) {
-			t.Errorf("details seharusnya menunjuk refresh_token, dapat %s", w.Body.String())
+		if body.Error == nil || body.Error.Code != "UNAUTHORIZED" {
+			t.Errorf("kode error %v, diharapkan UNAUTHORIZED", body.Error)
 		}
 	})
 
@@ -570,7 +627,7 @@ func TestRefreshErrorMapping(t *testing.T) {
 			t.Fatalf("logout_all: status %d, body %s", w.Code, w.Body.String())
 		}
 
-		w2, body := refreshWithToken(t, engine, session.Data.RefreshToken)
+		w2, body := refreshWithToken(t, engine, refreshToken)
 		if w2.Code != http.StatusUnauthorized {
 			t.Fatalf("refresh sesudah logout_all: status %d, diharapkan 401 (%s)", w2.Code, w2.Body.String())
 		}

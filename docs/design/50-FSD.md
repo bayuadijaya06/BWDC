@@ -154,7 +154,7 @@ Document Number, Title, Category, Status (badge), Version, Owner, Last Updated
 **Step 2: Upload File**
 - Drag & drop area atau file browser
 - Max file size: 100 MB
-- Supported types: PDF, TXT, CSV, XLS/XLSX, JPG, PNG
+- Supported types: PDF, TXT, CSV, DOC/DOCX, XLS/XLSX, PPT/PPTX, JPG, PNG
 - Show file info: name, size, type
 
 **Version Assignment** (dihitung server, tanpa field jenis versi dari klien — `42-API.md` §4):
@@ -336,7 +336,7 @@ Ketiga aksi itu **bukan** tiga nilai pada satu endpoint ubah-status: Complete pu
 
 **Fields:**
 - Content (required, max 2000 chars)
-- Reply (optional, threaded) — **belum didukung skema.** Tabel `comments` (`41-DATABASE.md` §2.5) tidak punya kolom induk, jadi balasan saat ini ditulis sebagai komentar biasa pada entitas yang sama dan ditampilkan dalam satu timeline datar. Menghidupkan threading menuntut kolom `parent_id` (migrasi baru) + ADR, dan tidak ada `FR-CMT-*` yang menuntutnya; dicatat sebagai temuan **C-050**/Q-018 dengan rekomendasi menundanya sampai ada kebutuhan nyata.
+- Reply (optional, threaded) — **didukung sejak ADR-0032** (migrasi `013`, Q-019): `POST /comments` menerima `parent_id` yang menunjuk komentar pada entitas yang sama; daftar tetap kronologis datar dan klien menampilkan penanda "membalas…". Hapus induk menghapus balasannya; `parent_id` tidak dapat diubah lewat `PATCH`.
 
 **Display:**
 - Avatar/initials

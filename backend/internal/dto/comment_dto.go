@@ -21,6 +21,9 @@ type CreateCommentRequest struct {
 	EntityType string    `json:"entity_type"`
 	EntityID   uuid.UUID `json:"entity_id"`
 	Content    string    `json:"content"`
+	// ParentID opsional (balasan, ADR-0032): wajib menunjuk komentar pada
+	// entitas yang sama; validasi relasinya di service.
+	ParentID *uuid.UUID `json:"parent_id"`
 }
 
 // UpdateCommentRequest adalah badan `PATCH /comments/:id`. `Content` adalah
@@ -45,7 +48,10 @@ type CommentResponse struct {
 	Content           string    `json:"content"`
 	CreatedByID       uuid.UUID `json:"created_by_id"`
 	CreatedByUsername string    `json:"created_by_username,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
+	// ParentID hanya terisi pada balasan (ADR-0032); daftar tetap datar dan
+	// klien memetakan penanda "membalas…" sendiri.
+	ParentID  *uuid.UUID `json:"parent_id,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // NewCommentResponse memetakan model komentar ke bentuk response.
@@ -60,6 +66,7 @@ func NewCommentResponse(comment *model.Comment) CommentResponse {
 		Content:           comment.Content,
 		CreatedByID:       comment.CreatedByID,
 		CreatedByUsername: comment.CreatedByUsername,
+		ParentID:          comment.ParentID,
 		CreatedAt:         comment.CreatedAt,
 	}
 }

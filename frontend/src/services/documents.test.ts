@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
+  patch: vi.fn(),
 }));
 
 vi.mock("./http", () => ({ http: mocks }));
@@ -13,6 +14,7 @@ const {
   downloadDocumentVersion,
   listDocumentVersions,
   listDocuments,
+  updateDocument,
   uploadDocumentVersion,
   validateDocumentForm,
   validateRevisionNote,
@@ -27,6 +29,7 @@ function meta(total = 0) {
 beforeEach(() => {
   mocks.get.mockReset();
   mocks.post.mockReset();
+  mocks.patch.mockReset();
 });
 
 describe("listDocuments", () => {
@@ -154,6 +157,31 @@ describe("endpoint tulis", () => {
     expect(kedua.status).toBe("archived");
   });
 
+  it("PATCH /documents/:id mengirim metadata apa adanya dan membuka amplop detailnya", async () => {
+    // Amplop sama dengan GET detail (`data.document` + `data.current_version`),
+    // bukan dokumen telanjang (pelajaran C-070).
+    mocks.patch.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          document: { id: "d1", title: "Judul Baru", review_due_at: "2026-10-24T00:00:00+07:00" },
+          current_version: null,
+        },
+      },
+    });
+
+    const detail = await updateDocument("d1", {
+      title: "Judul Baru",
+      review_due_at: "2026-10-24T00:00:00+07:00",
+    });
+
+    expect(mocks.patch).toHaveBeenCalledWith("/documents/d1", {
+      title: "Judul Baru",
+      review_due_at: "2026-10-24T00:00:00+07:00",
+    });
+    expect(detail.document.title).toBe("Judul Baru");
+  });
+
   it("GET /documents/:id/versions membaca larik di dalam kunci versions", async () => {
     mocks.get.mockResolvedValue({
       data: { success: true, data: { versions: [{ id: "v1", version: "1.1" }] } },
@@ -241,8 +269,12 @@ describe("pemeriksaan sisi klien", () => {
       "a.pdf",
       "a.txt",
       "a.csv",
+      "a.doc",
+      "a.docx",
       "a.xls",
       "a.xlsx",
+      "a.ppt",
+      "a.pptx",
       "a.jpg",
       "a.jpeg",
       "a.PNG",

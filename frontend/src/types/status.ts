@@ -106,3 +106,36 @@ export function workflowInstanceStatus(
 export function overdueLabel(isOverdue: boolean): string | null {
   return isOverdue ? "Overdue" : null;
 }
+
+export interface DocumentLifecycleDates {
+  status: DocumentStatus;
+  published_at?: string;
+  expiry_at?: string;
+}
+
+/**
+ * Label turunan siklus hidup dokumen (keputusan pemilik P-081): dokumen
+ * `approved` yang punya `published_at` tampil `Published`; dokumen yang
+ * `expiry_at`-nya lewat tampil `Obsolete`.
+ *
+ * Bukan status kanonik (ADR-0012): tidak ada di `documentStatuses`, tidak
+ * pernah dikirim ke server, dan tidak dipakai penyaring. Nadanya memakai ulang
+ * nada yang ada (`approved`/`archived`), bukan nada baru. `now` disuntik supaya
+ * dapat diuji tanpa bergantung pada jam mesin. Tanggal yang tidak dapat diurai
+ * diperlakukan tidak ada — bukan 500 di klien atas data server.
+ */
+export function documentLifecycle(
+  document: DocumentLifecycleDates,
+  now: Date = new Date(),
+): StatusPresentation | null {
+  if (document.expiry_at !== undefined) {
+    const expiry = new Date(document.expiry_at);
+    if (!Number.isNaN(expiry.getTime()) && expiry.getTime() < now.getTime()) {
+      return { label: "Obsolete", tone: "archived" };
+    }
+  }
+  if (document.status === "approved" && document.published_at !== undefined) {
+    return { label: "Published", tone: "approved" };
+  }
+  return null;
+}

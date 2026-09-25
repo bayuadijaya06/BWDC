@@ -78,6 +78,10 @@ export interface DocumentRecord {
   current_version: number;
   /** Label versi terakhir, mis. `1.1`. Kosong selama belum ada unggahan. */
   latest_version?: string;
+  /** Siklus hidup eksplisit (ADR-0029): kapan perlu review / kedaluwarsa / diterbitkan. */
+  review_due_at?: string;
+  expiry_at?: string;
+  published_at?: string;
   workflow_instance_id?: string;
   workflow_instance_status?: WorkflowInstanceStatus;
   created_at: string;
@@ -114,10 +118,16 @@ export interface DocumentListQuery {
   search?: string;
   /**
    * Penyaring project. `50-FSD.md` §4.1 menyebutnya, dan kontraknya ada:
-   * `?project_id=`. Penyaring **owner** juga disebut spec tetapi **tidak** ada
-   * di kontrak (Q-016), jadi ia tidak dapat dijalankan dari klien.
+   * `?project_id=`.
    */
   project_id?: string;
+  /**
+   * Penyaring pemilik — `?owner_id=` (`50-FSD.md` §4.1, `42-API.md` §4,
+   * keputusan P-079). Tanpa endpoint daftar pengguna, klien hanya mengirim ID
+   * yang sudah diketahuinya: user login untuk tab `Milik saya`. Dropdown
+   * pilih-pengguna tetap di luar cakupan.
+   */
+  owner_id?: string;
   /** Kategori dokumen — `?category_id=` (`50-FSD.md` §4.1, Q-016). */
   category_id?: string;
   /**
@@ -147,6 +157,20 @@ export interface UploadVersionInput {
   revision_note?: string;
 }
 
+export interface UpdateDocumentInput {
+  title?: string;
+  description?: string;
+  /** UUID kategori; organisasi lain → `422`. */
+  category_id?: string;
+  /**
+   * String RFC 3339 ber-offset, atau `null` eksplisit untuk mengosongkan
+   * tanggal yang sudah terisi (`42-API.md` §4). Tidak dikirim = tidak diubah.
+   */
+  review_due_at?: string | null;
+  expiry_at?: string | null;
+  published_at?: string | null;
+}
+
 export interface DownloadedFile {
   blob: Blob;
   filename: string;
@@ -160,8 +184,12 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
   ".pdf",
   ".txt",
   ".csv",
+  ".doc",
+  ".docx",
   ".xls",
   ".xlsx",
+  ".ppt",
+  ".pptx",
   ".jpg",
   ".jpeg",
   ".png",
@@ -179,6 +207,7 @@ async function listDocuments(
   };
   if (query.status) params.status = query.status;
   if (query.project_id) params.project_id = query.project_id;
+  if (query.owner_id) params.owner_id = query.owner_id;
   if (query.category_id) params.category_id = query.category_id;
   if (query.updated_from) params.updated_from = query.updated_from;
   if (query.updated_to) params.updated_to = query.updated_to;
@@ -259,6 +288,21 @@ async function archiveDocument(
 }
 
 /**
+ * Memperbarui metadata dokumen (`PATCH /documents/:id`, aksi Edit `50-FSD.md`
+ * §4.3). Responsnya amplop detail yang sama dengan `GET /documents/:id`.
+ */
+async function updateDocument(
+  id: string,
+  input: UpdateDocumentInput,
+): Promise<DocumentDetail> {
+  const response = await http.patch<ApiSuccess<DocumentDetail>>(
+    `/documents/${encodeURIComponent(id)}`,
+    input,
+  );
+  return response.data.data;
+}
+
+/**
  * Mengunduh satu versi. Berkasnya diambil sebagai blob karena endpointnya
  * menuntut header `Authorization` (lihat `utils/download.ts`).
  */
@@ -288,6 +332,7 @@ export {
   fetchDocument,
   listDocumentVersions,
   listDocuments,
+  updateDocument,
   uploadDocumentVersion,
 };
 

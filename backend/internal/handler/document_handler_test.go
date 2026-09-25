@@ -77,6 +77,9 @@ type documentPayload struct {
 		LatestVersion  string  `json:"latest_version"`
 		OwnerUsername  string  `json:"owner_username"`
 		ProjectCode    string  `json:"project_code"`
+		ReviewDueAt    *string `json:"review_due_at"`
+		ExpiryAt       *string `json:"expiry_at"`
+		PublishedAt    *string `json:"published_at"`
 		CreatedAt      string  `json:"created_at"`
 		UpdatedAt      string  `json:"updated_at"`
 	} `json:"document"`
@@ -563,6 +566,102 @@ func TestUploadAcceptsDocumentedTextTypesHTTP(t *testing.T) {
 	}
 }
 
+// officeHTTPContent merakit byte Office minimal: sihir yang benar plus penanda
+// yang dikenali `service.DetectUploadMimeType`. Penanda OLE diletakkan sesudah
+// byte ke-512 — jendela intip yang masih 512 byte akan menggagalkan kasus
+// `.doc` di sini dan menunjukkan tepat di mana jendelanya kurang.
+func officeHTTPContent(kind string) []byte {
+	switch kind {
+	case "doc":
+		content := []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+		for len(content) < 600 {
+			content = append(content, 0)
+		}
+		for _, r := range "WordDocument" {
+			content = append(content, byte(r), 0)
+		}
+		for len(content) < 700 {
+			content = append(content, 0)
+		}
+		return content
+	case "docx", "xlsx":
+		part := map[string]string{"docx": "word/document.xml", "xlsx": "xl/workbook.xml"}[kind]
+		content := []byte("PK\x03\x04\x14\x00\x06\x00[Content_Types].xml" + part)
+		for len(content) < 600 {
+			content = append(content, 0)
+		}
+		return content
+	default:
+		return nil
+	}
+}
+
+// TestUploadAcceptsOfficeTypesHTTP menutup Q-008 di lapisan HTTP: `.docx`,
+// `.doc`, dan `.xlsx` yang dijanjikan kini diterima lewat multipart sungguhan,
+// dengan MIME yang dihitung server dari isi (bukan tebakan test). ZIP polos
+// berekstensi `.docx` tetap `422` — penjaga MIME tidak ikut longgar.
+func TestUploadAcceptsOfficeTypesHTTP(t *testing.T) {
+	fixture := newDocumentHTTPFixture(t)
+	engine := fixture.parts.engine
+
+	manager := fixture.createActor("manager")
+	projectID := fixture.createProject(manager, "terimaofficedoc")
+	token := loginToken(t, engine, manager)
+	document := createDocumentHTTP(t, engine, token, projectID, "Dokumen Office")
+
+	cases := []struct {
+		name     string
+		filename string
+		content  []byte
+	}{
+		{name: "docx", filename: "laporan.docx", content: officeHTTPContent("docx")},
+		{name: "doc", filename: "memo.doc", content: officeHTTPContent("doc")},
+		{name: "xlsx", filename: "angka.xlsx", content: officeHTTPContent("xlsx")},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			rec := uploadMultipart(t, engine, "/api/v1/documents/"+document.Document.ID+"/upload", token,
+				testCase.filename, testCase.content)
+			requireStatus(t, rec, http.StatusCreated)
+
+			var uploaded documentVersionPayload
+			decodeData(t, rec, &uploaded)
+
+			expected := service.DetectUploadMimeType(testCase.content)
+			if uploaded.MimeType != expected {
+				t.Errorf("mime_type tersimpan %q, diharapkan %q", uploaded.MimeType, expected)
+			}
+
+			rec = doJSON(t, engine, http.MethodGet,
+				"/api/v1/documents/"+document.Document.ID+"/download/"+uploaded.ID, token, "")
+			requireStatus(t, rec, http.StatusOK)
+			if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, expected) {
+				t.Errorf("Content-Type unduhan %q, diharapkan berawalan %q", got, expected)
+			}
+			if !bytes.Equal(rec.Body.Bytes(), testCase.content) {
+				t.Errorf("isi unduhan tidak identik dengan %s yang diunggah", testCase.filename)
+			}
+		})
+	}
+
+	t.Run("zip polos berekstensi docx ditolak", func(t *testing.T) {
+		content := []byte("PK\x03\x04 isi zip tanpa part office")
+		for len(content) < 600 {
+			content = append(content, 0)
+		}
+		rec := uploadMultipart(t, engine, "/api/v1/documents/"+document.Document.ID+"/upload", token,
+			"palsu.docx", content)
+		requireStatus(t, rec, http.StatusUnprocessableEntity)
+
+		var failure envelope
+		decodeBody(t, rec, &failure)
+		if failure.Error == nil || len(failure.Error.Details) == 0 || failure.Error.Details[0].Field != "file" {
+			t.Errorf("422 tanpa detail field file: %s", rec.Body.String())
+		}
+	})
+}
+
 // TestDocumentScopeHidesDocumentsFromOutsiders membuktikan cakupan
 // `44-SECURITY.md` §3.1.3 di lapisan HTTP: non-anggota melihat daftar kosong,
 // dan detail/versi/unduhan dibalas `404` — bukan `403`.
@@ -725,8 +824,117 @@ func TestArchiveDocumentEndToEnd(t *testing.T) {
 	}
 }
 
-// TestDocumentDownloadStreamsLargeContent membuktikan unduhan benar-benar
-// mengalir (bukan dipotong) dan panjangnya cocok dengan yang tersimpan.
+// TestUpdateDocumentEndToEnd menutup `PATCH /documents/:id` (`42-API.md` §4,
+// aksi Edit `50-FSD.md` §4.3, T-092): judul + tanggal siklus hidup, penolakan
+// field immutable, validasi tanggal, konflik arsip, dan auditnya.
+func TestUpdateDocumentEndToEnd(t *testing.T) {
+	fixture := newDocumentHTTPFixture(t)
+	engine := fixture.parts.engine
+
+	manager := fixture.createActor("manager")
+	projectID := fixture.createProject(manager, "ubahdoc")
+	token := loginToken(t, engine, manager)
+	document := createDocumentHTTP(t, engine, token, projectID, "Dokumen untuk diubah")
+	base := "/api/v1/documents/" + document.Document.ID
+
+	// Judul + review_due_at + expiry_at → 200 dengan amplop detail yang sama.
+	rec := doJSON(t, engine, http.MethodPatch, base, token,
+		`{"title":"Judul Baru","review_due_at":"2026-10-24T00:00:00+07:00","expiry_at":"2027-09-24T00:00:00+07:00"}`)
+	requireStatus(t, rec, http.StatusOK)
+	var updated documentPayload
+	decodeData(t, rec, &updated)
+	if updated.Document.Title != "Judul Baru" {
+		t.Errorf("title response %q, diharapkan Judul Baru", updated.Document.Title)
+	}
+	if updated.Document.ReviewDueAt == nil || updated.Document.ExpiryAt == nil {
+		t.Errorf("response tidak memuat review_due_at/expiry_at: %+v", updated.Document)
+	}
+
+	// Body kosong → 422 pada body.
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{}`)
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+	var env envelope
+	decodeBody(t, rec, &env)
+	if env.Error == nil || len(env.Error.Details) == 0 || env.Error.Details[0].Field != "body" {
+		t.Errorf("details 422 body kosong %+v, diharapkan field=body", env.Error)
+	}
+
+	// Status lewat PATCH → 422 pada status (lifecycle terpisah).
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{"status":"approved"}`)
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+	decodeBody(t, rec, &env)
+	if env.Error == nil || len(env.Error.Details) == 0 || env.Error.Details[0].Field != "status" {
+		t.Errorf("details 422 status %+v, diharapkan field=status", env.Error)
+	}
+
+	// Tanggal bukan RFC 3339 → 422 pada field-nya.
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{"review_due_at":"24-10-2026"}`)
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+	decodeBody(t, rec, &env)
+	if env.Error == nil || len(env.Error.Details) == 0 || env.Error.Details[0].Field != "review_due_at" {
+		t.Errorf("details 422 tanggal %+v, diharapkan field=review_due_at", env.Error)
+	}
+
+	// Dokumen tidak ada → 404.
+	rec = doJSON(t, engine, http.MethodPatch, "/api/v1/documents/"+uuid.NewString(), token, `{"title":"X"}`)
+	requireStatus(t, rec, http.StatusNotFound)
+
+	// Dokumen terarsip menolak pembaruan → 409.
+	rec = doJSON(t, engine, http.MethodPost, base+"/archive", token, "")
+	requireStatus(t, rec, http.StatusOK)
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{"title":"Sesudah Arsip"}`)
+	requireStatus(t, rec, http.StatusConflict)
+
+	// Viewer anggota (baca saja) → 403, bukan 404.
+	viewer := fixture.createUserInOrg(manager.OrgID, "viewer")
+	fixture.addMember(manager, projectID, viewer.ID, model.ProjectRoleViewer)
+	viewerToken := loginToken(t, engine, viewer)
+	rec = doJSON(t, engine, http.MethodPatch, base, viewerToken, `{"title":"Oleh Viewer"}`)
+	requireStatus(t, rec, http.StatusForbidden)
+
+	if got := countProjectAudit(t, manager.ID, service.ActionDocumentUpdated); got != 1 {
+		t.Errorf("audit DOCUMENT_UPDATED %d, diharapkan 1", got)
+	}
+}
+
+// TestUpdateDocumentClearsDates menutup pengosongan tanggal (`42-API.md` §4,
+// T-094): `null` eksplisit mengembalikan kolom ke NULL, dibedakan dari tidak
+// dikirim (yang tidak mengubah apa pun).
+func TestUpdateDocumentClearsDates(t *testing.T) {
+	fixture := newDocumentHTTPFixture(t)
+	engine := fixture.parts.engine
+
+	manager := fixture.createActor("manager")
+	projectID := fixture.createProject(manager, "bersihdoc")
+	token := loginToken(t, engine, manager)
+	document := createDocumentHTTP(t, engine, token, projectID, "Dokumen tanggal")
+	base := "/api/v1/documents/" + document.Document.ID
+
+	rec := doJSON(t, engine, http.MethodPatch, base, token,
+		`{"review_due_at":"2026-10-24T00:00:00+07:00","expiry_at":"2027-09-24T00:00:00+07:00"}`)
+	requireStatus(t, rec, http.StatusOK)
+
+	// `null` eksplisit → 200 dan kolom kembali NULL (hilang dari response
+	// karena `omitempty`).
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{"review_due_at":null}`)
+	requireStatus(t, rec, http.StatusOK)
+	var cleared documentPayload
+	decodeData(t, rec, &cleared)
+	if cleared.Document.ReviewDueAt != nil {
+		t.Errorf("review_due_at response %+v, diharapkan kosong sesudah clear", cleared.Document.ReviewDueAt)
+	}
+	if cleared.Document.ExpiryAt == nil {
+		t.Error("expiry_at ikut kosong, padahal hanya review_due_at yang di-null-kan")
+	}
+
+	// Tidak dikirim = tidak diubah: PATCH judul saja mempertahankan expiry.
+	rec = doJSON(t, engine, http.MethodPatch, base, token, `{"title":"Tetap Ada Tanggal"}`)
+	requireStatus(t, rec, http.StatusOK)
+	decodeData(t, rec, &cleared)
+	if cleared.Document.ExpiryAt == nil {
+		t.Error("expiry_at hilang padahal tidak dikirim — null dan absen tidak dibedakan")
+	}
+}
 func TestDocumentDownloadStreamsLargeContent(t *testing.T) {
 	fixture := newDocumentHTTPFixture(t)
 	engine := fixture.parts.engine
@@ -960,6 +1168,67 @@ func TestDocumentListCategoryFilter(t *testing.T) {
 	}
 }
 
+// TestDocumentListOwnerFilter menutup `?owner_id=` (`42-API.md` §4, T-095,
+// keputusan P-079): hanya dokumen milik user itu — dan tetap di dalam cakupan,
+// sehingga orang luar tetap melihat 0 walau owner-nya benar.
+func TestDocumentListOwnerFilter(t *testing.T) {
+	requirePool(t)
+	fixture := newDocumentHTTPFixture(t)
+	engine := fixture.parts.engine
+	manager := fixture.createActor("manager")
+	projectID := fixture.createProject(manager, "owndoc")
+	token := loginToken(t, engine, manager)
+
+	contributor := fixture.createUserInOrg(manager.OrgID, "contributor")
+	fixture.addMember(manager, projectID, contributor.ID, model.ProjectRoleContributor)
+	contributorToken := loginToken(t, engine, contributor)
+
+	docM := createDocumentHTTP(t, engine, token, projectID, "Milik Manager")
+	docC := createDocumentHTTP(t, engine, contributorToken, projectID, "Milik Contributor")
+
+	byOwner := func(ownerID, token string) documentListPayload {
+		t.Helper()
+		rec := doJSON(t, engine, http.MethodGet, "/api/v1/documents?owner_id="+ownerID, token, "")
+		requireStatus(t, rec, http.StatusOK)
+		var list documentListPayload
+		decodeData(t, rec, &list)
+		return list
+	}
+
+	got := byOwner(manager.ID.String(), token)
+	if len(got) != 1 || got[0].DocumentNumber != docM.Document.DocumentNumber {
+		t.Fatalf("filter owner manager %+v, diharapkan hanya %s", got, docM.Document.DocumentNumber)
+	}
+
+	got = byOwner(contributor.ID.String(), token)
+	if len(got) != 1 || got[0].DocumentNumber != docC.Document.DocumentNumber {
+		t.Fatalf("filter owner contributor %+v, diharapkan hanya %s", got, docC.Document.DocumentNumber)
+	}
+
+	// UUID asing yang sah → 200 kosong, bukan 404: tidak ada yang bocor.
+	got = byOwner(uuid.NewString(), token)
+	if len(got) != 0 {
+		t.Fatalf("filter owner asing %+v, diharapkan kosong", got)
+	}
+
+	// Bukan UUID → 422 pada field-nya.
+	rec := doJSON(t, engine, http.MethodGet, "/api/v1/documents?owner_id=bukan-uuid", token, "")
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+	var env envelope
+	decodeBody(t, rec, &env)
+	if env.Error == nil || len(env.Error.Details) != 1 || env.Error.Details[0].Field != "owner_id" {
+		t.Fatalf("owner_id invalid: %+v", env.Error)
+	}
+
+	// Orang luar organisasi: cakupan tetap berlaku di atas filter owner.
+	outsider := fixture.createActor("manager")
+	outsiderToken := loginToken(t, engine, outsider)
+	got = byOwner(manager.ID.String(), outsiderToken)
+	if len(got) != 0 {
+		t.Fatalf("outsider melihat %+v lewat filter owner, diharapkan kosong", got)
+	}
+}
+
 func createDocumentWithCategoryHTTP(t *testing.T, engine *gin.Engine, token string, projectID uuid.UUID, title string, catID *uuid.UUID) documentPayload {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"project_id": projectID.String(), "title": title, "category_id": catID.String()})
@@ -1029,4 +1298,3 @@ func TestDocumentListCategories(t *testing.T) {
 		t.Errorf("kategori viewer: %+v, diharapkan kosong", empty)
 	}
 }
-

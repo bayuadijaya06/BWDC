@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,8 +35,12 @@ type DocumentListFilter struct {
 	// CategoryID menyaring `documents.category_id` — `50-FSD.md` §4.1 (Q-016),
 	// tanpa migrasi baru karena `document_categories` sudah ada (`41-DATABASE.md` §2.3).
 	CategoryID *uuid.UUID
-	Page       int
-	Limit      int
+	// OwnerID menyaring `documents.owner_id` — `50-FSD.md` §4.1 Owner (Q-016,
+	// keputusan P-079: tanpa endpoint daftar pengguna; klien mengirim ID yang
+	// sudah diketahuinya, mis. user login untuk tab "Milik saya").
+	OwnerID *uuid.UUID
+	Page    int
+	Limit   int
 }
 
 // documentSelectColumns adalah kolom kanonik daftar/detail dokumen, termasuk
@@ -45,6 +50,7 @@ const documentSelectColumns = `
 	d.id, d.project_id, d.document_number, d.title, d.category_id,
 	COALESCE(d.description, '') AS description, d.owner_id, d.status, d.archived_at,
 	d.current_version, d.workflow_instance_id, d.created_at, d.updated_at,
+	d.review_due_at, d.expiry_at, d.published_at,
 	p.code AS project_code, p.name AS project_name, p.status AS project_status,
 	COALESCE(c.name, '') AS category_name,
 	owner.username AS owner_username,
@@ -71,18 +77,19 @@ const documentFrom = `
 // `List` dan `count` supaya keduanya tidak dapat menyimpang.
 //
 // Posisi parameter: 1-3 cakupan, 4 project_id, 5 status, 6 pencarian, 7-8 rentang,
-// 9 category_id.
+// 9 category_id, 10 owner_id.
 //
 // Tanpa penyaring `status`, dokumen terarsip keluar dari daftar default dan
 // hanya muncul pada `?status=archived` (ADR-0019 butir 5). Aturan itu hidup di
 // dalam kueri, bukan di handler, jadi di sini pun ikut terjaga.
 var documentListWhere = projectScopePredicate(1, 2, 3) + `
-			AND ($4::uuid IS NULL OR d.project_id = $4)
-			AND CASE WHEN $5 = '' THEN d.status <> 'archived' ELSE d.status = $5 END
-			AND ($6 = '' OR d.title ILIKE '%' || $6 || '%' OR d.document_number ILIKE '%' || $6 || '%')
-			AND ($7::timestamptz IS NULL OR d.updated_at >= $7)
-			AND ($8::timestamptz IS NULL OR d.updated_at <= $8)
-			AND ($9::uuid IS NULL OR d.category_id = $9)`
+		AND ($4::uuid IS NULL OR d.project_id = $4)
+		AND CASE WHEN $5 = '' THEN d.status <> 'archived' ELSE d.status = $5 END
+		AND ($6 = '' OR d.title ILIKE '%' || $6 || '%' OR d.document_number ILIKE '%' || $6 || '%')
+		AND ($7::timestamptz IS NULL OR d.updated_at >= $7)
+		AND ($8::timestamptz IS NULL OR d.updated_at <= $8)
+		AND ($9::uuid IS NULL OR d.category_id = $9)
+		AND ($10::uuid IS NULL OR d.owner_id = $10)`
 
 // DocumentRepository membaca dan mengubah dokumen beserta versinya.
 type DocumentRepository struct {
@@ -120,7 +127,7 @@ func (r *DocumentRepository) List(ctx context.Context, scope ProjectScope, filte
 	offset := (page - 1) * limit
 
 	// Posisi parameter: 1-3 cakupan, 4 project_id, 5 status, 6 search, 7-8 rentang
-	// `updated_at`, 9 category_id, 10 limit, 11 offset. Aturan arsip (default
+	// `updated_at`, 9 category_id, 10 owner_id, 11 limit, 12 offset. Aturan arsip (default
 	// menyembunyikan `archived`) ada di `documentListWhere`.
 	query := `
 		SELECT ` + documentSelectColumns + `,
@@ -128,12 +135,12 @@ func (r *DocumentRepository) List(ctx context.Context, scope ProjectScope, filte
 	` + documentFrom + `
 		WHERE ` + documentListWhere + `
 		ORDER BY d.created_at DESC, d.document_number DESC
-		LIMIT $10 OFFSET $11`
+		LIMIT $11 OFFSET $12`
 
 	rows, err := r.db.Query(ctx, query,
 		scope.OrganizationID, scope.AllInOrganization, scope.UserID,
 		filter.ProjectID, filter.Status, filter.Search,
-		filter.UpdatedFrom, filter.UpdatedTo, filter.CategoryID, limit, offset)
+		filter.UpdatedFrom, filter.UpdatedTo, filter.CategoryID, filter.OwnerID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("baca daftar dokumen: %w", err)
 	}
@@ -181,7 +188,7 @@ func (r *DocumentRepository) count(ctx context.Context, scope ProjectScope, filt
 	if err := r.db.QueryRow(ctx, query,
 		scope.OrganizationID, scope.AllInOrganization, scope.UserID,
 		filter.ProjectID, filter.Status, filter.Search,
-		filter.UpdatedFrom, filter.UpdatedTo, filter.CategoryID,
+		filter.UpdatedFrom, filter.UpdatedTo, filter.CategoryID, filter.OwnerID,
 	).Scan(&total); err != nil {
 		return 0, fmt.Errorf("hitung daftar dokumen: %w", err)
 	}
@@ -381,6 +388,90 @@ func (r *DocumentRepository) HasRunningWorkflow(ctx context.Context, documentID 
 	return exists, nil
 }
 
+// DocumentUpdate adalah perubahan parsial `PATCH /documents/:id`. Field `nil`
+// berarti "tidak dikirim" dan tidak diubah.
+//
+// `Status`/`ProjectID`/`OwnerID`/`DocumentNumber` sengaja **tidak ada** di sini:
+// status hanya bergerak lewat endpoint lifecycle, tiga lainnya immutable.
+//
+// `Clear*` berarti kolom dikembalikan ke NULL (`null` eksplisit di body).
+type DocumentUpdate struct {
+	Title            *string
+	Description      *string
+	CategoryID       *uuid.UUID
+	ReviewDueAt      *time.Time
+	ExpiryAt         *time.Time
+	PublishedAt      *time.Time
+	ClearReviewDueAt bool
+	ClearExpiryAt    bool
+	ClearPublishedAt bool
+}
+
+// Update menerapkan perubahan parsial di dalam cakupan aktor.
+//
+// Daftar kolom yang dapat diubah ditulis eksplisit (whitelist), bukan disusun
+// dari nama field kiriman klien (pola `ProjectRepository.Update`).
+func (r *DocumentRepository) Update(ctx context.Context, scope ProjectScope, id uuid.UUID, update DocumentUpdate) (int64, error) {
+	sets := make([]string, 0, 7)
+	args := make([]any, 0, 9)
+
+	add := func(column string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+
+	if update.Title != nil {
+		add("title", *update.Title)
+	}
+	if update.Description != nil {
+		add("description", *update.Description)
+	}
+	if update.CategoryID != nil {
+		add("category_id", *update.CategoryID)
+	}
+	if update.ReviewDueAt != nil {
+		add("review_due_at", *update.ReviewDueAt)
+	}
+	if update.ClearReviewDueAt {
+		add("review_due_at", nil)
+	}
+	if update.ExpiryAt != nil {
+		add("expiry_at", *update.ExpiryAt)
+	}
+	if update.ClearExpiryAt {
+		add("expiry_at", nil)
+	}
+	if update.PublishedAt != nil {
+		add("published_at", *update.PublishedAt)
+	}
+	if update.ClearPublishedAt {
+		add("published_at", nil)
+	}
+	if len(sets) == 0 {
+		return 0, ErrNoUpdateFields
+	}
+	sets = append(sets, "updated_at = NOW()")
+
+	args = append(args, id)
+	idPos := len(args)
+	args = append(args, scope.OrganizationID)
+	orgPos := len(args)
+	args = append(args, scope.AllInOrganization)
+	allPos := len(args)
+	args = append(args, scope.UserID)
+	userPos := len(args)
+
+	query := fmt.Sprintf(`UPDATE documents d SET %s FROM projects p
+		WHERE d.project_id = p.id AND d.id = $%d AND %s`,
+		strings.Join(sets, ", "), idPos, projectScopePredicate(orgPos, allPos, userPos))
+
+	tag, err := r.db.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("perbarui dokumen: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // documentVersionSelect adalah proyeksi kanonik satu versi dokumen.
 const documentVersionSelect = `
 	SELECT v.id, v.document_id, v.version, v.file_key, v.original_name, v.mime_type,
@@ -400,6 +491,7 @@ func scanDocument(row pgx.Row) (*model.Document, error) {
 		&document.ID, &document.ProjectID, &document.DocumentNumber, &document.Title, &document.CategoryID,
 		&document.Description, &document.OwnerID, &document.Status, &document.ArchivedAt,
 		&document.CurrentVersion, &document.WorkflowInstanceID, &document.CreatedAt, &document.UpdatedAt,
+		&document.ReviewDueAt, &document.ExpiryAt, &document.PublishedAt,
 		&document.ProjectCode, &document.ProjectName, &projectStatus,
 		&document.CategoryName, &document.OwnerUsername, &document.LatestVersion, &workflowStatus,
 	); err != nil {
@@ -420,6 +512,7 @@ func scanDocumentRow(rows pgx.Rows, document *model.Document, total *int) error 
 		&document.ID, &document.ProjectID, &document.DocumentNumber, &document.Title, &document.CategoryID,
 		&document.Description, &document.OwnerID, &document.Status, &document.ArchivedAt,
 		&document.CurrentVersion, &document.WorkflowInstanceID, &document.CreatedAt, &document.UpdatedAt,
+		&document.ReviewDueAt, &document.ExpiryAt, &document.PublishedAt,
 		&document.ProjectCode, &document.ProjectName, &projectStatus,
 		&document.CategoryName, &document.OwnerUsername, &document.LatestVersion, &workflowStatus,
 		total,

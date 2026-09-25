@@ -75,6 +75,7 @@ var commentOwnFrom = `
 // `comments.created_by_id` bersifat `NOT NULL`, jadi tidak perlu `COALESCE`.
 const commentSelectColumns = `
 	c.id, c.entity_id, c.entity_type, c.content, c.created_by_id, c.created_at,
+	c.parent_id,
 	cu.username AS created_by_username`
 
 // commentReadPredicate menyusun syarat cakupan BACA komentar: "komentar pada
@@ -201,7 +202,7 @@ func (r *CommentRepository) List(ctx context.Context, scope ProjectScope, filter
 		)
 		if err := rows.Scan(
 			&comment.ID, &comment.EntityID, &comment.EntityType, &comment.Content,
-			&comment.CreatedByID, &comment.CreatedAt, &comment.CreatedByUsername,
+			&comment.CreatedByID, &comment.CreatedAt, &comment.ParentID, &comment.CreatedByUsername,
 			&count,
 		); err != nil {
 			return nil, 0, fmt.Errorf("pindai baris komentar: %w", err)
@@ -276,13 +277,48 @@ func (r *CommentRepository) FindOwn(ctx context.Context, id, actorID uuid.UUID) 
 	return scanComment(r.db.QueryRow(ctx, query, id, actorID))
 }
 
+// FindOnEntity membaca satu komentar pada entitas yang SUDAH dipastikan
+// (jenis + id cocok persis), tanpa join cakupan.
+//
+// Dipakai validasi `parent_id` (ADR-0032): induk wajib pada entitas yang sama
+// dengan balasan, dan entitas itu sendiri sudah lolos pemeriksaan cakupan di
+// service — jadi tidak ada informasi baru yang bocor lewat sini. Komentar pada
+// entitas lain (atau yang tidak ada) menghasilkan ErrNotFound yang sama.
+func (r *CommentRepository) FindOnEntity(ctx context.Context, id uuid.UUID, entityType string, entityID uuid.UUID) (*model.Comment, error) {
+	query := `
+		SELECT ` + commentSelectColumns + commentOwnFrom + `
+		WHERE c.id = $1 AND c.entity_type = $2 AND c.entity_id = $3`
+
+	return scanComment(r.db.QueryRow(ctx, query, id, entityType, entityID))
+}
+
+// CountReplies menghitung SELURUH keturunan sebuah komentar (langsung maupun
+// berjenjang) untuk metadata audit penghapusan induk (ADR-0032).
+//
+// Penghitungannya rekursif karena validasi tidak membatasi kedalaman balasan;
+// UI datar T-097 menampilkannya tanpa jenjang, tetapi penghapusan CASCADE
+// menyentuh semua tingkat sehingga audit harus jujur tentang jumlahnya.
+func (r *CommentRepository) CountReplies(ctx context.Context, id uuid.UUID) (int, error) {
+	var count int
+	if err := r.db.QueryRow(ctx, `
+		WITH RECURSIVE subtree AS (
+			SELECT id FROM comments WHERE parent_id = $1
+			UNION ALL
+			SELECT c.id FROM comments c JOIN subtree s ON c.parent_id = s.id
+		)
+		SELECT COUNT(*) FROM subtree`, id).Scan(&count); err != nil {
+		return 0, fmt.Errorf("hitung balasan komentar: %w", err)
+	}
+	return count, nil
+}
+
 // Create menulis komentar baru dan mengisi `ID` serta `CreatedAt` dari database.
 func (r *CommentRepository) Create(ctx context.Context, comment *model.Comment) error {
 	if err := r.db.QueryRow(ctx,
-		`INSERT INTO comments (entity_id, entity_type, content, created_by_id)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO comments (entity_id, entity_type, content, created_by_id, parent_id)
+		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id, created_at`,
-		comment.EntityID, comment.EntityType, comment.Content, comment.CreatedByID,
+		comment.EntityID, comment.EntityType, comment.Content, comment.CreatedByID, comment.ParentID,
 	).Scan(&comment.ID, &comment.CreatedAt); err != nil {
 		return fmt.Errorf("simpan komentar: %w", err)
 	}
@@ -327,7 +363,7 @@ func scanComment(row pgx.Row) (*model.Comment, error) {
 	var comment model.Comment
 	if err := row.Scan(
 		&comment.ID, &comment.EntityID, &comment.EntityType, &comment.Content,
-		&comment.CreatedByID, &comment.CreatedAt, &comment.CreatedByUsername,
+		&comment.CreatedByID, &comment.CreatedAt, &comment.ParentID, &comment.CreatedByUsername,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound

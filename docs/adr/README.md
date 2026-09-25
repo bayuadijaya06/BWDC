@@ -77,5 +77,12 @@ Sebelumnya keputusan tercatat di dua tempat dengan isi berbeda (`01-AGENT-WORKFR
 | 0024 | Versi & tooling frontend (React 19, React Router 7, Tailwind v4 CSS-first, TanStack Query menyusul) | ACCEPTED | 2026-09-21 |
 | 0025 | Skill antislop terpasang dipin ke tag rilis; aturan hanya bersumber dari `antislop.md` | ACCEPTED | 2026-09-22 |
 | 0026 | Dashboard MVP: metrik mana yang hidup tanpa migrasi, dan apa yang ditahan | ACCEPTED | 2026-09-23 |
+| 0027 | Departemen: tabel `departments` + `projects.department_id` (jawaban Q-DASH-01) | ACCEPTED | 2026-09-24 |
+| 0028 | SLA per-step: kolom `sla_status` di `workflow_instances` (jawaban Q-DASH-02) | ACCEPTED | 2026-09-24 |
+| 0029 | Field siklus hidup dokumen: `review_due_at`/`expiry_at`/`published_at` eksplisit (jawaban Q-DASH-03) | ACCEPTED | 2026-09-24 |
+| 0030 | Riwayat stage presisi: tabel `workflow_stage_transitions` (jawaban Q-DASH-04) | ACCEPTED | 2026-09-24 |
+| 0031 | Lisensi proyek: Apache-2.0, pemegang hak cipta BSA (jawaban Q-023) | ACCEPTED | 2026-09-24 |
+| 0032 | Threading komentar: `parent_id` + daftar datar (jawaban Q-019) | ACCEPTED | 2026-09-24 |
+| 0033 | Refresh token lewat cookie HttpOnly — amandemen transpor ADR-0023 (jawaban Q-021) | ACCEPTED | 2026-09-25 |
 
 Setelah membuat ADR baru, tambahkan barisnya ke tabel di atas dan ke `docs/design/00-README.md` bila relevan.

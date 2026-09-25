@@ -47,8 +47,32 @@ type DocumentResponse struct {
 	LatestVersion      string     `json:"latest_version,omitempty"`
 	WorkflowInstanceID *uuid.UUID `json:"workflow_instance_id,omitempty"`
 	WorkflowStatus     string     `json:"workflow_instance_status,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	// Siklus hidup eksplisit (ADR-0029, `PATCH /documents/:id`): hanya terisi
+	// bila dijadwalkan, supaya klien tidak menebak dari `updated_at`.
+	ReviewDueAt *time.Time `json:"review_due_at,omitempty"`
+	ExpiryAt    *time.Time `json:"expiry_at,omitempty"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// UpdateDocumentRequest adalah body `PATCH /documents/:id` (`42-API.md` §4).
+// Field yang tidak dikirim bernilai nil dan tidak diubah.
+//
+// `Status`/`ProjectID`/`OwnerID`/`DocumentNumber` ada di sini **hanya** supaya
+// kiriman klien ditolak `422 VALIDATION_ERROR` dengan pesan yang jelas: status
+// hanya bergerak lewat endpoint lifecycle, tiga lainnya immutable.
+type UpdateDocumentRequest struct {
+	Title          *string    `json:"title"`
+	Description    *string    `json:"description"`
+	CategoryID     *uuid.UUID `json:"category_id"`
+	ReviewDueAt    *string    `json:"review_due_at"`
+	ExpiryAt       *string    `json:"expiry_at"`
+	PublishedAt    *string    `json:"published_at"`
+	Status         *string    `json:"status"`
+	ProjectID      *uuid.UUID `json:"project_id"`
+	OwnerID        *uuid.UUID `json:"owner_id"`
+	DocumentNumber *string    `json:"document_number"`
 }
 
 // DocumentVersionResponse adalah bentuk satu versi dokumen
@@ -101,6 +125,9 @@ func NewDocumentResponse(document *model.Document) DocumentResponse {
 		LatestVersion:      document.LatestVersion,
 		WorkflowInstanceID: document.WorkflowInstanceID,
 		WorkflowStatus:     document.WorkflowInstance,
+		ReviewDueAt:        document.ReviewDueAt,
+		ExpiryAt:           document.ExpiryAt,
+		PublishedAt:        document.PublishedAt,
 		CreatedAt:          document.CreatedAt,
 		UpdatedAt:          document.UpdatedAt,
 	}

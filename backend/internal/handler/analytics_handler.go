@@ -45,6 +45,39 @@ func (h *AnalyticsHandler) Dashboard(c *gin.Context) {
 	response.OK(c, data)
 }
 
+// ListDepartments melayani `GET /analytics/departments`.
+//
+// Opsi penyaring `?department_id=` dashboard (`42-API.md` §13, ADR-0027).
+func (h *AnalyticsHandler) ListDepartments(c *gin.Context) {
+	actor, ok := actorFrom(c)
+	if !ok {
+		return
+	}
+	items, err := h.analytics.ListDepartments(c.Request.Context(), actor)
+	if err != nil {
+		h.logger.Error("daftar departemen gagal", "error", err.Error(), "correlation_id", middleware.CurrentCorrelationID(c))
+		response.Internal(c)
+		return
+	}
+
+	// Bentuknya sama dengan `GET /documents/categories`: id string + nama +
+	// kode, untuk opsi dropdown penyaring.
+	type departmentItem struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Code string `json:"code"`
+	}
+	out := make([]departmentItem, len(items))
+	for i, dep := range items {
+		out[i] = departmentItem{
+			ID:   dep.ID.String(),
+			Name: dep.Name,
+			Code: dep.Code,
+		}
+	}
+	response.OK(c, out)
+}
+
 func parseAnalyticsQuery(c *gin.Context) (dto.AnalyticsQuery, []response.FieldError) {
 	var fields []response.FieldError
 	var q dto.AnalyticsQuery
@@ -73,6 +106,13 @@ func parseAnalyticsQuery(c *gin.Context) (dto.AnalyticsQuery, []response.FieldEr
 			fields = append(fields, response.FieldError{Field: "project_id", Error: "harus UUID yang sah"})
 		} else {
 			q.ProjectID = &raw
+		}
+	}
+	if raw := c.Query("department_id"); raw != "" {
+		if _, err := uuid.Parse(raw); err != nil {
+			fields = append(fields, response.FieldError{Field: "department_id", Error: "harus UUID yang sah"})
+		} else {
+			q.DepartmentID = &raw
 		}
 	}
 	if raw := c.Query("status"); raw != "" {

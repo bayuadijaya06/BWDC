@@ -65,9 +65,10 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 
 export const http: AxiosInstance = axios.create({
   baseURL: BASE_URL,
-  // Endpoint refresh dan login tidak butuh cookie; jangan kirim kredensial
-  // otomatis sampai backend memasang cookie HttpOnly (Q-021).
-  withCredentials: false,
+  // Cookie refresh token (ADR-0033) harus ikut pada setiap permintaan ke API —
+  // termasuk refresh itu sendiri. Tanpa ini peramban menahan cookie dan sesi
+  // tidak pernah bertahan melewati umur access token.
+  withCredentials: true,
   timeout: 30_000,
 });
 
@@ -99,20 +100,16 @@ http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 let refreshInFlight: Promise<string> | null = null;
 
 async function exchangeRefreshToken(): Promise<string> {
-  const refreshToken = session.getRefreshToken();
-  if (refreshToken === null) {
-    throw ApiError.network("tidak ada refresh token tersimpan");
-  }
-
-  const response = await axios.post<
-    ApiSuccess<{ token: string; refresh_token: string }>
-  >(
+  // Cookie dilampirkan peramban; tidak ada token yang dibaca dari storage
+  // (ADR-0033). Kegagalan di sini berarti tidak ada sesi (cookie hilang,
+  // kedaluwarsa, atau dicabut) — pemanggil yang memutuskan anonim.
+  const response = await axios.post<ApiSuccess<{ token: string }>>(
     `${BASE_URL}/auth/refresh`,
-    { refresh_token: refreshToken },
-    { timeout: 15_000 },
+    {},
+    { timeout: 15_000, withCredentials: true },
   );
 
-  session.setTokens(response.data.data.token, response.data.data.refresh_token);
+  session.setTokens(response.data.data.token);
   return response.data.data.token;
 }
 
@@ -206,8 +203,7 @@ http.interceptors.response.use(
       apiError.code === "UNAUTHORIZED" &&
       config !== undefined &&
       !isRefreshCall &&
-      config._retriedAfterRefresh !== true &&
-      session.getRefreshToken() !== null
+      config._retriedAfterRefresh !== true
     ) {
       config._retriedAfterRefresh = true;
       try {

@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/common/States";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { visibleNavigation } from "@/config/navigation";
 import { useProjectList } from "@/queries/projects";
-import { useDashboard } from "@/queries/analytics";
+import { useDashboard, useDepartments } from "@/queries/analytics";
 import { ApiError } from "@/services/http";
 import { toLocalInputValue, validateDashboardRange } from "@/services/analytics";
 import { useAuthStore } from "@/store/auth";
@@ -28,11 +28,12 @@ import {
 } from "recharts";
 
 /**
- * Dashboard MVP (`50-FSD.md` §9, `52-DASHBOARD-ANALYTICS.md` §3/§6, ADR-0026).
+ * Dashboard (`50-FSD.md` §9, `52-DASHBOARD-ANALYTICS.md` §3/§6/§8, ADR-0026 + ADR-0027..0030).
  *
- * KPI 6 + chart 8 dari `GET /analytics/dashboard` - tanpa angka karangan
- * (R-17/R-18). Filter global `?from=&to=&project_id=` hidup di URL sehingga
- * dapat dibagikan; drill-down adalah link biasa ke daftar yang sudah ada.
+ * KPI 13 + chart 11 dari `GET /analytics/dashboard` - tanpa angka karangan
+ * (R-17/R-18). Filter global `?from=&to=&project_id=&department_id=` hidup di
+ * URL sehingga dapat dibagikan; drill-down adalah link biasa ke daftar yang
+ * sudah ada.
  */
 export function DashboardPage() {
   const profile = useAuthStore((state) => state.profile);
@@ -43,13 +44,15 @@ export function DashboardPage() {
   const fromParam = params.get("from") ?? "";
   const toParam = params.get("to") ?? "";
   const projectId = params.get("project_id") ?? "";
+  const departmentId = params.get("department_id") ?? "";
 
   const [fromDraft, setFromDraft] = useState(toLocalInputValue(fromParam));
   const [toDraft, setToDraft] = useState(toLocalInputValue(toParam));
   const [rangeErrors, setRangeErrors] = useState<Record<string, string>>({});
 
-  const query = useDashboard({ from: fromParam, to: toParam, project_id: projectId });
+  const query = useDashboard({ from: fromParam, to: toParam, project_id: projectId, department_id: departmentId });
   const projects = useProjectList({ limit: 100 }, { enabled: canReadProjects });
+  const departments = useDepartments(canReadReport);
 
   const accessible = visibleNavigation(profile?.permissions ?? []);
   const readyModules = accessible.filter((item) => item.status === "ready" && item.path !== "/");
@@ -76,7 +79,7 @@ export function DashboardPage() {
     setFromDraft("");
     setToDraft("");
     setRangeErrors({});
-    navigate({ from: null, to: null, project_id: null });
+    navigate({ from: null, to: null, project_id: null, department_id: null });
   }
 
   const [chartTab, setChartTab] = useState<"dokumen" | "workflow" | "antrian">("dokumen");
@@ -174,10 +177,29 @@ export function DashboardPage() {
           </select>
         </div>
 
+        <div className="flex flex-col gap-1.5 min-w-0">
+          <label htmlFor="dashboard-department" className="text-13 font-medium text-text-soft">
+            Departemen
+          </label>
+          <select
+            id="dashboard-department"
+            value={departmentId}
+            onChange={(e) => navigate({ department_id: e.target.value || null })}
+            className="tap-target rounded-control border border-line-strong bg-surface-raised px-2 text-14 text-text min-w-0"
+          >
+            <option value="">{departments.isPending ? "Memuat departemen..." : "Semua departemen"}</option>
+            {(departments.data ?? []).map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <Button type="submit" variant="secondary">
           Terapkan
         </Button>
-        {(fromParam || toParam || projectId) && (
+        {(fromParam || toParam || projectId || departmentId) && (
           <Button type="button" variant="quiet" onClick={clearFilter}>
             Bersihkan
           </Button>
@@ -254,13 +276,28 @@ export function DashboardPage() {
                 Lihat overdue
               </Link>
             </Panel>
+            <Panel title="SLA On Time" note="selesai sebelum deadline">
+              <p className="font-mono text-20 font-semibold text-text">{kpis.sla_on_time}</p>
+            </Panel>
+            <Panel title="SLA Late" note="selesai melewati deadline">
+              <p className="font-mono text-20 font-semibold text-text">{kpis.sla_late}</p>
+            </Panel>
+            <Panel title="SLA Overdue" note="rejected (gagal SLA)">
+              <p className="font-mono text-20 font-semibold text-text">{kpis.sla_overdue}</p>
+            </Panel>
+            <Panel title="Review Due" note="review_due_at di masa depan">
+              <p className="font-mono text-20 font-semibold text-text">{kpis.review_due}</p>
+            </Panel>
+            <Panel title="Expired" note="expiry_at lewat, belum diarsip">
+              <p className="font-mono text-20 font-semibold text-text">{kpis.expired}</p>
+            </Panel>
           </section>
 
           <section className="flex flex-col gap-4" aria-label="Chart dashboard">
             <div role="tablist" aria-label="Kelompok chart" className="flex flex-wrap gap-1.5 border-b border-line pb-2">
               {[
-                { id: "dokumen" as const, label: "Dokumen", hint: "Sebaran, funnel, kategori" },
-                { id: "workflow" as const, label: "Workflow", hint: "Volume, approval, aktivitas" },
+                { id: "dokumen" as const, label: "Dokumen", hint: "Sebaran, funnel, kategori, departemen" },
+                { id: "workflow" as const, label: "Workflow", hint: "Volume, approval, SLA, aktivitas" },
                 { id: "antrian" as const, label: "Antrian", hint: "Aging, durasi stage" },
               ].map((tab) => (
                 <button
@@ -356,6 +393,45 @@ export function DashboardPage() {
                     </div>
                   )}
                 </Panel>
+
+                <Panel title="Dokumen per Departemen" note="Horizontal bar">
+                  {charts.byDepartment.length === 0 ? (
+                    <p className="text-13 text-text-muted">Belum ada departemen</p>
+                  ) : (
+                    <div className="h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={charts.byDepartment} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
+                          <XAxis type="number" tick={chartTick} stroke={chartAxisStroke} />
+                          <YAxis dataKey="department" type="category" width={140} tick={chartTick} stroke={chartAxisStroke} />
+                          <Tooltip contentStyle={tooltipStyle} />
+                          <Bar dataKey="count" fill="var(--color-status-review-ink)" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </Panel>
+
+                <Panel title="Review & Expiry Trend" note="Review jatuh tempo, kedaluwarsa, terbit per minggu">
+                  {charts.reviewDueTrend.length === 0 ? (
+                    <p className="text-13 text-text-muted">Belum ada jadwal review</p>
+                  ) : (
+                    <div className="h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={charts.reviewDueTrend}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
+                          <XAxis dataKey="week" tick={chartTick} stroke={chartAxisStroke} />
+                          <YAxis tick={chartTick} stroke={chartAxisStroke} />
+                          <Tooltip contentStyle={tooltipStyle} />
+                          <Legend wrapperStyle={{ color: "var(--text-muted)", fontSize: 12 }} />
+                          <Line type="monotone" dataKey="review_due" stroke="var(--color-status-review-ink)" dot={false} />
+                          <Line type="monotone" dataKey="expired" stroke="var(--color-status-rejected-ink)" dot={false} />
+                          <Line type="monotone" dataKey="published" stroke="var(--color-status-approved-ink)" dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </Panel>
               </div>
             ) : null}
 
@@ -394,6 +470,27 @@ export function DashboardPage() {
                           <Bar dataKey="approved" stackId="a" fill="var(--color-status-approved-ink)" />
                           <Bar dataKey="rejected" stackId="a" fill="var(--color-status-rejected-ink)" />
                           <Bar dataKey="revision" stackId="a" fill="var(--color-status-revision-ink)" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </Panel>
+
+                <Panel title="SLA Compliance" note="On time / late / overdue per minggu">
+                  {charts.slaBreakdown.length === 0 ? (
+                    <p className="text-13 text-text-muted">Belum ada instance selesai</p>
+                  ) : (
+                    <div className="h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={charts.slaBreakdown}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
+                          <XAxis dataKey="week" tick={chartTick} stroke={chartAxisStroke} />
+                          <YAxis tick={chartTick} stroke={chartAxisStroke} />
+                          <Tooltip contentStyle={tooltipStyle} />
+                          <Legend wrapperStyle={{ color: "var(--text-muted)", fontSize: 12 }} />
+                          <Bar dataKey="on_time" stackId="s" fill="var(--color-status-approved-ink)" />
+                          <Bar dataKey="late" stackId="s" fill="var(--color-status-revision-ink)" />
+                          <Bar dataKey="overdue" stackId="s" fill="var(--color-status-rejected-ink)" />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -444,9 +541,9 @@ export function DashboardPage() {
                   )}
                 </Panel>
 
-                <Panel title="Avg Time per Stage" note="Estimasi selisih aksi">
+                <Panel title="Avg Time per Stage" note="Presisi workflow_stage_transitions">
                   {charts.avgTimePerStage.length === 0 ? (
-                    <p className="text-13 text-text-muted">Belum ada aksi</p>
+                    <p className="text-13 text-text-muted">Belum ada stage selesai</p>
                   ) : (
                     <div className="h-64">
                       <ResponsiveContainer width="100%" height="100%">

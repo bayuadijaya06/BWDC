@@ -570,18 +570,73 @@ func TestCommentListIsChronologicalAndPaginated(t *testing.T) {
 	}
 }
 
-// TestCommentThreadingIsNotSupported mencatat batas modul ini sebagai test, bukan
-// sebagai catatan yang mudah hilang: `50-FSD.md` §7 menyebut "Reply (optional,
-// threaded)", sedangkan tabel `comments` (`41-DATABASE.md` §2.5) tidak punya
-// kolom induk. Test ini menegaskan perilaku yang **ada** — balasan ditulis
-// sebagai komentar biasa pada entitas yang sama, tanpa relasi ke komentar lain.
-//
-// Bila kelak threading diputuskan (butuh migrasi + ADR), test ini yang harus
-// berubah lebih dulu.
-func TestCommentThreadingIsNotSupported(t *testing.T) {
+// TestCommentReplyLinksToParent menutup threading datar (ADR-0032, T-096):
+// balasan menyimpan `parent_id` induk pada entitas yang sama, terbaca kembali
+// di daftar/detail, dan audit COMMENT_CREATED mencatat induknya.
+func TestCommentReplyLinksToParent(t *testing.T) {
 	fixture := newCommentFixture(t)
 	manager := fixture.createOrgAndUser("manager")
-	projectID := fixture.createProject(manager, "CMT-THREAD")
+	contributor := fixture.createUserInOrg(manager.OrgID, "contributor")
+	projectID := fixture.createProject(manager, "CMT-REPLY")
+	fixture.mustAddMember(manager, projectID, contributor, "contributor")
+	ctx := context.Background()
+
+	parent, err := fixture.comments.Create(ctx, actorOf(manager),
+		commentInput(model.CommentEntityProject, projectID, "komentar induk"))
+	if err != nil {
+		t.Fatalf("buat komentar induk: %v", err)
+	}
+	if parent.ParentID != nil {
+		t.Errorf("komentar tingkat atas punya parent_id %v", parent.ParentID)
+	}
+
+	replyInput := commentInput(model.CommentEntityProject, projectID, "balasan")
+	replyInput.ParentID = &parent.ID
+	reply, err := fixture.comments.Create(ctx, actorOf(contributor), replyInput)
+	if err != nil {
+		t.Fatalf("buat balasan: %v", err)
+	}
+	if reply.ParentID == nil || *reply.ParentID != parent.ID {
+		t.Errorf("balasan parent_id = %v, diharapkan %s", reply.ParentID, parent.ID)
+	}
+
+	// Daftar kronologis datar memuat keduanya, dengan relasi terbaca.
+	listed, total, err := fixture.comments.List(ctx, actorOf(contributor), model.CommentEntityProject, projectID, 1, 20)
+	if err != nil {
+		t.Fatalf("daftar komentar: %v", err)
+	}
+	if total != 2 || len(listed) != 2 {
+		t.Fatalf("daftar berisi %d baris total %d, diharapkan 2", len(listed), total)
+	}
+	if listed[0].ID != parent.ID || listed[1].ID != reply.ID {
+		t.Errorf("urutan daftar bukan [induk, balasan] kronologis")
+	}
+	if listed[1].ParentID == nil || *listed[1].ParentID != parent.ID {
+		t.Errorf("baris balasan di daftar tidak membawa parent_id")
+	}
+
+	// Balasan berjenjang (balasan atas balasan) sah: validasi hanya menuntut
+	// entitas yang sama, bukan kedalaman.
+	nestedInput := commentInput(model.CommentEntityProject, projectID, "balasan berjenjang")
+	nestedInput.ParentID = &reply.ID
+	nested, err := fixture.comments.Create(ctx, actorOf(manager), nestedInput)
+	if err != nil {
+		t.Fatalf("buat balasan berjenjang: %v", err)
+	}
+	if nested.ParentID == nil || *nested.ParentID != reply.ID {
+		t.Errorf("balasan berjenjang parent_id = %v, diharapkan %s", nested.ParentID, reply.ID)
+	}
+}
+
+// TestCommentReplyRequiresParentOnSameEntity menutup validasi `parent_id`
+// (ADR-0032, `42-API.md` §7): induk yang tidak ada dan induk pada entitas
+// berbeda dijawab SAMA (`ErrCommentParentInvalid`), supaya UUID komentar tidak
+// dapat dipakai memetakan entitas lain.
+func TestCommentReplyRequiresParentOnSameEntity(t *testing.T) {
+	fixture := newCommentFixture(t)
+	manager := fixture.createOrgAndUser("manager")
+	projectID := fixture.createProject(manager, "CMT-REPLY-VALID")
+	otherProjectID := fixture.createProject(manager, "CMT-REPLY-OTHER")
 	ctx := context.Background()
 
 	parent, err := fixture.comments.Create(ctx, actorOf(manager),
@@ -590,26 +645,69 @@ func TestCommentThreadingIsNotSupported(t *testing.T) {
 		t.Fatalf("buat komentar induk: %v", err)
 	}
 
-	reply, err := fixture.comments.Create(ctx, actorOf(manager),
-		commentInput(model.CommentEntityProject, projectID, "balasan"))
+	// Induk tidak ada.
+	missing := uuid.New()
+	badInput := commentInput(model.CommentEntityProject, projectID, "balasan yatim")
+	badInput.ParentID = &missing
+	_, err = fixture.comments.Create(ctx, actorOf(manager), badInput)
+	requireError(t, err, service.ErrCommentParentInvalid)
+
+	// Induk ada tetapi pada entitas berbeda: jawaban SAMA.
+	foreignInput := commentInput(model.CommentEntityProject, otherProjectID, "balasan asing")
+	foreignInput.ParentID = &parent.ID
+	_, err = fixture.comments.Create(ctx, actorOf(manager), foreignInput)
+	requireError(t, err, service.ErrCommentParentInvalid)
+
+	// Tidak ada baris yang tersimpan dari kedua penolakan.
+	_, total, err := fixture.comments.List(ctx, actorOf(manager), model.CommentEntityProject, projectID, 1, 20)
+	if err != nil {
+		t.Fatalf("daftar komentar: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("total = %d sesudah dua penolakan, diharapkan 1 (hanya induk)", total)
+	}
+}
+
+// TestCommentDeleteParentCascadesReplies menutup `ON DELETE CASCADE` (ADR-0032):
+// menghapus induk menghapus balasannya, dan audit induk mencatat hitungannya.
+func TestCommentDeleteParentCascadesReplies(t *testing.T) {
+	fixture := newCommentFixture(t)
+	manager := fixture.createOrgAndUser("manager")
+	projectID := fixture.createProject(manager, "CMT-CASCADE")
+	ctx := context.Background()
+
+	parent, err := fixture.comments.Create(ctx, actorOf(manager),
+		commentInput(model.CommentEntityProject, projectID, "komentar induk"))
+	if err != nil {
+		t.Fatalf("buat komentar induk: %v", err)
+	}
+	replyInput := commentInput(model.CommentEntityProject, projectID, "balasan")
+	replyInput.ParentID = &parent.ID
+	reply, err := fixture.comments.Create(ctx, actorOf(manager), replyInput)
 	if err != nil {
 		t.Fatalf("buat balasan: %v", err)
 	}
 
-	if reply.ID == parent.ID {
-		t.Fatal("balasan memakai baris yang sama dengan komentarnya")
+	if err := fixture.comments.Delete(ctx, actorOf(manager), parent.ID); err != nil {
+		t.Fatalf("hapus induk: %v", err)
 	}
 
-	// Keduanya berdiri sendiri: tidak ada kolom yang mengaitkan balasan ke induk.
-	var columns int
-	if err := testPool.QueryRow(ctx,
-		`SELECT count(*) FROM information_schema.columns
-		 WHERE table_name = 'comments' AND column_name IN ('parent_id', 'parent_comment_id', 'reply_to_id')`,
-	).Scan(&columns); err != nil {
-		t.Fatalf("periksa kolom induk komentar: %v", err)
+	// Balasan ikut hilang: dibaca sebagai tidak ada, bukan yatim.
+	if _, err := fixture.comments.Get(ctx, actorOf(manager), reply.ID); err == nil {
+		t.Error("balasan masih dapat dibaca sesudah induk dihapus")
+	} else {
+		requireError(t, err, service.ErrCommentNotFound)
 	}
-	if columns != 0 {
-		t.Errorf("tabel comments punya %d kolom induk; threading sudah didukung dan test ini usang", columns)
+
+	var replyCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT (metadata->>'deleted_reply_count')::int FROM audit_logs
+		 WHERE actor_id = $1 AND action = $2 ORDER BY created_at DESC LIMIT 1`,
+		manager.ID, service.ActionCommentDeleted).Scan(&replyCount); err != nil {
+		t.Fatalf("baca metadata audit hapus: %v", err)
+	}
+	if replyCount != 1 {
+		t.Errorf("deleted_reply_count = %d, diharapkan 1", replyCount)
 	}
 }
 

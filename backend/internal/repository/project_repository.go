@@ -44,11 +44,14 @@ func projectScopePredicate(orgPos, allPos, userPos int) string {
 // anggota). Tidak ada kolom turunan yang disimpan di tabel.
 const projectSelectColumns = `
 	p.id, p.organization_id, p.code, p.name, COALESCE(p.description, '') AS description,
-	p.owner_id, p.status, p.start_date, p.target_end_date, p.created_at, p.updated_at,
+	p.owner_id, p.status, p.start_date, p.target_end_date, p.department_id, p.created_at, p.updated_at,
 	owner.username AS owner_username,
+	COALESCE(dep.name, '') AS department_name,
 	(SELECT COUNT(*) FROM project_members mc WHERE mc.project_id = p.id) AS member_count`
 
-const projectFrom = `FROM projects p JOIN users owner ON owner.id = p.owner_id`
+const projectFrom = `FROM projects p
+	JOIN users owner ON owner.id = p.owner_id
+	LEFT JOIN departments dep ON dep.id = p.department_id`
 
 // projectListWhere adalah syarat WHERE daftar project, dipakai bersama oleh
 // `List` dan `count` supaya keduanya tidak dapat menyimpang.
@@ -210,11 +213,13 @@ func (r *ProjectRepository) Create(ctx context.Context, project *model.Project) 
 // `Code` sengaja **tidak ada** di sini: `projects.code` permanen karena menjadi
 // prefiks nomor dokumen (ADR-0017).
 type ProjectUpdate struct {
-	Name          *string
-	Description   *string
-	OwnerID       *uuid.UUID
-	StartDate     *string
-	TargetEndDate *string
+	Name              *string
+	Description       *string
+	OwnerID           *uuid.UUID
+	StartDate         *string
+	TargetEndDate     *string
+	DepartmentID      *uuid.UUID
+	ClearDepartmentID bool
 }
 
 // Update menerapkan perubahan parsial di dalam cakupan aktor.
@@ -244,6 +249,12 @@ func (r *ProjectRepository) Update(ctx context.Context, scope ProjectScope, id u
 	}
 	if update.TargetEndDate != nil {
 		add("target_end_date", *update.TargetEndDate)
+	}
+	if update.DepartmentID != nil {
+		add("department_id", *update.DepartmentID)
+	}
+	if update.ClearDepartmentID {
+		add("department_id", nil)
 	}
 	if len(sets) == 0 {
 		return 0, ErrNoUpdateFields
@@ -301,6 +312,22 @@ func (r *ProjectRepository) CodeExists(ctx context.Context, organizationID uuid.
 		)`, organizationID, code, excludeID).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("periksa kode project %q: %w", code, err)
+	}
+	return exists, nil
+}
+
+// DepartmentExists menjawab apakah departemen ada di organisasi yang sama.
+// Departemen organisasi lain diperlakukan sama dengan yang tidak ada: perbedaan
+// pesan akan membocorkan keberadaan unit antartenant (pola `CategoryExists`).
+func (r *ProjectRepository) DepartmentExists(ctx context.Context, organizationID, departmentID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM departments
+			WHERE organization_id = $1 AND id = $2
+		)`, organizationID, departmentID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("periksa departemen: %w", err)
 	}
 	return exists, nil
 }
@@ -409,8 +436,8 @@ func scanProject(row pgx.Row) (*model.Project, error) {
 	var p model.Project
 	if err := row.Scan(
 		&p.ID, &p.OrganizationID, &p.Code, &p.Name, &p.Description,
-		&p.OwnerID, &p.Status, &p.StartDate, &p.TargetEndDate, &p.CreatedAt, &p.UpdatedAt,
-		&p.OwnerUsername, &p.MemberCount,
+		&p.OwnerID, &p.Status, &p.StartDate, &p.TargetEndDate, &p.DepartmentID, &p.CreatedAt, &p.UpdatedAt,
+		&p.OwnerUsername, &p.DepartmentName, &p.MemberCount,
 	); err != nil {
 		return nil, wrapNotFound(err)
 	}
@@ -422,8 +449,8 @@ func scanProjectRow(rows pgx.Rows, project *model.Project, total *int) error {
 	if err := rows.Scan(
 		&project.ID, &project.OrganizationID, &project.Code, &project.Name, &project.Description,
 		&project.OwnerID, &project.Status, &project.StartDate, &project.TargetEndDate,
-		&project.CreatedAt, &project.UpdatedAt,
-		&project.OwnerUsername, &project.MemberCount, total,
+		&project.DepartmentID, &project.CreatedAt, &project.UpdatedAt,
+		&project.OwnerUsername, &project.DepartmentName, &project.MemberCount, total,
 	); err != nil {
 		return fmt.Errorf("scan project: %w", err)
 	}

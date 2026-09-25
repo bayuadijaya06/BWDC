@@ -6,14 +6,16 @@ import "time"
 //
 // `from`/`to` — instan RFC 3339 ber-offset, interval tertutup, dipakai semua
 // seri waktu. `project_id` menyaring per project. Semua opsional.
+// `department_id` (UUID) menyaring per departemen (ADR-0027).
 type AnalyticsQuery struct {
-	From      *time.Time `form:"from"`
-	To        *time.Time `form:"to"`
-	ProjectID *string    `form:"project_id"`
-	Status    string     `form:"status"`
+	From         *time.Time `form:"from"`
+	To           *time.Time `form:"to"`
+	ProjectID    *string    `form:"project_id"`
+	Status       string     `form:"status"`
+	DepartmentID *string    `form:"department_id"`
 }
 
-// DashboardKPIs adalah 6 KPI MVP (`52-*` §7).
+// DashboardKPIs adalah KPI dashboard (8 MVP + SLA + review/expiry).
 type DashboardKPIs struct {
 	TotalDocuments       int     `json:"total_documents"`
 	ActiveWorkflows      int     `json:"active_workflows"`
@@ -23,6 +25,13 @@ type DashboardKPIs struct {
 	RevisedThisMonth     int     `json:"revised_this_month"`
 	OpenTasks            int     `json:"open_tasks"`
 	OverdueTasks         int     `json:"overdue_tasks"`
+	// SLA KPIs (ADR-0028): hanya menghitung instance yang sudah selesai.
+	SlaOnTime  int `json:"sla_on_time"`
+	SlaLate    int `json:"sla_late"`
+	SlaOverdue int `json:"sla_overdue"`
+	// Review / expiry KPIs (ADR-0029): dihitung dari kolom eksplisit.
+	ReviewDue int `json:"review_due"`
+	Expired   int `json:"expired"`
 }
 
 // StatusDistItem adalah satu bucket sebaran status.
@@ -91,6 +100,32 @@ type DashboardCharts struct {
 	AvgTimePerStage []AvgStageItem      `json:"avgTimePerStage"`
 	ByCategory      []CategoryItem      `json:"byCategory"`
 	ActivityTrend   []ActivityTrendItem `json:"activityTrend"`
+	// Chart tambahan Phase 5 (ADR-0027..0030).
+	SlaBreakdown   []SlaBreakdownItem `json:"slaBreakdown"`
+	ByDepartment   []DepartmentItem   `json:"byDepartment"`
+	ReviewDueTrend []ReviewDueItem    `json:"reviewDueTrend"`
+}
+
+// SlaBreakdownItem adalah bucket SLA per minggu (On Time / Late / Overdue).
+type SlaBreakdownItem struct {
+	Week    string `json:"week"`
+	OnTime  int    `json:"on_time"`
+	Late    int    `json:"late"`
+	Overdue int    `json:"overdue"`
+}
+
+// DepartmentItem adalah satu departemen dengan jumlah dokumennya.
+type DepartmentItem struct {
+	Department string `json:"department"`
+	Count      int    `json:"count"`
+}
+
+// ReviewDueItem adalah jumlah dokumen per minggu berdasarkan review_due_at.
+type ReviewDueItem struct {
+	Week      string `json:"week"`
+	ReviewDue int    `json:"review_due"`
+	Expired   int    `json:"expired"`
+	Published int    `json:"published"`
 }
 
 // DashboardResponse adalah payload `GET /analytics/dashboard`.

@@ -31,13 +31,48 @@ describe("fetchDashboard", () => {
     expect(mocks.get).toHaveBeenCalledWith("/analytics/dashboard", { params: {} });
   });
 
-  it("mengembalikan data dashboard apa adanya", async () => {
-    const data = { kpis: { total_documents: 42 }, charts: { statusDist: [] } };
+  it("menormalkan respons backend lama tanpa chart/KPI Phase 5 (temuan P-084)", async () => {
+    // Backend sebelum migrasi 012 mengirim 8 KPI + 8 chart; halaman tidak boleh
+    // meledak menjadi layar putih — panel menampilkan keadaan kosongnya.
+    const legacy = {
+      kpis: { total_documents: 42, avg_approval_time_hours: 52.3 },
+      charts: { statusDist: [{ status: "draft", count: 10 }] },
+    };
+    mocks.get.mockResolvedValue({ data: { success: true, data: legacy } });
+
+    const result = await fetchDashboard({});
+
+    expect(result.kpis.total_documents).toBe(42);
+    expect(result.kpis.avg_approval_time_hours).toBe(52.3);
+    expect(result.kpis.sla_on_time).toBe(0);
+    expect(result.kpis.review_due).toBe(0);
+    expect(result.charts.statusDist).toEqual([{ status: "draft", count: 10 }]);
+    expect(result.charts.byDepartment).toEqual([]);
+    expect(result.charts.slaBreakdown).toEqual([]);
+    expect(result.charts.reviewDueTrend).toEqual([]);
+    expect(result.charts.funnel).toEqual({
+      draft: 0,
+      in_review: 0,
+      revision_required: 0,
+      approved: 0,
+      rejected: 0,
+    });
+  });
+
+  it("mengembalikan data dashboard lengkap apa adanya", async () => {
+    const data = {
+      kpis: { total_documents: 42 },
+      charts: { statusDist: [] },
+    };
     mocks.get.mockResolvedValue({ data: { success: true, data } });
 
     const result = await fetchDashboard({});
 
-    expect(result).toEqual(data);
+    // Bentuk penuh yang dinormalkan: field yang dikirim bertahan, yang hilang
+    // diisi netral — tidak pernah `undefined`.
+    expect(result.kpis.total_documents).toBe(42);
+    expect(result.charts.statusDist).toEqual([]);
+    expect(result.charts.byDepartment).toEqual([]);
   });
 });
 

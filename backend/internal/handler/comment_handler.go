@@ -122,6 +122,7 @@ func (h *CommentHandler) Create(c *gin.Context) {
 		EntityType: req.EntityType,
 		EntityID:   req.EntityID,
 		Content:    req.Content,
+		ParentID:   req.ParentID,
 	})
 	if err != nil {
 		h.writeServiceError(c, err)
@@ -205,6 +206,12 @@ func (h *CommentHandler) writeServiceError(c *gin.Context, err error) {
 		response.Validation(c, []response.FieldError{{
 			Field: "entity_type",
 			Error: "harus salah satu dari " + strings.Join(model.CommentEntityTypes(), ", "),
+		}})
+
+	case errors.Is(err, service.ErrCommentParentInvalid):
+		response.Validation(c, []response.FieldError{{
+			Field: "parent_id",
+			Error: "komentar induk tidak ditemukan pada entitas ini",
 		}})
 
 	case errors.Is(err, service.ErrCommentContentRequired):
@@ -314,6 +321,10 @@ func validateCreateComment(req dto.CreateCommentRequest) []response.FieldError {
 
 	if req.EntityID == uuid.Nil {
 		fields = append(fields, response.FieldError{Field: "entity_id", Error: "wajib diisi"})
+	}
+
+	if req.ParentID != nil && *req.ParentID == uuid.Nil {
+		fields = append(fields, response.FieldError{Field: "parent_id", Error: "tidak boleh UUID kosong"})
 	}
 
 	return fields

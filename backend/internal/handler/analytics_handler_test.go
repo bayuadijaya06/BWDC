@@ -54,6 +54,16 @@ func TestAnalyticsDashboardValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("department_id tidak UUID -> 422", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/analytics/dashboard?department_id=bukan-uuid", nil)
+		req.Header.Set("Authorization", "Bearer "+managerToken)
+		engine.ServeHTTP(w, req)
+		if w.Code != 422 {
+			t.Fatalf("status %d, want 422", w.Code)
+		}
+	})
+
 	t.Run("tanpa token -> 401", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/api/v1/analytics/dashboard", nil)
@@ -70,6 +80,65 @@ func TestAnalyticsDashboardValidation(t *testing.T) {
 		engine.ServeHTTP(w, req)
 		if w.Code != 403 {
 			t.Fatalf("status %d, want 403 body=%s", w.Code, w.Body.String())
+		}
+	})
+}
+
+func TestAnalyticsDepartments(t *testing.T) {
+	requirePool(t)
+	engine := newEngine(t, 5)
+
+	manager := createActor(t, "manager")
+	viewer := createActor(t, "viewer")
+	managerToken := loginAs(t, engine, manager.Username, manager.Password)
+	viewerToken := loginAs(t, engine, viewer.Username, viewer.Password)
+
+	// Organisasi fixture dibuat langsung via SQL (tanpa bootstrap), jadi belum
+	// punya departemen — yang diuji di sini bentuk responsnya, bukan seed-nya
+	// (seed dibuktikan TestEnsureAdminFirstRun_CreatesDepartments).
+	t.Run("manager -> 200 daftar array", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/analytics/departments", nil)
+		req.Header.Set("Authorization", "Bearer "+managerToken)
+		engine.ServeHTTP(w, req)
+		if w.Code != 200 {
+			t.Fatalf("status %d, want 200 body=%s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Success bool `json:"success"`
+			Data    []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+				Code string `json:"code"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("parse: %v body=%s", err, w.Body.String())
+		}
+		if !resp.Success {
+			t.Fatal("success false")
+		}
+		if resp.Data == nil {
+			t.Fatal("data null, diharapkan array (kosong bila belum ada departemen)")
+		}
+	})
+
+	t.Run("viewer tanpa report:read -> 403", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/analytics/departments", nil)
+		req.Header.Set("Authorization", "Bearer "+viewerToken)
+		engine.ServeHTTP(w, req)
+		if w.Code != 403 {
+			t.Fatalf("status %d, want 403 body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("tanpa token -> 401", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/analytics/departments", nil)
+		engine.ServeHTTP(w, req)
+		if w.Code != 401 {
+			t.Fatalf("status %d, want 401", w.Code)
 		}
 	})
 }
@@ -105,6 +174,16 @@ func TestAnalyticsDashboardSuccess(t *testing.T) {
 	}
 	if resp.Data.Charts.VolumeTrend == nil {
 		t.Fatal("volumeTrend nil")
+	}
+	// chart Phase 5 (ADR-0027..0030) wajib ada walau kosong.
+	if resp.Data.Charts.SlaBreakdown == nil {
+		t.Fatal("slaBreakdown nil")
+	}
+	if resp.Data.Charts.ByDepartment == nil {
+		t.Fatal("byDepartment nil")
+	}
+	if resp.Data.Charts.ReviewDueTrend == nil {
+		t.Fatal("reviewDueTrend nil")
 	}
 }
 

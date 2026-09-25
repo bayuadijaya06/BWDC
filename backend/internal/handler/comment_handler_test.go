@@ -18,13 +18,14 @@ import (
 
 // commentPayload adalah bentuk `data` pada endpoint komentar (`42-API.md` §7).
 type commentPayload struct {
-	ID                uuid.UUID `json:"id"`
-	EntityID          uuid.UUID `json:"entity_id"`
-	EntityType        string    `json:"entity_type"`
-	Content           string    `json:"content"`
-	CreatedByID       uuid.UUID `json:"created_by_id"`
-	CreatedByUsername string    `json:"created_by_username"`
-	CreatedAt         string    `json:"created_at"`
+	ID                uuid.UUID  `json:"id"`
+	EntityID          uuid.UUID  `json:"entity_id"`
+	EntityType        string     `json:"entity_type"`
+	Content           string     `json:"content"`
+	CreatedByID       uuid.UUID  `json:"created_by_id"`
+	CreatedByUsername string     `json:"created_by_username"`
+	ParentID          *uuid.UUID `json:"parent_id"`
+	CreatedAt         string     `json:"created_at"`
 }
 
 func createCommentBody(entityType string, entityID uuid.UUID, content string) string {
@@ -554,5 +555,78 @@ func TestCommentOnTaskAndDocumentOverHTTP(t *testing.T) {
 	otherProject := createProjectOverHTTP(t, engine, managerToken, manager.ID, "CMT-TASK-OTHER")
 	rec = doJSON(t, engine, http.MethodPost, "/api/v1/comments", contributorToken,
 		createCommentBody(model.CommentEntityTask, otherProject, "Task project lain."))
+	requireStatus(t, rec, http.StatusNotFound)
+}
+
+// TestCommentReplyOverHTTP menutup threading datar pada jalur HTTP (ADR-0032,
+// T-096): balasan 201 dengan parent_id, validasi relasi, dan kaskade hapus.
+func TestCommentReplyOverHTTP(t *testing.T) {
+	fixture := newProjectHTTPFixture(t)
+	engine := newEngine(t, 5)
+
+	manager := fixture.createActor("manager")
+	managerToken := loginToken(t, engine, manager)
+	projectID := createProjectOverHTTP(t, engine, managerToken, manager.ID, "CMT-REPLY-HTTP")
+
+	parent := createCommentOverHTTP(t, engine, managerToken,
+		createCommentBody(model.CommentEntityProject, projectID, "Komentar induk."))
+	if parent.ParentID != nil {
+		t.Fatalf("komentar tingkat atas membawa parent_id %v", parent.ParentID)
+	}
+
+	// Balasan pada entitas yang sama → 201 dengan parent_id.
+	reply := createCommentOverHTTP(t, engine, managerToken,
+		fmt.Sprintf(`{"entity_type":"project","entity_id":%q,"content":"Balasan.","parent_id":%q}`,
+			projectID, parent.ID))
+	if reply.ParentID == nil || *reply.ParentID != parent.ID {
+		t.Fatalf("balasan parent_id = %v, diharapkan %s", reply.ParentID, parent.ID)
+	}
+
+	// Daftar memuat relasinya; detail juga.
+	rec := doJSON(t, engine, http.MethodGet,
+		fmt.Sprintf("/api/v1/comments?entity_type=project&entity_id=%s", projectID),
+		managerToken, "")
+	requireStatus(t, rec, http.StatusOK)
+	var env envelope
+	decodeBody(t, rec, &env)
+	var list []commentPayload
+	if err := json.Unmarshal(env.Data, &list); err != nil {
+		t.Fatalf("urai daftar: %v", err)
+	}
+	if len(list) != 2 || list[1].ParentID == nil || *list[1].ParentID != parent.ID {
+		t.Fatalf("daftar tidak memuat relasi balasan: %+v", list)
+	}
+
+	// Induk pada entitas berbeda → 422 pada parent_id (bukan 404 yang bocor).
+	otherProject := createProjectOverHTTP(t, engine, managerToken, manager.ID, "CMT-REPLY-OTHER")
+	rec = doJSON(t, engine, http.MethodPost, "/api/v1/comments", managerToken,
+		fmt.Sprintf(`{"entity_type":"project","entity_id":%q,"content":"Balasan asing.","parent_id":%q}`,
+			otherProject, parent.ID))
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+	decodeBody(t, rec, &env)
+	if env.Error == nil || len(env.Error.Details) != 1 || env.Error.Details[0].Field != "parent_id" {
+		t.Fatalf("parent_id beda entitas: %+v", env.Error)
+	}
+
+	// parent_id bukan UUID → 422 pada parent_id (bindJSON menamai field).
+	rec = doJSON(t, engine, http.MethodPost, "/api/v1/comments", managerToken,
+		fmt.Sprintf(`{"entity_type":"project","entity_id":%q,"content":"X.","parent_id":"bukan-uuid"}`,
+			projectID))
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+	decodeBody(t, rec, &env)
+	if env.Error == nil || len(env.Error.Details) == 0 || env.Error.Details[0].Field != "parent_id" {
+		t.Fatalf("parent_id bukan UUID: %+v", env.Error)
+	}
+
+	// parent_id UUID kosong → 422 pada parent_id.
+	rec = doJSON(t, engine, http.MethodPost, "/api/v1/comments", managerToken,
+		fmt.Sprintf(`{"entity_type":"project","entity_id":%q,"content":"X.","parent_id":"00000000-0000-0000-0000-000000000000"}`,
+			projectID))
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+
+	// Hapus induk → balasan ikut hilang (CASCADE), dibaca sebagai 404.
+	rec = doJSON(t, engine, http.MethodDelete, "/api/v1/comments/"+parent.ID.String(), managerToken, "")
+	requireStatus(t, rec, http.StatusOK)
+	rec = doJSON(t, engine, http.MethodGet, "/api/v1/comments/"+reply.ID.String(), managerToken, "")
 	requireStatus(t, rec, http.StatusNotFound)
 }

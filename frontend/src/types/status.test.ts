@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  documentLifecycle,
   documentStatus,
   overdueLabel,
   projectStatus,
@@ -68,5 +69,57 @@ describe("label status kanonik", () => {
     expect(overdueLabel(true)).toBe("Overdue");
     expect(overdueLabel(false)).toBeNull();
     expect(Object.keys(statuses.task)).not.toContain("overdue");
+  });
+});
+
+describe("label turunan siklus hidup dokumen (keputusan P-081)", () => {
+  const now = new Date("2026-09-24T00:00:00Z");
+
+  it("approved + published_at tampil Published", () => {
+    expect(
+      documentLifecycle(
+        { status: "approved", published_at: "2026-09-20T00:00:00Z" },
+        now,
+      ),
+    ).toEqual({ label: "Published", tone: "approved" });
+  });
+
+  it("approved tanpa published_at tetap Approved", () => {
+    expect(documentLifecycle({ status: "approved" }, now)).toBeNull();
+  });
+
+  it("expiry lewat tampil Obsolete apa pun statusnya", () => {
+    expect(
+      documentLifecycle(
+        { status: "approved", expiry_at: "2026-09-01T00:00:00Z" },
+        now,
+      ),
+    ).toEqual({ label: "Obsolete", tone: "archived" });
+    expect(
+      documentLifecycle(
+        { status: "draft", expiry_at: "2026-09-01T00:00:00Z" },
+        now,
+      ),
+    ).toEqual({ label: "Obsolete", tone: "archived" });
+  });
+
+  it("expiry di masa depan bukan Obsolete", () => {
+    expect(
+      documentLifecycle(
+        { status: "draft", expiry_at: "2026-10-01T00:00:00Z" },
+        now,
+      ),
+    ).toBeNull();
+  });
+
+  it("tanggal tak terurai diperlakukan tidak ada", () => {
+    expect(
+      documentLifecycle({ status: "draft", expiry_at: "kapan-kapan" }, now),
+    ).toBeNull();
+  });
+
+  it("bukan status kanonik: tidak ada di peta documentStatuses", () => {
+    expect(Object.keys(statuses.document)).not.toContain("published");
+    expect(Object.keys(statuses.document)).not.toContain("obsolete");
   });
 });

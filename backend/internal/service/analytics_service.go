@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"bwdcs/backend/internal/dto"
+	"bwdcs/backend/internal/model"
 	"bwdcs/backend/internal/repository"
 )
 
@@ -28,4 +29,11 @@ func (s *AnalyticsService) Dashboard(ctx context.Context, actor Actor, q dto.Ana
 		return nil, err
 	}
 	return s.analytics.DashboardData(ctx, scope, q)
+}
+
+// ListDepartments mengembalikan departemen organisasi aktor untuk opsi penyaring
+// dashboard. Tanpa cakupan project: keanggotaan departemen belum dimodelkan
+// (ADR-0027 hanya FK dari project), dan daftarnya sendiri bukan data sensitif.
+func (s *AnalyticsService) ListDepartments(ctx context.Context, actor Actor) ([]model.Department, error) {
+	return s.analytics.ListDepartments(ctx, actor.OrganizationID)
 }

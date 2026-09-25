@@ -85,7 +85,7 @@ Jangan mulai menulis kode sebelum tabel ini hijau atau keputusannya dicatat. Sta
 | 6 | Daftar environment variable final | `.env.example` dan `docker-compose.yml` mengikuti `60-DEPLOYMENT.md` §2 | Selesai (P-006), tervalidasi dengan `docker compose config` |
 | 6a | Database dev siap dipakai | Role + database `bwdcs` pada PostgreSQL 16 yang sudah berjalan (`T-013`) | Selesai (P-018/P-020): role + database `bwdcs` dibuat pada instance 16.10 yang sudah berjalan, skema `001`-`009` terpasang (`T-013`, `T-004` DONE) |
 | 7 | Port dev | Backend `8080`, PostgreSQL `5432`, Vite `5173` + proxy `/api` (lihat §7.1) | Selesai (konvensi) |
-| 8 | Kebijakan file upload | MIME/ekstensi whitelist & ukuran maksimum, termasuk `.doc/.docx/.pptx` (Q-008) | Sebagian; rekomendasi ada di `OPEN-QUESTIONS.md` |
+| 8 | Kebijakan file upload | MIME/ekstensi whitelist & ukuran maksimum, termasuk `.doc/.docx/.ppt/.pptx` (Q-008) | Selesai (P-090): Opsi A hidup — 12 ekstensi + pemurnian ZIP-container/OLE (`T-101`) |
 | 9 | Test runner frontend | `vitest` sudah tertulis di `60-DEPLOYMENT.md` §3.2 | Selesai |
 
 Aturan: item yang belum diputuskan **tidak boleh ditebak**. Kerjakan item lain yang tidak bergantung padanya, dan catat keputusan yang dibutuhkan di `OPEN-QUESTIONS.md`.

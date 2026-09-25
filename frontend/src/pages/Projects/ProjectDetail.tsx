@@ -13,8 +13,9 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAuditList } from "@/queries/audit";
 import { useAdminUsers } from "@/queries/admin";
+import { useDepartments } from "@/queries/analytics";
 import { useDocumentList } from "@/queries/documents";
-import { useProject } from "@/queries/projects";
+import { useProject, useUpdateProject } from "@/queries/projects";
 import { useTaskList } from "@/queries/tasks";
 import { useWorkflowInstances } from "@/queries/workflows";
 import { ApiError } from "@/services/http";
@@ -101,6 +102,11 @@ export function ProjectDetailPage() {
 
   const currentUser = useAuthStore((s) => s.profile);
   const canManageMembers = currentUser?.permissions.includes("project_member:manage") ?? false;
+  const canUpdate = currentUser?.permissions.includes("project:update") ?? false;
+
+  const updateProject = useUpdateProject(id);
+  const departments = useDepartments(canUpdate);
+  const [departmentError, setDepartmentError] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -514,6 +520,57 @@ export function ProjectDetailPage() {
                   ? "Belum diisi."
                   : project.description}
               </p>
+            </div>
+            <div className="flex max-w-prose flex-col gap-0.5 pt-3.5">
+              {canUpdate ? (
+                <>
+                  <SelectField
+                    label="Departemen"
+                    value={project.department_id ?? ""}
+                    disabled={updateProject.isPending || departments.isPending}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      if (next === (project.department_id ?? "")) return;
+                      setDepartmentError(null);
+                      updateProject.mutate(
+                        // String kosong = `null` eksplisit: melepas penugasan
+                        // (`42-API.md` §3). Tidak dikirim tidak mungkin di sini
+                        // karena pilihan selalu berubah saat handler berjalan.
+                        next === "" ? { department_id: null } : { department_id: next },
+                        {
+                          onError: (error) => {
+                            setDepartmentError(
+                              error instanceof ApiError
+                                ? (error.fieldErrors.department_id ?? error.message)
+                                : "Penugasan departemen gagal.",
+                            );
+                          },
+                        },
+                      );
+                    }}
+                    error={departmentError}
+                    hint="Menentukan bucket project ini di chart Dokumen per Departemen."
+                  >
+                    <option value="">
+                      {departments.isPending ? "Memuat departemen..." : "Belum ditugaskan"}
+                    </option>
+                    {(departments.data ?? []).map((department) => (
+                      <option key={department.id} value={department.id}>
+                        {department.name}
+                      </option>
+                    ))}
+                  </SelectField>
+                  {updateProject.isPending ? (
+                    <p role="status" className="text-12 text-text-muted">
+                      Menyimpan penugasan...
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-13 text-text">
+                  {project.department_name ?? "Belum ditugaskan."}
+                </p>
+              )}
             </div>
           </Panel>
 

@@ -25,28 +25,26 @@ import {
 } from "@/services/documents";
 import { ApiError } from "@/services/http";
 import { useAuthStore } from "@/store/auth";
-import { documentStatus } from "@/types/status";
+import { documentLifecycle, documentStatus } from "@/types/status";
 import { EMPTY_VALUE, formatFileSize, formatTimestamp } from "@/utils/format";
 import { saveBlob } from "@/utils/download";
 
 import { UploadVersionDialog } from "./UploadVersionDialog";
+import { EditDocumentDialog } from "./EditDocumentDialog";
+import { CommentThread } from "./CommentThread";
 
 /**
  * Bagian `50-FSD.md` §4.3 yang **belum** dibangun. Ditulis sebagai data, bukan
  * komponen setengah jadi, dan alasannya menyebut keadaan sebenarnya.
  *
  * Workflow tidak ada di sini lagi: modulnya hidup dan panelnya dibangun di
- * bawah (`T-086` backend, submit/resubmit di halaman ini). Activity juga bukan
- * "endpoint belum ada" — `GET /audit` hidup, tetapi izin `audit:read` hanya
- * milik Administrator dan tampilan aktivitas per dokumen belum dibangun.
+ * bawah (`T-086` backend, submit/resubmit di halaman ini). Comments tidak ada
+ * di sini lagi: utasnya hidup sebagai `CommentThread` di bawah (`T-097`,
+ * `parent_id` ADR-0032). Activity juga bukan "endpoint belum ada" — `GET
+ * /audit` hidup, tetapi izin `audit:read` hanya milik Administrator dan
+ * tampilan aktivitas per dokumen belum dibangun.
  */
 const pendingSections: { label: string; reason: string; reference: string }[] = [
-  {
-    label: "Comments",
-    reason:
-      "Endpoint komentar sudah hidup untuk entitas document (bentuk kueri ?entity_type=&entity_id=), tetapi antarmuka utas komentar belum dibangun.",
-    reference: "docs/design/42-API.md §7, docs/design/50-FSD.md §7",
-  },
   {
     label: "Activity",
     reason:
@@ -70,7 +68,7 @@ const pendingSections: { label: string; reason: string; reference: string }[] = 
  * lain — memang itu yang dijanjikan `42-API.md` §4.
  *
  * Dokumen terarsip tetap dapat dibaca dan diunduh (ADR-0019); yang hilang
- * hanyalah aksi yang mengubahnya: unggah versi dan arsip ulang.
+ * hanyalah aksi yang mengubahnya: unggah versi, ubah metadata, dan arsip ulang.
  */
 export function DocumentDetailPage() {
   const { id = "" } = useParams();
@@ -82,6 +80,7 @@ export function DocumentDetailPage() {
     state.has("document_version:upload"),
   );
   const canArchive = useAuthStore((state) => state.has("document:update"));
+  const canEdit = useAuthStore((state) => state.has("document:update"));
   const canSubmit = useAuthStore((state) =>
     state.has("workflow_instance:submit"),
   );
@@ -96,6 +95,7 @@ export function DocumentDetailPage() {
   const [downloadError, setDownloadError] = useState<ApiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [openUpload, setOpenUpload] = useState(false);
+  const [openEdit, setOpenEdit] = useState(false);
   const [openArchive, setOpenArchive] = useState(false);
   const [archiveReason, setArchiveReason] = useState("");
   const [openSubmit, setOpenSubmit] = useState(false);
@@ -324,13 +324,31 @@ export function DocumentDetailPage() {
         ? formatTimestamp(document.archived_at)
         : "Belum diarsipkan",
     },
+    {
+      label: "Perlu review",
+      value: document.review_due_at
+        ? formatTimestamp(document.review_due_at)
+        : "Belum dijadwalkan",
+    },
+    {
+      label: "Kedaluarsa",
+      value: document.expiry_at
+        ? formatTimestamp(document.expiry_at)
+        : "Tidak ada batas",
+    },
+    {
+      label: "Diterbitkan",
+      value: document.published_at
+        ? formatTimestamp(document.published_at)
+        : "Belum diterbitkan",
+    },
   ];
 
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
         title={document.title}
-        presentation={documentStatus(document.status)}
+        presentation={documentLifecycle(document) ?? documentStatus(document.status)}
         description={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-mono text-12 text-text-soft">
@@ -341,7 +359,7 @@ export function DocumentDetailPage() {
               {document.project_name ?? document.project_code ?? EMPTY_VALUE}
             </span>
             <span aria-hidden="true">·</span>
-            <span>{documentStatus(document.status).label}</span>
+            <span>{(documentLifecycle(document) ?? documentStatus(document.status)).label}</span>
           </span>
         }
         actions={
@@ -355,6 +373,11 @@ export function DocumentDetailPage() {
             {canUpload && !archived ? (
               <Button variant="primary" onClick={() => setOpenUpload(true)}>
                 Unggah versi
+              </Button>
+            ) : null}
+            {canEdit && !archived ? (
+              <Button variant="secondary" onClick={() => setOpenEdit(true)}>
+                Ubah
               </Button>
             ) : null}
             {canArchive && !archived ? (
@@ -564,6 +587,8 @@ export function DocumentDetailPage() {
         ) : null}
       </Panel>
 
+      <CommentThread entityType="document" entityId={document.id} />
+
       <Panel
         title="Bagian lain halaman ini"
         note="Disebut 50-FSD.md §4.3 dan belum dibangun; alasannya per bagian, bukan satu kalimat umum."
@@ -587,8 +612,7 @@ export function DocumentDetailPage() {
       </Panel>
 
       {openUpload ? (
-        <UploadVersionDialog
-          documentId={document.id}
+        <UploadVersionDialog          documentId={document.id}
           status={document.status}
           latestVersion={document.latest_version}
           onClose={() => setOpenUpload(false)}
@@ -596,6 +620,19 @@ export function DocumentDetailPage() {
             setOpenUpload(false);
             setNotice(
               `Versi ${version.version} tersimpan sebagai ${version.original_name}.`,
+            );
+          }}
+        />
+      ) : null}
+
+      {openEdit ? (
+        <EditDocumentDialog
+          document={document}
+          onClose={() => setOpenEdit(false)}
+          onUpdated={(updated) => {
+            setOpenEdit(false);
+            setNotice(
+              `${updated.document.document_number} diperbarui.`,
             );
           }}
         />

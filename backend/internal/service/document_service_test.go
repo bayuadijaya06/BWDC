@@ -390,6 +390,165 @@ func TestDocumentUploadAcceptsDetectedMimeWithParameters(t *testing.T) {
 	}
 }
 
+// office090Content merakit byte berkas Office minimal untuk Q-008: sihir yang
+// benar (OLE CFB atau ZIP) plus penanda yang dikenali `DetectUploadMimeType`.
+// Penanda OLE diletakkan sesudah byte ke-512 — bila jendela intip handler
+// masih 512 byte, kasus `.doc` di lapisan HTTP akan gagal dan menunjukkan
+// tepat di mana jendelanya kurang.
+func office090Content(kind string) []byte {
+	switch kind {
+	case "doc", "xls", "ppt":
+		content := []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+		for len(content) < 600 {
+			content = append(content, 0)
+		}
+		marker := map[string]string{"doc": "WordDocument", "xls": "Workbook", "ppt": "PowerPoint Document"}[kind]
+		for _, r := range marker {
+			content = append(content, byte(r), 0)
+		}
+		for len(content) < 700 {
+			content = append(content, 0)
+		}
+		return content
+	case "docx", "xlsx", "pptx":
+		part := map[string]string{
+			"docx": "word/document.xml",
+			"xlsx": "xl/workbook.xml",
+			"pptx": "ppt/presentation.xml",
+		}[kind]
+		content := []byte("PK\x03\x04\x14\x00\x06\x00[Content_Types].xml" + part)
+		for len(content) < 600 {
+			content = append(content, 0)
+		}
+		return content
+	case "zip-polos":
+		content := []byte("PK\x03\x04 isi zip tanpa part office")
+		for len(content) < 600 {
+			content = append(content, 0)
+		}
+		return content
+	default:
+		return nil
+	}
+}
+
+// TestDetectUploadMimeType mengunci pemurnian format Office (Q-008, Opsi A)
+// sebagai fungsi murni: tanpa database, tanpa HTTP, tanpa tebakan MIME.
+func TestDetectUploadMimeType(t *testing.T) {
+	cases := []struct {
+		name     string
+		header   []byte
+		expected string
+	}{
+		{"doc OLE dikenali", office090Content("doc"), "application/msword"},
+		{"xls OLE dikenali", office090Content("xls"), "application/vnd.ms-excel"},
+		{"ppt OLE dikenali", office090Content("ppt"), "application/vnd.ms-powerpoint"},
+		{"docx ZIP dikenali", office090Content("docx"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+		{"xlsx ZIP dikenali", office090Content("xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+		{"pptx ZIP dikenali", office090Content("pptx"), "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
+		{"zip polos tetap zip", office090Content("zip-polos"), "application/zip"},
+		{"pdf lewat apa adanya", []byte("%PDF-1.4\n1 0 obj\n"), "application/pdf"},
+		{"teks lewat apa adanya", []byte("laporan\nbaris kedua\n"), "text/plain; charset=utf-8"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := service.DetectUploadMimeType(testCase.header); got != testCase.expected {
+				t.Errorf("terdeteksi %q, diharapkan %q", got, testCase.expected)
+			}
+		})
+	}
+
+	t.Run("OLE tanpa penanda tetap octet-stream", func(t *testing.T) {
+		header := []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+		for len(header) < 600 {
+			header = append(header, 0)
+		}
+		if got := service.DetectUploadMimeType(header); got != "application/octet-stream" {
+			t.Errorf("terdeteksi %q, diharapkan application/octet-stream (tetap ditolak)", got)
+		}
+	})
+
+	t.Run("penanda paling awal menang", func(t *testing.T) {
+		header := []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+		for len(header) < 520 {
+			header = append(header, 0)
+		}
+		for _, r := range "WordDocument" {
+			header = append(header, byte(r), 0)
+		}
+		for len(header) < 600 {
+			header = append(header, 0)
+		}
+		for _, r := range "Workbook" {
+			header = append(header, byte(r), 0)
+		}
+		for len(header) < 700 {
+			header = append(header, 0)
+		}
+		if got := service.DetectUploadMimeType(header); got != "application/msword" {
+			t.Errorf("terdeteksi %q, diharapkan application/msword (WordDocument lebih awal)", got)
+		}
+	})
+}
+
+// TestDocumentUploadAcceptsOfficeTypes menutup Q-008 di lapisan service:
+// `.doc`/`.docx`/`.xlsx` yang dijanjikan `50-FSD.md` §4.2 diterima dengan MIME
+// yang **dihitung** lewat `service.DetectUploadMimeType` (kode produksi yang
+// sama dengan handler), bukan ditulis dengan tangan (pelajaran C-072).
+// Bonus yang dikunci sekalian: `.xlsx`/`.xls` asli selama ini diam-diam
+// tertolak karena isinya terdeteksi `application/zip`/`octet-stream`.
+func TestDocumentUploadAcceptsOfficeTypes(t *testing.T) {
+	fixture := newDocumentFixture(t)
+	owner := fixture.createOrgAndUser("contributor")
+	projectID := fixture.createProject(owner, "OFFICE090")
+	document := fixture.createDocument(owner, projectID, "Dokumen Office")
+	ctx := context.Background()
+
+	cases := []struct {
+		name    string
+		content []byte
+	}{
+		{"memo.doc", office090Content("doc")},
+		{"laporan.docx", office090Content("docx")},
+		{"angka.xlsx", office090Content("xlsx")},
+		{"presentasi.pptx", office090Content("pptx")},
+		{"arsip.xls", office090Content("xls")},
+		{"slide.ppt", office090Content("ppt")},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			detected := service.DetectUploadMimeType(testCase.content)
+			version, err := fixture.documents.UploadVersion(ctx, actorOf(owner), document.Document.ID,
+				service.UploadVersionInput{
+					OriginalName: testCase.name,
+					MimeType:     detected,
+					Size:         int64(len(testCase.content)),
+					Content:      bytes.NewReader(testCase.content),
+				})
+			if err != nil {
+				t.Fatalf("unggah %s dengan MIME %q ditolak: %v", testCase.name, detected, err)
+			}
+			if version.MimeType != detected {
+				t.Errorf("mime_type tersimpan %q, diharapkan %q", version.MimeType, detected)
+			}
+		})
+	}
+
+	// ZIP polos berekstensi `.docx` tetap ditolak: ekstensinya di daftar,
+	// tetapi isinya (`application/zip`) tidak — penjaga MIME tidak ikut longgar.
+	if _, err := fixture.documents.UploadVersion(ctx, actorOf(owner), document.Document.ID,
+		service.UploadVersionInput{
+			OriginalName: "palsu.docx",
+			MimeType:     service.DetectUploadMimeType(office090Content("zip-polos")),
+			Size:         600,
+			Content:      bytes.NewReader(office090Content("zip-polos")),
+		}); !errors.Is(err, service.ErrDocumentFileType) {
+		t.Errorf("zip polos berekstensi .docx diterima (err=%v), diharapkan ErrDocumentFileType", err)
+	}
+}
+
 // TestDocumentDownloadReturnsContentAndAudit menutup FR-DOC-05/FR-VER-05 dan
 // FR-AUDIT-01 ("download doc").
 func TestDocumentDownloadReturnsContentAndAudit(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 
 	"bwdcs/backend/internal/dto"
 	"bwdcs/backend/internal/middleware"
+	"bwdcs/backend/internal/pkg/jwt"
 	"bwdcs/backend/internal/pkg/response"
 	"bwdcs/backend/internal/service"
 )
@@ -23,14 +24,56 @@ import (
 // Handler hanya: parse & validasi input, memanggil service, lalu memetakan
 // error domain ke status HTTP. Handler TIDAK menulis audit log dan tidak
 // menyentuh transaksi — keduanya milik service (ADR-0011).
+//
+// Refresh token diantar lewat cookie `HttpOnly`, bukan body (ADR-0033):
+// `secureCookies` mengikuti `APP_ENV=production`, karena cookie `Secure` di
+// atas `http://` non-localhost ditolak peramban.
 type AuthHandler struct {
-	auth   *service.AuthService
-	logger *slog.Logger
+	auth          *service.AuthService
+	secureCookies bool
+	logger        *slog.Logger
 }
 
+// refreshCookieName/Path/MaxAge adalah kontrak cookie `42-API.md` §2 — satu
+// tempat supaya login, refresh, logout, dan change-password tidak berbeda.
+const (
+	refreshCookieName = "refresh_token"
+	refreshCookiePath = "/api/v1/auth"
+)
+
 // NewAuthHandler merakit handler auth.
-func NewAuthHandler(auth *service.AuthService, logger *slog.Logger) *AuthHandler {
-	return &AuthHandler{auth: auth, logger: logger}
+func NewAuthHandler(auth *service.AuthService, logger *slog.Logger, secureCookies bool) *AuthHandler {
+	return &AuthHandler{auth: auth, secureCookies: secureCookies, logger: logger}
+}
+
+// setRefreshCookie memasang cookie refresh token baru (login, refresh,
+// change-password). Max-Age mengikuti umur refresh token, bukan angka tulisan
+// tangan, supaya keduanya tidak dapat menyimpang diam-diam.
+func (h *AuthHandler) setRefreshCookie(c *gin.Context, value string) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    value,
+		Path:     refreshCookiePath,
+		MaxAge:   int(jwt.RefreshExpiry / time.Second),
+		HttpOnly: true,
+		Secure:   h.secureCookies,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// clearRefreshCookie menghapus cookie refresh token (logout biasa maupun
+// logout_all). Path-nya wajib sama dengan saat pemasangan, kalau tidak
+// peramban menganggapnya cookie yang berbeda dan yang lama tetap terkirim.
+func (h *AuthHandler) clearRefreshCookie(c *gin.Context) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    "",
+		Path:     refreshCookiePath,
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   h.secureCookies,
+		SameSite: http.SameSiteLaxMode,
+	})
 }
 
 // Login melayani `POST /auth/login`.
@@ -62,12 +105,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	// Refresh token hanya lewat cookie HttpOnly (ADR-0033): body tidak lagi
+	// memuat salinan yang dapat dibaca JS.
+	h.setRefreshCookie(c, result.RefreshToken.Value)
 	response.OK(c, dto.LoginResponse{
-		Token:            result.Token.Value,
-		ExpiresAt:        result.ExpiresAt,
-		RefreshToken:     result.RefreshToken.Value,
-		RefreshExpiresAt: result.RefreshToken.ExpiresAt,
-		User:             dto.NewUserSummary(result.User),
+		Token:     result.Token.Value,
+		ExpiresAt: result.ExpiresAt,
+		User:      dto.NewUserSummary(result.User),
 	})
 }
 
@@ -160,6 +204,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 
+	h.clearRefreshCookie(c)
 	response.OK(c, nil)
 }
 
@@ -205,15 +250,19 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
+	// Cookie refresh ikut diganti seperti access token-nya: revokasi massal
+	// `tokens_invalid_before` mematikan cookie lama, dan tanpa pengganti sesi
+	// yang dipakai ikut mati (alasan yang sama dengan token pengganti).
+	h.setRefreshCookie(c, result.RefreshToken.Value)
 	response.OK(c, dto.ChangePasswordResponse{Token: result.Token.Value, ExpiresAt: result.ExpiresAt})
 }
 
-// Refresh melayani `POST /auth/refresh` (ADR-0023).
+// Refresh melayani `POST /auth/refresh` (ADR-0023, transpor ADR-0033).
 //
 // Pemetaan error (`42-API.md` §2/§12):
 //
-//	422 VALIDATION_ERROR — `refresh_token` tidak dikirim
-//	401 UNAUTHORIZED     — refresh token tidak sah (tanda tangan, `exp`, atau tipe)
+//	401 UNAUTHORIZED     — cookie tidak ada/kosong, atau refresh token tidak
+//	                       sah (tanda tangan, `exp`, atau tipe)
 //	401 TOKEN_REVOKED    — sesinya sudah dicabut (`jti` di `token_revocations`,
 //	                       `iat` lebih tua daripada `tokens_invalid_before`, atau
 //	                       usernya sudah tidak ada)
@@ -223,16 +272,13 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // Tidak ada izin role yang diperiksa: ini aksi atas sesi sendiri, sama seperti
 // `logout` dan `change-password`.
 func (h *AuthHandler) Refresh(c *gin.Context) {
-	var req dto.RefreshRequest
-	if !bindJSON(c, &req) {
-		return
-	}
-	if strings.TrimSpace(req.RefreshToken) == "" {
-		response.Validation(c, []response.FieldError{{Field: "refresh_token", Error: "wajib diisi"}})
+	raw, err := c.Cookie(refreshCookieName)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		response.Fail(c, http.StatusUnauthorized, response.CodeUnauthorized, "refresh token tidak ada")
 		return
 	}
 
-	result, err := h.auth.Refresh(c.Request.Context(), req.RefreshToken)
+	result, err := h.auth.Refresh(c.Request.Context(), raw)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidRefreshToken):
@@ -247,11 +293,10 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
+	h.setRefreshCookie(c, result.RefreshToken.Value)
 	response.OK(c, dto.RefreshResponse{
-		Token:            result.AccessToken.Value,
-		ExpiresAt:        result.AccessToken.ExpiresAt,
-		RefreshToken:     result.RefreshToken.Value,
-		RefreshExpiresAt: result.RefreshToken.ExpiresAt,
+		Token:     result.AccessToken.Value,
+		ExpiresAt: result.AccessToken.ExpiresAt,
 	})
 }
 

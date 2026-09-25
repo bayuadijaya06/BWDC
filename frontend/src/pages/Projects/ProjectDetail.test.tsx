@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   listTasks: vi.fn(),
   listWorkflows: vi.fn(),
   listAudit: vi.fn(),
+  departments: vi.fn(),
 }));
 
 vi.mock("@/services/projects", async (importOriginal) => {
@@ -65,6 +66,14 @@ vi.mock("@/services/audit", async (importOriginal) => {
   return {
     ...actual,
     listAuditLogs: mocks.listAudit,
+  };
+});
+
+vi.mock("@/services/analytics", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/analytics")>();
+  return {
+    ...actual,
+    fetchDepartments: mocks.departments,
   };
 });
 
@@ -134,6 +143,9 @@ beforeEach(() => {
   mocks.listAudit.mockResolvedValue({ items: [], meta: { page: 1, limit: 50, total: 0, total_page: 0 } });
   mocks.list.mockReset();
   mocks.list.mockResolvedValue({ items: [], meta: { page: 1, limit: 20, total: 0, total_page: 0 } });
+  mocks.departments.mockReset();
+  mocks.departments.mockResolvedValue([]);
+  mocks.update.mockReset();
   useAuthStore.setState({
     status: "authenticated",
     profile,
@@ -324,5 +336,74 @@ describe("halaman detail project", () => {
     expect(screen.getByRole("dialog", { name: /Tambah anggota project/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/Cari pengguna/i)).toBeInTheDocument();
     await vi.waitFor(() => expect(screen.getByText("newuser")).toBeInTheDocument());
+  });
+
+  it("menugaskan departemen lewat pilihan di metadata (T-093)", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: { ...profile, permissions: ["project:read", "project:update"] },
+      error: null,
+      pending: false,
+    });
+    mocks.departments.mockResolvedValue([
+      { id: "dep-it", name: "IT", code: "IT" },
+      { id: "dep-fin", name: "Finance", code: "FIN" },
+    ]);
+    mocks.update.mockResolvedValue({});
+
+    renderDetail();
+    await screen.findByRole("heading", { name: "Website Redesign" });
+
+    const select = screen.getByLabelText("Departemen") as HTMLSelectElement;
+    await vi.waitFor(() => expect(screen.getByRole("option", { name: "IT" })).toBeInTheDocument());
+    await user.selectOptions(select, "dep-it");
+
+    await vi.waitFor(() =>
+      expect(mocks.update).toHaveBeenCalledWith("p1", { department_id: "dep-it" }),
+    );
+  });
+
+  it("tanpa project:update hanya menampilkan nama departemen", async () => {
+    mocks.fetch.mockResolvedValue({
+      project: { ...detail.project, department_id: "dep-it", department_name: "IT" },
+      members: detail.members,
+    });
+
+    renderDetail();
+    await screen.findByRole("heading", { name: "Website Redesign" });
+
+    expect(screen.queryByLabelText("Departemen")).toBeNull();
+    expect(screen.getByText("IT")).toBeInTheDocument();
+  });
+
+  it("memilih Belum ditugaskan melepas departemen via null (T-094)", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: { ...profile, permissions: ["project:read", "project:update"] },
+      error: null,
+      pending: false,
+    });
+    mocks.fetch.mockResolvedValue({
+      project: { ...detail.project, department_id: "dep-it", department_name: "IT" },
+      members: detail.members,
+    });
+    mocks.departments.mockResolvedValue([
+      { id: "dep-it", name: "IT", code: "IT" },
+    ]);
+    mocks.update.mockResolvedValue({});
+
+    renderDetail();
+    await screen.findByRole("heading", { name: "Website Redesign" });
+
+    const select = screen.getByLabelText("Departemen") as HTMLSelectElement;
+    await user.selectOptions(select, "");
+
+    await vi.waitFor(() =>
+      expect(mocks.update).toHaveBeenCalledWith("p1", { department_id: null }),
+    );
   });
 });

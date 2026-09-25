@@ -8,12 +8,14 @@ const mocks = vi.hoisted(() => ({
   login: vi.fn<(username: string, password: string) => Promise<unknown>>(),
   fetchProfile: vi.fn<() => Promise<unknown>>(),
   logout: vi.fn<(all?: boolean) => Promise<void>>(),
+  refreshSession: vi.fn<() => Promise<unknown>>(),
 }));
 
 vi.mock("@/services/auth", () => ({
   login: mocks.login,
   fetchProfile: mocks.fetchProfile,
   logout: mocks.logout,
+  refreshSession: mocks.refreshSession,
 }));
 
 const { useAuthStore } = await import("./auth");
@@ -21,8 +23,6 @@ const { useAuthStore } = await import("./auth");
 const authSession: AuthSession = {
   token: "access-1",
   expires_at: "2026-09-21T10:15:00Z",
-  refresh_token: "refresh-1",
-  refresh_expires_at: "2026-09-28T10:00:00Z",
   user: {
     id: "u1",
     username: "admin",
@@ -42,6 +42,7 @@ beforeEach(() => {
   mocks.login.mockReset();
   mocks.fetchProfile.mockReset();
   mocks.logout.mockReset();
+  mocks.refreshSession.mockReset();
   session.clear();
   useAuthStore.setState({
     status: "unknown",
@@ -52,7 +53,7 @@ beforeEach(() => {
 });
 
 describe("store auth", () => {
-  it("menyimpan kedua token dan membaca profil saat login berhasil", async () => {
+  it("menyimpan access token dan membaca profil saat login berhasil", async () => {
     mocks.login.mockResolvedValue(authSession);
     mocks.fetchProfile.mockResolvedValue(profile);
 
@@ -61,7 +62,6 @@ describe("store auth", () => {
     expect(ok).toBe(true);
     expect(mocks.login).toHaveBeenCalledWith("admin", "rahasia");
     expect(session.getAccessToken()).toBe("access-1");
-    expect(session.getRefreshToken()).toBe("refresh-1");
     expect(useAuthStore.getState().status).toBe("authenticated");
     expect(useAuthStore.getState().profile?.permissions).toEqual([
       "project:read",
@@ -81,13 +81,12 @@ describe("store auth", () => {
 
     expect(ok).toBe(false);
     expect(session.getAccessToken()).toBeNull();
-    expect(session.getRefreshToken()).toBeNull();
     expect(useAuthStore.getState().status).toBe("anonymous");
     expect(useAuthStore.getState().error?.code).toBe("INVALID_CREDENTIALS");
   });
 
   it("membersihkan sesi lokal walau permintaan logout gagal", async () => {
-    session.setTokens("access-1", "refresh-1");
+    session.setTokens("access-1");
     useAuthStore.setState({ status: "authenticated", profile });
     mocks.logout.mockRejectedValue(
       ApiError.network("tidak dapat menghubungi server"),
@@ -101,25 +100,31 @@ describe("store auth", () => {
     expect(useAuthStore.getState().profile).toBeNull();
   });
 
-  it("tidak memanggil server saat tidak ada sesi tersimpan", async () => {
+  it("anonim tanpa memanggil server saat refresh cookie gagal", async () => {
+    mocks.refreshSession.mockRejectedValue(
+      new ApiError({ status: 401, code: "UNAUTHORIZED", message: "tanpa sesi" }),
+    );
+
     await useAuthStore.getState().restore();
+
+    expect(mocks.refreshSession).toHaveBeenCalledOnce();
     expect(mocks.fetchProfile).not.toHaveBeenCalled();
     expect(useAuthStore.getState().status).toBe("anonymous");
   });
 
-  it("menukar refresh token tersimpan menjadi sesi saat halaman dimuat ulang", async () => {
-    session.setTokens("access-1", "refresh-1");
+  it("menukar cookie menjadi sesi saat halaman dimuat ulang", async () => {
+    mocks.refreshSession.mockResolvedValue({ token: "access-baru" });
     mocks.fetchProfile.mockResolvedValue(profile);
 
     await useAuthStore.getState().restore();
 
     expect(mocks.fetchProfile).toHaveBeenCalledOnce();
+    expect(session.getAccessToken()).toBe("access-baru");
     expect(useAuthStore.getState().status).toBe("authenticated");
   });
 
-  it("memperlakukan refresh token yang sudah dicabut sebagai anonim, bukan galat", async () => {
-    session.setTokens("access-1", "refresh-1");
-    mocks.fetchProfile.mockRejectedValue(
+  it("memperlakukan refresh yang dicabut sebagai anonim, bukan galat", async () => {
+    mocks.refreshSession.mockRejectedValue(
       new ApiError({
         status: 401,
         code: "TOKEN_REVOKED",
@@ -131,7 +136,7 @@ describe("store auth", () => {
 
     expect(useAuthStore.getState().status).toBe("anonymous");
     expect(useAuthStore.getState().error).toBeNull();
-    expect(session.getRefreshToken()).toBeNull();
+    expect(session.getAccessToken()).toBeNull();
   });
 
   it("memeriksa izin dari daftar server, bukan dari nama role", () => {
