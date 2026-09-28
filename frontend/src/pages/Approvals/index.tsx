@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { useWorkflowInstances } from "@/queries/workflows";
 import { ApiError } from "@/services/http";
 import type { WorkflowInstance } from "@/services/workflows";
+import { useAuthStore } from "@/store/auth";
 import { formatTimestamp } from "@/utils/format";
 
 import { EMPTY_VALUE } from "@/utils/format";
@@ -20,30 +21,41 @@ import { EMPTY_VALUE } from "@/utils/format";
  *
  * Tab mengikuti `50-FSD.md` §5.4 dan `51-UX.md` §2.1:
  * - Pending: `status=running` + `scope=assigned_to_me` (kecualikan jeda revisi)
+ * - Semua Pending: `status=running` tanpa scope, khusus Admin/Manager — inilah
+ *   tab yang menjawab "dokumen yang saya ajukan kok tidak muncul": antrean
+ *   Pending hanya berisi step yang menunjuk Anda, sedangkan dokumen yang baru
+ *   di-submit menunggu penanggung jawab step-nya di sini
  * - Approved: `status=completed`
  * - Rejected: `status=rejected`
  *
  * Label tab mengikuti `50-FSD.md` §11.3: `running` → "Pending" hanya di halaman ini.
  */
 const tabs = [
-  { label: "Pending", value: "pending", status: "running" as const, scope: "assigned_to_me" as const },
-  { label: "Approved", value: "approved", status: "completed" as const, scope: "" as const },
-  { label: "Rejected", value: "rejected", status: "rejected" as const, scope: "" as const },
+  { label: "Pending", value: "pending", status: "running" as const, scope: "assigned_to_me" as const, roles: [] as string[] },
+  { label: "Semua Pending", value: "all-pending", status: "running" as const, scope: "" as const, roles: ["administrator", "manager"] },
+  { label: "Approved", value: "approved", status: "completed" as const, scope: "" as const, roles: [] as string[] },
+  { label: "Rejected", value: "rejected", status: "rejected" as const, scope: "" as const, roles: [] as string[] },
 ] as const;
 
 type TabValue = (typeof tabs)[number]["value"];
 
-function isTabValue(v: string): v is TabValue {
-  return tabs.some((t) => t.value === v);
-}
-
 export function ApprovalsPage() {
   const [params, setParams] = useSearchParams();
   const tabParam = params.get("tab") ?? "pending";
-  const tab: TabValue = isTabValue(tabParam) ? tabParam : "pending";
   const page = Math.max(Number(params.get("page") ?? "1") || 1, 1);
 
-  const active = tabs.find((t) => t.value === tab) ?? tabs[0];
+  // Tab "Semua Pending" hanya untuk Admin/Manager (`50-FSD.md` §5.4); role lain
+  // tidak melihat tabnya DAN tidak dapat membukanya lewat URL — pencocokan dan
+  // fallback berjalan di atas daftar yang terlihat, bukan daftar penuh.
+  const myRoles = useAuthStore((state) => state.profile?.roles ?? []);
+  const visibleTabs = tabs.filter(
+    (t) => t.roles.length === 0 || t.roles.some((r) => myRoles.includes(r)),
+  );
+  const tab: TabValue = visibleTabs.some((t) => t.value === tabParam)
+    ? (tabParam as TabValue)
+    : "pending";
+
+  const active = visibleTabs.find((t) => t.value === tab) ?? visibleTabs[0] ?? tabs[0];
 
   // Pending menyesuaikan scope=assigned_to_me; tab lain tanpa scope
   const query = useWorkflowInstances({
@@ -157,7 +169,7 @@ export function ApprovalsPage() {
       />
 
       <nav aria-label="Sub-halaman approvals" className="flex flex-wrap gap-1.5">
-        {tabs.map((t) => {
+        {visibleTabs.map((t) => {
           const activeTab = t.value === tab;
           return (
             <Link
@@ -188,6 +200,13 @@ export function ApprovalsPage() {
           sedang jeda revisi - tidak ada yang dapat bertindak sampai re-submit.
         </p>
       ) : null}
+      {tab === "all-pending" ? (
+        <p className="text-12 text-text-muted">
+          Menampilkan <strong>seluruh</strong> instance <strong>running</strong> dalam cakupan Anda,
+          termasuk yang menunggu penanggung jawab lain dan yang sedang jeda revisi. Tab ini hanya
+          untuk Admin/Manager (`50-FSD.md` §5.4).
+        </p>
+      ) : null}
 
       {/* Form penyaring untuk konsistensi layout - Approvals memakai tab sebagai penyaring utama (`51-UX.md` §2.1). */}
       <form
@@ -212,14 +231,18 @@ export function ApprovalsPage() {
             title={
               tab === "pending"
                 ? "Tidak ada pending approval"
-                : tab === "approved"
-                  ? "Belum ada yang approved"
-                  : "Belum ada yang rejected"
+                : tab === "all-pending"
+                  ? "Tidak ada instance running"
+                  : tab === "approved"
+                    ? "Belum ada yang approved"
+                    : "Belum ada yang rejected"
             }
             description={
               tab === "pending"
                 ? "Antrean kosong: tidak ada instance running yang menunggu Anda. Instance di luar keanggotaan project memang tidak pernah dikirim server."
-                : "Riwayat akan muncul setelah ada aksi approve/reject."
+                : tab === "all-pending"
+                  ? "Tidak ada instance running dalam cakupan Anda. Dokumen yang baru di-submit muncul di sini sampai step terakhir selesai."
+                  : "Riwayat akan muncul setelah ada aksi approve/reject."
             }
             action={
               tab !== "pending" ? (

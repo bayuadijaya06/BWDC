@@ -6,6 +6,10 @@ import { Panel } from "@/components/common/Panel";
 import { ErrorState, TableSkeleton } from "@/components/common/States";
 import { OverdueFlag } from "@/components/common/StatusBadge";
 import { PageHeader } from "@/components/layout/PageHeader";
+// Utas komentar lahir di halaman Documents (T-097) dan entity-agnostic
+// (`entityType`/`entityId` props), jadi dipakai ulang di sini alih-alih
+// ditulis ulang — satu komponen, satu perilaku penanda "membalas…".
+import { CommentThread } from "@/pages/Documents/CommentThread";
 import { useCompleteTask, useTask, useUpdateTask } from "@/queries/tasks";
 import { ApiError } from "@/services/http";
 import { taskPriorityLabels } from "@/services/tasks";
@@ -17,6 +21,9 @@ import { EMPTY_VALUE, formatTimestamp } from "@/utils/format";
  * Bagian `50-FSD.md` §6.3 yang **belum** dibangun, dengan alasannya masing-
  * masing. Ditulis sebagai data supaya tidak ada panel setengah jadi yang
  * tampak seperti fitur yang rusak.
+ *
+ * Comments tidak ada di sini lagi: utasnya hidup sebagai `CommentThread` di
+ * bawah (`T-107`, komponen yang sama dengan detail dokumen).
  */
 const pendingSections: { label: string; reason: string; reference: string }[] = [
   {
@@ -24,12 +31,6 @@ const pendingSections: { label: string; reason: string; reference: string }[] = 
     reason:
       "Jejaknya sudah ditulis ke audit_logs pada setiap transisi (TASK_CREATED, TASK_UPDATED, TASK_ASSIGNED, TASK_COMPLETED), tetapi pembacanya memerlukan izin audit:read yang hanya dimiliki Administrator dan halaman auditnya belum dibangun.",
     reference: "docs/design/42-API.md §9, docs/design/44-SECURITY.md §6",
-  },
-  {
-    label: "Comments",
-    reason:
-      "Endpoint komentar sudah hidup untuk entitas task (?entity_type=task&entity_id=), tetapi antarmuka utas komentar belum dibangun.",
-    reference: "docs/design/42-API.md §7, docs/design/50-FSD.md §7",
   },
 ];
 
@@ -392,6 +393,8 @@ export function TaskDetailPage() {
           (50-FSD.md §11.4).
         </p>
       </Panel>
+
+      <CommentThread entityType="task" entityId={task.id} />
 
       <Panel
         title="Bagian lain halaman ini"

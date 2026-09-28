@@ -60,7 +60,10 @@ func (r *UserRepository) Roles(ctx context.Context, userID uuid.UUID) ([]string,
 	}
 	defer rows.Close()
 
-	var names []string
+	// Selalu slice non-nil: JSON `null` pada field array meruntuhkan klien
+	// (`row.roles.join` di halaman Administration — ditemukan dari peramban
+	// sungguhan, bukan dari test yang selalu memberi roles berisi).
+	names := []string{}
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {

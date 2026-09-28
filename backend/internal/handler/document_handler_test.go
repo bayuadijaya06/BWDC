@@ -662,6 +662,115 @@ func TestUploadAcceptsOfficeTypesHTTP(t *testing.T) {
 	})
 }
 
+// categoryPayload adalah bentuk `data` kategori di `42-API.md` §4.
+type categoryPayload struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Code string `json:"code"`
+}
+
+func decodeCategory(t *testing.T, rec *httptest.ResponseRecorder) categoryPayload {
+	t.Helper()
+	var payload categoryPayload
+	decodeData(t, rec, &payload)
+	return payload
+}
+
+// TestCategoryCRUDHTTP menutup `POST`/`PATCH`/`DELETE /documents/categories`
+// (`42-API.md` §4, T-103): buat → 201; validasi 422; duplikat 409; ubah → 200;
+// kirim code → 409; hapus → 200; asing → 404; tanpa `document_category:manage`
+// (viewer, contributor, manager) → 403.
+func TestCategoryCRUDHTTP(t *testing.T) {
+	admin := createActor(t, "administrator")
+	manager := createActor(t, "manager")
+	viewer := createActor(t, "viewer")
+	engine := newEngine(t, 5)
+
+	_, adminLogin := logins(t, engine, admin.Username, admin.Password)
+	_, managerLogin := logins(t, engine, manager.Username, manager.Password)
+	_, viewerLogin := logins(t, engine, viewer.Username, viewer.Password)
+
+	rec := doJSON(t, engine, http.MethodPost, "/api/v1/documents/categories", adminLogin.Data.Token,
+		`{"name":"SOP","code":"SOP"}`)
+	requireStatus(t, rec, http.StatusCreated)
+	created := decodeCategory(t, rec)
+	if created.Name != "SOP" || created.Code != "SOP" {
+		t.Fatalf("kategori terbentuk = %+v", created)
+	}
+
+	rec = doJSON(t, engine, http.MethodPost, "/api/v1/documents/categories", adminLogin.Data.Token,
+		`{"name":"Nama lain","code":"SOP"}`)
+	requireStatus(t, rec, http.StatusConflict)
+
+	rec = doJSON(t, engine, http.MethodPost, "/api/v1/documents/categories", adminLogin.Data.Token,
+		`{"name":"","code":"X"}`)
+	requireStatus(t, rec, http.StatusUnprocessableEntity)
+
+	rec = doJSON(t, engine, http.MethodPatch, "/api/v1/documents/categories/"+created.ID, adminLogin.Data.Token,
+		`{"name":"SOP Mutu"}`)
+	requireStatus(t, rec, http.StatusOK)
+	if updated := decodeCategory(t, rec); updated.Name != "SOP Mutu" || updated.Code != "SOP" {
+		t.Fatalf("kategori sesudah ubah = %+v", updated)
+	}
+
+	rec = doJSON(t, engine, http.MethodPatch, "/api/v1/documents/categories/"+created.ID, adminLogin.Data.Token,
+		`{"name":"X","code":"LAIN"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("kirim code: status %d, diharapkan 409 (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, engine, http.MethodDelete, "/api/v1/documents/categories/"+created.ID, adminLogin.Data.Token, "")
+	requireStatus(t, rec, http.StatusOK)
+
+	rec = doJSON(t, engine, http.MethodDelete, "/api/v1/documents/categories/"+created.ID, adminLogin.Data.Token, "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("hapus ulang: status %d, diharapkan 404 (%s)", rec.Code, rec.Body.String())
+	}
+
+	for _, login := range []apiResponse{managerLogin, viewerLogin} {
+		rec = doJSON(t, engine, http.MethodPost, "/api/v1/documents/categories", login.Data.Token,
+			`{"name":"X","code":"X"}`)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("tanpa manage: status %d, diharapkan 403 (%s)", rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestCategoryDeleteInUseAndCrossOrgHTTP mengunci dua aturan kontrak: kategori
+// yang dipakai dokumen → 409 (bukan 500 dari FK), dan kategori organisasi lain
+// → 404 (bukan 403).
+func TestCategoryDeleteInUseAndCrossOrgHTTP(t *testing.T) {
+	fixture := newDocumentHTTPFixture(t)
+	engine := fixture.parts.engine
+
+	manager := fixture.createActor("administrator")
+	stranger := fixture.createActor("administrator")
+	token := loginToken(t, engine, manager)
+	strangerLogin := loginToken(t, engine, stranger)
+
+	rec := doJSON(t, engine, http.MethodPost, "/api/v1/documents/categories", token,
+		`{"name":"Terpakai","code":"PAKAI"}`)
+	requireStatus(t, rec, http.StatusCreated)
+	category := decodeCategory(t, rec)
+
+	projectID := fixture.createProject(manager, "KATGUNA2")
+	document := createDocumentHTTP(t, engine, token, projectID, "Dokumen berkategori")
+	rec = doJSON(t, engine, http.MethodPatch, "/api/v1/documents/"+document.Document.ID, token,
+		`{"category_id":"`+category.ID+`"}`)
+	requireStatus(t, rec, http.StatusOK)
+
+	rec = doJSON(t, engine, http.MethodDelete, "/api/v1/documents/categories/"+category.ID, token, "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("hapus kategori terpakai: status %d, diharapkan 409 (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, engine, http.MethodPatch, "/api/v1/documents/categories/"+category.ID, strangerLogin,
+		`{"name":"Milik orang lain"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("kategori organisasi lain: status %d, diharapkan 404 (%s)", rec.Code, rec.Body.String())
+	}
+}
+
 // TestDocumentScopeHidesDocumentsFromOutsiders membuktikan cakupan
 // `44-SECURITY.md` §3.1.3 di lapisan HTTP: non-anggota melihat daftar kosong,
 // dan detail/versi/unduhan dibalas `404` — bukan `403`.

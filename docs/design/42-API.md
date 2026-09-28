@@ -589,6 +589,68 @@ Aturan:
 Izin: `document:update` (Administrator, Manager, Contributor — sama dengan arsip, dan sama dengan
 aktor "Contributor+" di `50-FSD.md` §4.3).
 
+### GET /documents/categories
+
+Response 200: `data` adalah array `{id, name, code}` seluruh kategori dokumen pada organisasi aktor,
+terurut nama. Tanpa pagination: jumlah kategori per organisasi kecil.
+
+Izin: `document_category:read` (semua role).
+
+> Catatan: endpoint ini sudah hidup sebelum sub-bab kontraknya ditulis; sub-bab ini menutup
+> kekosongan dokumentasinya (`T-103`). Bentuk `data`-nya array telanjang (bukan `data.items`),
+> mengikuti yang sudah dikirim server — jangan "dibetulkan" tanpa mengubah kontrak dan klien
+> (`src/services/documents.ts`) bersamaan.
+
+### POST /documents/categories
+
+Request: `{"name": "SOP", "code": "SOP"}` (keduanya wajib, spasi tepi dibuang).
+
+Response 201: `data` adalah `{id, name, code}` kategori yang dibuat.
+
+Izin: `document_category:manage` (Administrator saja).
+
+Aturan (`50-FSD.md` §10.4):
+
+- `name` kosong → `422`; `name` > 100 karakter → `422`; `code` kosong → `422`; `code` > 50
+  karakter → `422` (batas kolom `41-DATABASE.md` §2.3 — overflow kolom tidak boleh menjadi `500`).
+- `code` unik per organisasi (`UNIQUE(organization_id, code)`): duplikat → `409 CONFLICT`.
+  `name` tidak unik.
+- Kategori selalu lahir di organisasi aktor; tidak ada field organisasi di body.
+- Entri audit `CATEGORY_CREATED` ditulis di transaksi yang sama (ADR-0011).
+
+### PATCH /documents/categories/:id
+
+Request: `{"name": "SOP Mutu"}`.
+
+Response 200: `data` adalah `{id, name, code}` sesudah diubah.
+
+Izin: `document_category:manage` (Administrator saja).
+
+Aturan:
+
+- Hanya `name` yang dapat diubah. `code` dipakai dokumen sebagai rujukan stabil (dan
+  `UNIQUE(organization_id, code)` menjaganya); mengirim `code` → `409 CONFLICT`.
+- `name` kosong / > 100 karakter → `422`; body tanpa `name` → `422` field `body`.
+- Kategori di luar organisasi aktor → `404` (bukan `403`, supaya keberadaannya tidak bocor —
+  aturan cakupan yang sama dengan daftar dokumen).
+- Entri audit `CATEGORY_UPDATED` ditulis di transaksi yang sama (ADR-0011).
+
+### DELETE /documents/categories/:id
+
+Response 200: `{"success": true, "data": null}` — bentuk yang sama dengan `DELETE /comments/:id`.
+
+Izin: `document_category:manage` (Administrator saja).
+
+Aturan:
+
+- Hapus permanen (data rujukan tanpa versi dan tanpa jejak audit yang bergantung padanya —
+  berbeda dari dokumen yang ber-arsip, ADR-0019).
+- Kategori yang masih dipakai ≥ 1 dokumen → `409 CONFLICT` (relasi tanpa `ON DELETE`:
+  database menolaknya; service memeriksa dulu supaya pesannya menyebut sebabnya, bukan
+  `500`). Tidak ada pemindahan massal dokumen di MVP.
+- Kategori di luar organisasi aktor → `404`.
+- Entri audit `CATEGORY_DELETED` ditulis di transaksi yang sama (ADR-0011).
+
 ---
 
 ## 5. Workflow
@@ -1095,6 +1157,20 @@ Response 200: all notifications marked read
 
 Izin: `notification:update` (semua role). Tidak ada parameter yang dapat menyasar user lain: aksi ini hanya menyentuh baris `user_id = user`, jadi tidak ada endpoint "tandai semua milik siapa pun".
 
+### Pengiriman server-side (FR-NOTIF-01, `50-FSD.md` §8.1)
+
+Tidak ada endpoint tulis notifikasi: baris `notifications` hanya lahir dari aksi bisnis, di transaksi yang sama (pola ADR-0011). Pemetaannya:
+
+| Aksi | Tipe | Penerima | Entitas tujuan |
+|---|---|---|---|
+| `POST /tasks` | `TASK_ASSIGNED` | assignee (bukan bila assignee = pembuat) | task (`/tasks/:id`) |
+| `PATCH /tasks/:id` (assignee berubah) | `TASK_ASSIGNED` | assignee baru (bukan bila = pengubah) | task |
+| `POST /comments` dengan `parent_id` | `COMMENT_REPLIED` | penulis komentar induk (bukan bila = pembalas) | entitas yang dikomentari |
+| `POST /workflows/submit` | `APPROVAL_REQUIRED` | penanggung jawab step 1 | workflow instance |
+| Aksi `approve`/`reject`/`request_revision` | `DOCUMENT_APPROVED` / `DOCUMENT_REJECTED` / `REVISION_REQUESTED` + `REVIEW_REQUIRED_AGAIN` | pemilik dokumen + penanggung jawab step tujuan | workflow instance |
+
+`TASK_OVERDUE` (butuh job harian) dan `COMMENT_MENTION` (butuh pengenalan mention) belum dikirim — keduanya backlog yang dinyatakan, bukan perilaku yang diam-diam hilang.
+
 ---
 
 ## 9. Audit
@@ -1205,7 +1281,7 @@ Aturan (**ADR-0022** butir 5):
 
 Kode error tambahan: `422 VALIDATION_ERROR` bila `:id` bukan UUID (menamai field `id`), dan `404 NOT_FOUND` bila user-nya tidak ada.
 
-> **Status implementasi.** Sudah berjalan (`T-041`, P-030): `internal/handler/user_handler.go` + `internal/service/user_service.go` (`UserService.Unlock` → `UserRepository.ClearLock`). Ini endpoint `/admin/*` **pertama** yang hidup; sisanya (§11) menyusul per modul.
+> **Status implementasi.** Sudah berjalan (`T-041`, P-030): `internal/handler/user_handler.go` + `internal/service/user_service.go` (`UserService.Unlock` → `UserRepository.ClearLock`). Ini endpoint `/admin/*` **pertama** yang hidup; baca users/roles/orgs menyusul (`T-083`, P-069), tulis users/roles/orgs menyusul (`T-102`, P-094).
 
 ### POST /admin/users/:id/reset-password
 Headers: `Authorization: Bearer <token>`

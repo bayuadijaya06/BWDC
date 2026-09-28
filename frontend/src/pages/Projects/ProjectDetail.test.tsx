@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   removeMember: vi.fn(),
   listDocuments: vi.fn(),
   listTasks: vi.fn(),
+  listCategories: vi.fn(),
   listWorkflows: vi.fn(),
   listAudit: vi.fn(),
   departments: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock("@/services/documents", async (importOriginal) => {
   return {
     ...actual,
     listDocuments: mocks.listDocuments,
+    listDocumentCategories: mocks.listCategories,
   };
 });
 
@@ -143,6 +145,8 @@ beforeEach(() => {
   mocks.listAudit.mockResolvedValue({ items: [], meta: { page: 1, limit: 50, total: 0, total_page: 0 } });
   mocks.list.mockReset();
   mocks.list.mockResolvedValue({ items: [], meta: { page: 1, limit: 20, total: 0, total_page: 0 } });
+  mocks.listCategories.mockReset();
+  mocks.listCategories.mockResolvedValue([]);
   mocks.departments.mockReset();
   mocks.departments.mockResolvedValue([]);
   mocks.update.mockReset();
@@ -378,8 +382,7 @@ describe("halaman detail project", () => {
     expect(screen.getByText("IT")).toBeInTheDocument();
   });
 
-  it("memilih Belum ditugaskan melepas departemen via null (T-094)", async () => {
-    const userEvent = (await import("@testing-library/user-event")).default;
+  it("memilih Belum ditugaskan melepas departemen via null (T-094)", async () => {    const userEvent = (await import("@testing-library/user-event")).default;
     const user = userEvent.setup();
     useAuthStore.setState({
       status: "authenticated",
@@ -405,5 +408,60 @@ describe("halaman detail project", () => {
     await vi.waitFor(() =>
       expect(mocks.update).toHaveBeenCalledWith("p1", { department_id: null }),
     );
+  });
+
+  it("shortcut Tambah dokumen membuka dialog dengan project terkunci (T-111)", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: { ...profile, permissions: ["project:read", "document:create"] },
+      error: null,
+      pending: false,
+    });
+
+    renderDetail("/projects/p1?tab=documents");
+    await screen.findByRole("heading", { name: "Website Redesign" });
+
+    await user.click(screen.getByRole("button", { name: "Tambah dokumen" }));
+    await screen.findByRole("dialog", { name: /langkah 1 dari 2/i });
+
+    // Project terkunci read-only pada project ini, bukan pemilih.
+    const projectField = screen.getByLabelText("Project") as HTMLInputElement;
+    expect(projectField.readOnly).toBe(true);
+    expect(projectField.value).toBe("WEB · Website Redesign");
+    expect(screen.queryByText("Pilih project")).toBeNull();
+  });
+
+  it("shortcut Tambah tugas membuka dialog dengan project terkunci (T-111)", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: { ...profile, permissions: ["project:read", "task:create"] },
+      error: null,
+      pending: false,
+    });
+
+    const { container } = renderDetail("/projects/p1?tab=tasks");
+    await screen.findByRole("heading", { name: "Website Redesign" });
+
+    await user.click(screen.getByRole("button", { name: "Tambah tugas" }));
+    await screen.findByRole("dialog", { name: "Buat task" });
+
+    const projectField = screen.getByLabelText("Project") as HTMLInputElement;
+    expect(projectField.readOnly).toBe(true);
+    expect(projectField.value).toBe("WEB · Website Redesign");
+    expect(await runAxe(container)).toEqual([]);
+  });
+
+  it("tanpa izin buat, tab tidak menampilkan shortcut (T-111)", async () => {
+    renderDetail("/projects/p1?tab=documents");
+    await screen.findByRole("heading", { name: "Website Redesign" });
+    expect(screen.queryByRole("button", { name: "Tambah dokumen" })).toBeNull();
+
+    renderDetail("/projects/p1?tab=tasks");
+    await screen.findByRole("heading", { name: "Website Redesign" });
+    expect(screen.queryByRole("button", { name: "Tambah tugas" })).toBeNull();
   });
 });

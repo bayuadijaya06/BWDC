@@ -633,6 +633,17 @@ task **`T-045`** `DONE`, dan `POST /auth/login` kini juga mengembalikan `refresh
 - **Rekomendasi:** terima estimasi untuk MVP; bila presisi diminta, buat tabel `workflow_stage_transitions` baru (Phase 5) — jangan menambah trigger history tanpa ADR.
 - **Jawaban pemilik (2026-09-24, P-076): Opsi B** — tabel `workflow_stage_transitions`. Dijalankan lewat **ADR-0030** + migrasi `012` (tabel + trigger `trg_stage_transition_insert`); `avgTimePerStage` kini `AVG(completed_at - started_at)`. Selesai di `T-074`/`T-087`.
 
+### Q-027 — Notifikasi reset password admin (NON-BLOCKING)
+
+- **Konteks:** `42-API.md` §11 (`POST /admin/users/:id/reset-password`, FR-AUTH-08) menjanjikan "user menerima notifikasi bahwa password-nya diubah (`50-FSD.md` §2.2)". Tidak ada API generik untuk menulis notifikasi — `NotificationService` hanya List/MarkRead/MarkAllRead, penulisan terjadi inline di `workflow_repository.go`, dan kosakata `50-FSD.md` §8.1 tertutup tanpa tipe reset-password. Ditemukan saat mengerjakan `T-102` (P-094).
+- **Pilihan:**
+  - **(a) Tambah tipe `PASSWORD_RESET` + jalur tulis** (kontrak §8.1 + kode + test) — notifikasi benar-benar sampai ke bell.
+  - **(b) Coret janji notifikasinya dari kontrak §11** — reset tetap tercatat sebagai audit `PASSWORD_RESET`, tanpa bell.
+- **Rekomendasi agen:** (a) bila bell dianggap kanal keamanan (user tahu akunnya direset), (b) bila audit saja cukup untuk MVP internal.
+- **Asumsi sementara:** endpoint reset berjalan tanpa bell; audit `PASSWORD_RESET` menjadi jejaknya. Tidak menghalangi T-102–T-106.
+- **Keputusan Anda:** _(belum dijawab)_
+- **Terkait:** `42-API.md` §11, `50-FSD.md` §2.2/§8.1, FR-AUTH-08, task `T-102`.
+
 ## 2. Temuan Inkonsistensi Dokumen
 
 | # | Temuan | Status | Tindakan |

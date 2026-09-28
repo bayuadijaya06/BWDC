@@ -8,6 +8,168 @@ Setiap entri minimal memuat: ID prompt, tanggal/waktu, aktor, prompt user (ringk
 
 ---
 
+## P-107 — 2026-09-25 — Notifikasi task + balasan + shortcut project (T-110, T-111 DONE)
+
+- **Prompt user:** pastikan notifikasi ke pihak yang benar; balasan komentar tak berbunyi; shortcut tambah dokumen/task di tab project; Roles tanpa CRUD; Settings kosong.
+- **Konstruksi:** audit penerima (workflow terkunci test; `TASK_ASSIGNED` + balasan tak pernah ditulis) → `TASK_ASSIGNED` + `COMMENT_REPLIED` di tx pemicu + `fixedProject` di kedua dialog + tombol tab ber-gate.
+- **Bukti:** backend 316 (+3 test penerima di DB nyata); frontend 396/39 (+3); `typecheck`/`lint`/`build` bersih; enam pemeriksa hijau. T-112/T-113 dibuat, tetap TODO (butuh ADR).
+- **Status:** DONE. Next: T-108, T-112, T-113.
+
+---
+
+## P-106 — 2026-09-25 — Utas komentar di TaskDetail (T-107 DONE)
+
+- **Prompt user:** "Oke lanjutkan" (Next action: T-107)
+- **Konstruksi:** import `CommentThread` beralasan + render `entity_type="task"` + Comments keluar pendingSections; mock + 2 test.
+- **Bukti:** `typecheck`/`lint`/`build` bersih; `test:run` **393/39**; enam pemeriksa hijau.
+- **Status:** DONE. Next: T-108 (T-109/tab Approvals sudah DONE di P-105 sebelumnya).
+
+---
+
+## P-105 — 2026-09-25 — Tab Semua Pending di Approvals (T-109 DONE)
+
+- **Prompt user:** paste panel DocumentDetail + "Dokumen yang diajukan untuk approval tidak muncul di halam approvals (semua status)"
+- **Konstruksi:** diagnosis live (instance ada, UI tak menanyakannya) → tab keempat FSD §5.4 + gate Admin/Manager + fallback URL.
+- **Bukti:** `typecheck`/`lint`/`build` bersih; `test:run` **393/39** (+2); Chrome (`verify-apv OK`); `responsive-evidence OK` (28+42); cleanup 200; enam pemeriksa hijau.
+- **Status:** DONE. Next: T-107, lalu T-108.
+
+---
+
+## P-104 — 2026-09-25 — Sapuan backlog: T-107/T-108 baru
+
+- **Prompt user:** "Continue as per CONTINUE.md, if there's no new task, check again if there's any backlog, tasks that are not created yet"
+- **Konstruksi:** verifikasi papan (TODO hanya T-046) + sidebar semua `ready` + kontrak 62/62 + grep belum-bangun; buat T-107 (utas di TaskDetail) + T-108 (activity per dokumen); Related Tasks + form ubah task dilaporkan tanpa task (butuh keputusan kontrak / bukan spec).
+- **Bukti:** `check-ledger OK`; tanpa perubahan kode.
+- **Status:** DONE. Next: kerjakan T-107, lalu T-108.
+
+---
+
+## P-103 — 2026-09-25 — Investigasi galat halaman Administration
+
+- **Prompt user:** "Cek halaman administrasi masih ada error"
+- **Konstruksi:** statik hijau + reproduksi CDP 5 seksi (0 JS error) + inventarisasi 5 rute tulis di `:8081` (5/5 404). Akar: backend dev basi, bukan bug UI. Restart tidak dieksekusi (§8).
+- **Bukti:** `typecheck`/`lint`/17 test hijau; CDP; curl route inventory.
+- **Status:** DONE (diagnosis). Next: izin refresh `:8081` / arahan baru pemilik.
+
+---
+
+## P-103 — 2026-09-25 — Galat admin diperbaiki: refresh backend dev `:8081`
+
+- **Prompt user:** "Cek halaman administrasi masih ada error" → diagnosis: UI sehat, `:8081` basi (5 rute tulis 404)
+- **Konstruksi (atas izin eksplisit):** rebuild `bin/bwdcs` + kill 2271 → respawn 50922; verifikasi 5 rute 401 + login 200 + amplop lowercase live; jejak dihapus (DB 233/101).
+- **Bukti:** `healthy` + `refresh-kosong:401` + curl end-to-end.
+- **Status:** DONE. Next: T-046 / push / arahan baru pemilik.
+
+---
+
+## P-102 — 2026-09-25 — Rapikan papan: 5 baris DONE-inline ke tabel DONE
+
+- **Prompt user:** "Lanjutkan sesua continue.md" (Next action: T-046/push/arahan baru)
+- **Konstruksi:** T-084/085/086/091/088 duduk di TODO sambil mengklaim DONE (lolos pemeriksa karena tanpa tanggal) → pindah ke tabel DONE bertanggal 2026-09-24 + bukti + log. Kolom TODO tinggal T-046.
+- **Bukti:** `ledger OK` (satu ID satu kolom).
+- **Status:** DONE. Next: T-046 / push (butuh perintah) / arahan baru pemilik.
+
+---
+
+## P-101 — 2026-09-25 — Sapuan ringan T-046 (papan kosong)
+
+- **Prompt user:** "Lanjutkan sesua continue.md" (Next action: T-046/push/arahan baru; push tanpa perintah dilarang)
+- **Konstruksi:** resume §2-§3 (papan kosong, §0 selaras) + 6 pemeriksa hijau. Suite penuh dilewati sadar: kode tak tersentuh sejak hijau P-100.
+- **Bukti:** `ledger OK 313`, `BROKEN 0`, `readme-facts OK 46`, `api-contract OK 139/62`, `antislop-refs OK`, `navigation OK`.
+- **Status:** DONE. Next: T-046 / push (butuh perintah) / arahan baru pemilik.
+
+---
+
+## P-100 — 2026-09-25 — Halaman Audit (T-106 DONE)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md" (Next action: T-106)
+- **Konstruksi:** `pages/Audit` (filter gabungan + tabel + paginasi) + sub-nav Reports (gate `audit:read`) + `subPages` ready + route + baris §2.1 + evidence; contoh pending App.test → tonggak tanpa-pending.
+- **Bukti:** `typecheck`/`lint`/`build` bersih; `test:run` **390/39**; `responsive-evidence OK` (28 layout + 42 tema + laci); enam pemeriksa hijau.
+- **Status:** DONE. Next: papan kosong (T-046) / push / arahan baru pemilik.
+
+---
+
+## P-099 — 2026-09-25 — Halaman Administration Orgs + Categories + Settings (T-105 DONE)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md" (Next action: T-105 bagian 2/2)
+- **Konstruksi:** lapisan data org/kategori + 3 tab (Orgs penuh + Categories penuh + Settings-jujur) + 11 test; evidence dingin-gagal → hangatkan → OK; DB dev dibersihkan (1 pasang milik sesi ini; sisa asing dibiarkan).
+- **Bukti:** `typecheck`/`lint`/`build` bersih; `test:run` **384/38**; `responsive-evidence OK` (24 layout + 36 tema + laci); enam pemeriksa hijau.
+- **Status:** DONE. Next: T-106 halaman Audit.
+
+---
+
+## P-098 — 2026-09-25 — Halaman Administration Users + Roles (T-105 bagian 1/2)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md" (Next action: T-105)
+- **Konstruksi:** lapisan data admin + shell `?section=` + UsersTab (buat/ubah/role/reset + gate) + RolesTab + navigasi ready + route; evidence menemukan halaman blank → akar dua lapis (amplop kapital + roles null) diperbaiki + test regresi.
+- **Bukti:** `typecheck`/`lint`/`build` bersih; `test:run` **376/38**; `make test` 9 paket **313 test**; `responsive-evidence OK` (24 layout + 36 tema + laci); enam pemeriksa hijau.
+- **Status:** DONE (bagian 1/2; T-105 tetap IN PROGRESS). Next: Orgs + Categories + Settings.
+
+---
+
+## P-097 — 2026-09-25 — Halaman Reports tab Tasks + DONE (T-104 DONE)
+
+- **Prompt user:** "Lanjutkan next task" (T-104 bagian 2/2)
+- **Konstruksi:** TasksTab (paritas filter Tasks + kolom §6.1 + export subset + catatan terbuka) + 2 test; evidence ulang di server segar (`responsive-evidence OK`); DB dev dibersihkan (1 pasang milik sesi ini).
+- **Bukti:** `typecheck`/`lint`/`build` bersih; `test:run` **365/36**; enam pemeriksa hijau.
+- **Status:** DONE. Next: T-105 halaman Administration.
+
+---
+
+## P-096 — 2026-09-25 — Halaman Reports tab Projects + Documents (T-104 bagian 1/2)
+
+- **Prompt user:** "Lanjutkan ke next task" (T-104)
+- **Konstruksi:** `services/reports.ts` (export blob + nama disposition) + shell `?tab=` + 2 tab (filter paritas, tabel, export, tautan daftar) + navigasi ready + route + baris §2.1 + evidence; 1 cacat tap-target ditemukan skrip dan diperbaiki; `:8081` basi → server segar `:8089` + Vite `:5174`; DB dev dibersihkan (sisa +1 dijelaskan di log).
+- **Bukti:** `typecheck`/`lint`/`build` bersih; `test:run` **363/36**; `responsive-evidence OK` (20 layout + 30 tema + laci); `navigation`/`antislop-refs`/`ledger`/`doc-links` OK.
+- **Status:** DONE (bagian 1/2; T-104 tetap IN PROGRESS). Next: tab Tasks + evidence ulang.
+
+---
+
+## P-095 — 2026-09-25 — Categories CRUD backend (T-103 DONE)
+
+- **Prompt user:** "lanjutkan" (Next action: T-103, kontrak dulu)
+- **Konstruksi:** kontrak §4 dulu (dokumentasikan `GET` yang luput + 3 endpoint, satu path resource); repository org-scoped + service tx/audit + 3 handler + 3 route; hapus permanen + `409` bila dipakai. Dua temuan lahir dan ditutup di sesi yang sama: helper `createDocumentWithCategory` mengunci nama kategori skenarionya, dan `decodeData` membuka `data` (bukan amplop).
+- **Bukti:** `make test` 9 paket **312 test**; 2 service + 2 HTTP test (422/404/409/403, audit); gigi: guard in-use dicabut → FAIL; `api-contract OK 139/62`; `readme-facts OK` (62 route, 12 document); `ledger OK 312`.
+- **Status:** DONE. Next: T-104 halaman Reports.
+
+---
+
+## P-094 — 2026-09-25 — Admin writes backend (T-102 DONE)
+
+- **Prompt user:** "Lanjutkan sesuai CONTINUE.md" (Next action: T-102)
+- **Konstruksi:** 5 endpoint §11 (kontrak sudah ada; keempat izin di matriks — tanpa ADR): 5 aksi audit + `UserService` (+revocations) + 5 handler + 5 route; Q-027 dicatat untuk notifikasi reset (tanpa permukaan karangan). Dua temuan lahir dan ditutup di sesi yang sama: `ms-powerpoint` luput dari map (ketahuan test) dan baris uji yatim dari pipe `head` (SIGPIPE membunuh runner → DB kotor; jangan pipe `go test` ke `head`).
+- **Bukti:** `make test` 9 paket **308 test**; 5 service + 4 HTTP test (403/401/422/404/409, audit, sesi lama 401); `api-contract OK 132/58`; `readme-facts OK` (59 route, 10 admin); `ledger OK 308`.
+- **Status:** DONE. Next: T-103 categories CRUD (kontrak dulu).
+
+---
+
+## P-093 — 2026-09-25 — Antrean Reports + Administration (T-102–T-106 TODO)
+
+- **Prompt user:** "Jadi mau lanjut Reports dan Administration kapan? masih ada task apa saja yang belum??" → dijawab dari papan +diputuskan: antrean penuh
+- **Konstruksi:** pemetaan sisa (backend tulis + categories + 3 halaman tanpa task; FR-ROLE-04/ORG-03 TODO, FR-AUTH-07/08 PARTIAL) → T-102..T-106 TODO berurutan. Tanpa kode.
+- **Bukti:** `ledger OK` (ID baru terdaftar).
+- **Status:** DONE. Next: T-102 admin writes backend.
+
+---
+
+## P-092 — 2026-09-25 — Nyalakan Docker daemon (T-014 DONE)
+
+- **Prompt user:** "Lanjutkan task yang masih terbuka" (satu-satunya TODO yang bisa dikerjakan: T-014)
+- **Konstruksi:** daemon mati → `open -a Docker` → `Server Version: 24.0.2`; `docker compose config` exit 0. T-014 TODO → DONE; T-017 dipindah ke tabel DONE (baris DONE-inline di kolom TODO adalah bau ledger). NFR-PORT-01 tetap PARTIAL (tanpa Dockerfile/up).
+- **Bukti:** `docker info`, `docker compose config`, `ledger OK`.
+- **Status:** DONE. Next: T-046 / push / arahan baru pemilik.
+
+---
+
+## P-091 — 2026-09-25 — Commit working tree P-076–P-090 (`f730bab`)
+
+- **Prompt user:** "oke next" → tak ada task yang bisa jalan; pemilik memilih commit working tree (izin eksplisit)
+- **Konstruksi:** review 115 entri (tanpa `.env`/secret/`storage`/`dist`/binari) → `git add -A` → satu commit rentang `f730bab` (116 files, +7531/-703; per-sesi mustahil jujur). Push tidak dikerjakan.
+- **Bukti:** `git log` (`f730bab` di atas `3ad7ef2`), `git status` bersih, `ledger OK 299`, `BROKEN 0`.
+- **Status:** DONE. Next: T-014 / push (butuh perintah) / arahan baru pemilik.
+
+---
+
 ## P-090 — 2026-09-25 — Dukungan unggahan Office DOC/DOCX/PPT/PPTX (Q-008 Opsi A, T-101 DONE)
 
 - **Prompt user:** "oke next" → tiga keputusan diajukan sekaligus, dijawab: Q-025 Opsi A, Q-026 Opsi A, Q-008 Opsi A

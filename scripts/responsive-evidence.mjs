@@ -923,6 +923,12 @@ async function main() {
       { name: "tasks", path: "/tasks", filterForm: "Penyaring task", expectedRanges: 1 },
       { name: "documents", path: "/documents", filterForm: "Penyaring dokumen", expectedRanges: 1 },
       { name: "approvals", path: "/approvals", filterForm: "Penyaring approvals", expectedRanges: 0 },
+      { name: "reports", path: "/reports", filterForm: "Penyaring laporan", expectedRanges: 0 },
+      // Tab Documents/Tasks di /reports memuat 1 kelompok rentang (pola
+      // P-049/P-052 verbatim); entri statis ini mengukur tab bawaan
+      // (projects, 0 rentang).
+      { name: "administration", path: "/admin", filterForm: "Penyaring user", expectedRanges: 0 },
+      { name: "audit", path: "/reports/audit", filterForm: "Penyaring audit", expectedRanges: 0 },
     ];
     const filterRowsByPage = {};
     const documentTabsByWidth = {};

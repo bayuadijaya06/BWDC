@@ -549,6 +549,88 @@ func TestDocumentUploadAcceptsOfficeTypes(t *testing.T) {
 	}
 }
 
+// TestCreateUpdateDeleteCategory menutup CRUD kategori `42-API.md` §4 di
+// lapisan service (`50-FSD.md` §10.4, T-103): buat → duplikat 409 → ubah nama
+// → hapus, masing-masing beraudit, plus kategori asing (organisasi lain) →
+// `ErrCategoryNotFound`.
+func TestCreateUpdateDeleteCategory(t *testing.T) {
+	fixture := newDocumentFixture(t)
+	owner := fixture.createOrgAndUser("contributor")
+	stranger := fixture.createOrgAndUser("contributor")
+	ctx := context.Background()
+
+	category, err := fixture.documents.CreateCategory(ctx, actorOf(owner), "SOP", "SOP")
+	if err != nil {
+		t.Fatalf("buat kategori: %v", err)
+	}
+	if category.Name != "SOP" || category.Code != "SOP" || category.OrganizationID != owner.OrgID {
+		t.Errorf("kategori = %+v, diharapkan nama/kode/org pemilik", category)
+	}
+	if got := countAudit(t, owner.ID, service.ActionCategoryCreated); got != 1 {
+		t.Errorf("entri audit CATEGORY_CREATED = %d, diharapkan 1", got)
+	}
+
+	if _, err := fixture.documents.CreateCategory(ctx, actorOf(owner), "Nama lain", "SOP"); !errors.Is(err, service.ErrCategoryCodeExists) {
+		t.Errorf("code duplikat: err=%v, diharapkan ErrCategoryCodeExists", err)
+	}
+	if _, err := fixture.documents.CreateCategory(ctx, actorOf(owner), "", "X"); err == nil {
+		t.Error("nama kosong diterima, diharapkan ditolak")
+	}
+
+	updated, err := fixture.documents.UpdateCategory(ctx, actorOf(owner), category.ID, "SOP Mutu")
+	if err != nil {
+		t.Fatalf("ubah kategori: %v", err)
+	}
+	if updated.Name != "SOP Mutu" || updated.Code != "SOP" {
+		t.Errorf("kategori = %+v, diharapkan nama baru + code tetap", updated)
+	}
+	if got := countAudit(t, owner.ID, service.ActionCategoryUpdated); got != 1 {
+		t.Errorf("entri audit CATEGORY_UPDATED = %d, diharapkan 1", got)
+	}
+
+	// Organisasi lain: tidak terlihat, walau id-nya sah.
+	if _, err := fixture.documents.UpdateCategory(ctx, actorOf(stranger), category.ID, "X"); !errors.Is(err, service.ErrCategoryNotFound) {
+		t.Errorf("kategori organisasi lain: err=%v, diharapkan ErrCategoryNotFound", err)
+	}
+
+	if err := fixture.documents.DeleteCategory(ctx, actorOf(owner), category.ID); err != nil {
+		t.Fatalf("hapus kategori: %v", err)
+	}
+	if got := countAudit(t, owner.ID, service.ActionCategoryDeleted); got != 1 {
+		t.Errorf("entri audit CATEGORY_DELETED = %d, diharapkan 1", got)
+	}
+	if err := fixture.documents.DeleteCategory(ctx, actorOf(owner), category.ID); !errors.Is(err, service.ErrCategoryNotFound) {
+		t.Errorf("hapus ulang: err=%v, diharapkan ErrCategoryNotFound", err)
+	}
+}
+
+// TestDeleteCategoryInUseIsConflict mengunci aturan `409` kontrak: kategori
+// yang masih dipakai dokumen tidak dapat dihapus (relasi tanpa `ON DELETE`).
+func TestDeleteCategoryInUseIsConflict(t *testing.T) {
+	fixture := newDocumentFixture(t)
+	owner := fixture.createOrgAndUser("contributor")
+	projectID := fixture.createProject(owner, "KATGUNA")
+	ctx := context.Background()
+
+	category, err := fixture.documents.CreateCategory(ctx, actorOf(owner), "Terpakai", "PAKAI")
+	if err != nil {
+		t.Fatalf("buat kategori: %v", err)
+	}
+	// Langsung `Create` (bukan helper `createDocumentWithCategory`): helper itu
+	// mengunci `category_name` pada "Kategori Uji" milik skenarionya sendiri.
+	if _, err := fixture.documents.Create(ctx, actorOf(owner), service.CreateDocumentInput{
+		ProjectID:  projectID,
+		Title:      "Dokumen berkategori",
+		CategoryID: &category.ID,
+	}); err != nil {
+		t.Fatalf("buat dokumen berkategori: %v", err)
+	}
+
+	if err := fixture.documents.DeleteCategory(ctx, actorOf(owner), category.ID); !errors.Is(err, service.ErrCategoryInUse) {
+		t.Errorf("hapus kategori terpakai: err=%v, diharapkan ErrCategoryInUse", err)
+	}
+}
+
 // TestDocumentDownloadReturnsContentAndAudit menutup FR-DOC-05/FR-VER-05 dan
 // FR-AUDIT-01 ("download doc").
 func TestDocumentDownloadReturnsContentAndAudit(t *testing.T) {

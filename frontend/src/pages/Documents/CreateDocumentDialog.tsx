@@ -38,16 +38,26 @@ import { FilePicker } from "./FilePicker";
  *   (`42-API.md` §4: `current_version` boleh `null`). Pengguna diberi tahu
  *   bahwa ia dapat menutup dialog dan mengunggah berkasnya dari halaman detail,
  *   bukan diarahkan mengulang langkah 1 yang akan membuat dokumen kedua.
+ *
+ * `fixedProject` (T-111): shortcut dari tab Dokumen di `ProjectDetail` —
+ * project dikunci (read-only) karena konteksnya sudah jelas project ini.
+ * Validasi dan izin server tidak berubah: `projectId` tetap dikirim dan server
+ * tetap menjawab `404` bila project di luar cakupan.
  */
 export function CreateDocumentDialog({
   onClose,
   onCreated,
+  fixedProject,
 }: {
   onClose: () => void;
   onCreated: (documentId: string) => void;
+  fixedProject?: { id: string; label: string };
 }) {
   const canReadProjects = useAuthStore((state) => state.has("project:read"));
-  const projects = useProjectList({ limit: 100 }, { enabled: canReadProjects });
+  const projects = useProjectList(
+    { limit: 100 },
+    { enabled: canReadProjects && fixedProject === undefined },
+  );
   const categories = useDocumentCategories();
   const createDocument = useCreateDocument();
   const queryClient = useQueryClient();
@@ -55,7 +65,7 @@ export function CreateDocumentDialog({
   const [step, setStep] = useState<1 | 2>(1);
   const [created, setCreated] = useState<DocumentDetail | null>(null);
 
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(fixedProject?.id ?? "");
   const [title, setTitle] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [description, setDescription] = useState("");
@@ -180,6 +190,17 @@ export function CreateDocumentDialog({
             >
               Project
             </label>
+            {fixedProject !== undefined ? (
+              <input
+                id="project-dokumen"
+                readOnly
+                value={fixedProject.label}
+                aria-describedby={
+                  errors.project_id ? "project-dokumen-error" : undefined
+                }
+                className="tap-target min-w-0 rounded-control border border-line-strong bg-surface-raised px-2 text-14 text-text-muted"
+              />
+            ) : (
             <select
               id="project-dokumen"
               data-autofocus
@@ -207,6 +228,7 @@ export function CreateDocumentDialog({
                   </option>
                 ))}
             </select>
+            )}
             {errors.project_id ? (
               <p id="project-dokumen-error" className="text-12 text-danger">
                 {errors.project_id}

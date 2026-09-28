@@ -576,3 +576,31 @@ func (r *DocumentRepository) ListCategories(ctx context.Context, organizationID 
 	}
 	return categories, nil
 }
+
+// FindCategory membaca satu kategori yang hidup di organisasi yang sama.
+// Baris organisasi lain (atau yang tidak ada) dijawab `ErrNotFound` supaya
+// pemanggil membalas `404` — keberadaan lintas organisasi tidak bocor.
+func (r *DocumentRepository) FindCategory(ctx context.Context, organizationID, categoryID uuid.UUID) (*model.DocumentCategory, error) {
+	var category model.DocumentCategory
+	if err := r.db.QueryRow(ctx, `
+		SELECT id, organization_id, name, code, created_at
+		FROM document_categories
+		WHERE id = $1 AND organization_id = $2`,
+		categoryID, organizationID).Scan(
+		&category.ID, &category.OrganizationID, &category.Name, &category.Code, &category.CreatedAt,
+	); err != nil {
+		return nil, wrapNotFound(err)
+	}
+	return &category, nil
+}
+
+// CountDocumentsByCategory menghitung dokumen yang memakai kategori — penjaga
+// hapus (`DELETE` kategori yang dipakai → `409`, `42-API.md` §4).
+func (r *DocumentRepository) CountDocumentsByCategory(ctx context.Context, categoryID uuid.UUID) (int, error) {
+	var count int
+	if err := r.db.QueryRow(ctx,
+		`SELECT count(*) FROM documents WHERE category_id = $1`, categoryID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("hitung pemakaian kategori: %w", err)
+	}
+	return count, nil
+}

@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"bwdcs/backend/internal/model"
@@ -29,6 +32,11 @@ const (
 	ActionDocumentDownloaded     = "DOCUMENT_DOWNLOADED"
 	ActionDocumentArchived       = "DOCUMENT_ARCHIVED"
 	ActionDocumentUpdated        = "DOCUMENT_UPDATED"
+	// Aksi kategori (`42-API.md` §4, T-103). Didaftarkan di sini supaya tidak
+	// ada string aksi yang hanya hidup di satu pemanggil.
+	ActionCategoryCreated = "CATEGORY_CREATED"
+	ActionCategoryUpdated = "CATEGORY_UPDATED"
+	ActionCategoryDeleted = "CATEGORY_DELETED"
 )
 
 // EntityDocument adalah nilai kolom `audit_logs.entity` untuk semua aksi di atas.
@@ -427,6 +435,176 @@ func (s *DocumentService) Archive(ctx context.Context, actor Actor, documentID u
 // Dipakai endpoint `GET /documents/categories` untuk mengisi dropdown penyaring.
 func (s *DocumentService) ListCategories(ctx context.Context, actor Actor) ([]model.DocumentCategory, error) {
 	return s.documents.ListCategories(ctx, actor.OrganizationID)
+}
+
+// Batas kolom `document_categories` (`41-DATABASE.md` §2.3): overflow kolom
+// tidak boleh menjadi `500` — validasi di sini, bukan di database.
+const (
+	maxCategoryNameLength = 100
+	maxCategoryCodeLength = 50
+)
+
+var (
+	// ErrCategoryNotFound → `404 NOT_FOUND`: kategori tidak ada **atau** di
+	// organisasi lain (aturan cakupan yang sama dengan daftar dokumen).
+	ErrCategoryNotFound = errors.New("kategori tidak ditemukan")
+	// ErrCategoryCodeExists → `409 CONFLICT`: `code` duplikat per organisasi.
+	ErrCategoryCodeExists = errors.New("kode kategori sudah dipakai")
+	// ErrCategoryInUse → `409 CONFLICT`: kategori masih dipakai dokumen.
+	ErrCategoryInUse = errors.New("kategori masih dipakai dokumen")
+)
+
+// CreateCategory membuat kategori dokumen (`POST /documents/categories`,
+// `42-API.md` §4, `50-FSD.md` §10.4). Kategori lahir di organisasi aktor;
+// tidak ada field organisasi di body.
+func (s *DocumentService) CreateCategory(ctx context.Context, actor Actor, name, code string) (*model.DocumentCategory, error) {
+	name = strings.TrimSpace(name)
+	code = strings.TrimSpace(code)
+	if name == "" || code == "" {
+		return nil, errors.New("name dan code wajib diisi")
+	}
+	if len([]rune(name)) > maxCategoryNameLength || len([]rune(code)) > maxCategoryCodeLength {
+		return nil, errors.New("name maksimal 100 karakter, code maksimal 50 karakter")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("mulai transaksi buat kategori: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var category model.DocumentCategory
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO document_categories (organization_id, name, code)
+		VALUES ($1, $2, $3)
+		RETURNING id, organization_id, name, code, created_at`,
+		actor.OrganizationID, name, code).Scan(
+		&category.ID, &category.OrganizationID, &category.Name, &category.Code, &category.CreatedAt,
+	); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, ErrCategoryCodeExists
+		}
+		return nil, fmt.Errorf("simpan kategori: %w", err)
+	}
+	if err := NewAuditService(tx).Log(ctx, actor.ID, ActionCategoryCreated, "document_category", category.ID.String(),
+		"Kategori dokumen "+name+" dibuat", map[string]any{
+			"category_id": category.ID.String(),
+			"name":        name,
+			"code":        code,
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit buat kategori: %w", err)
+	}
+	return &category, nil
+}
+
+// UpdateCategory mengubah nama kategori (`PATCH /documents/categories/:id`,
+// `42-API.md` §4). Hanya `name`: `code` dipakai sebagai rujukan stabil,
+// sehingga kiriman `code` ditolak handler dengan `409` sebelum sampai ke sini.
+func (s *DocumentService) UpdateCategory(ctx context.Context, actor Actor, categoryID uuid.UUID, name string) (*model.DocumentCategory, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errors.New("name tidak boleh kosong")
+	}
+	if len([]rune(name)) > maxCategoryNameLength {
+		return nil, errors.New("name maksimal 100 karakter")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("mulai transaksi ubah kategori: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var before model.DocumentCategory
+	if err := tx.QueryRow(ctx, `
+		SELECT id, organization_id, name, code, created_at
+		FROM document_categories WHERE id = $1 AND organization_id = $2`,
+		categoryID, actor.OrganizationID).Scan(
+		&before.ID, &before.OrganizationID, &before.Name, &before.Code, &before.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCategoryNotFound
+		}
+		return nil, fmt.Errorf("baca kategori: %w", err)
+	}
+	var updated model.DocumentCategory
+	if err := tx.QueryRow(ctx, `
+		UPDATE document_categories SET name = $2 WHERE id = $1
+		RETURNING id, organization_id, name, code, created_at`,
+		categoryID, name).Scan(
+		&updated.ID, &updated.OrganizationID, &updated.Name, &updated.Code, &updated.CreatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("ubah kategori: %w", err)
+	}
+	if err := NewAuditService(tx).Log(ctx, actor.ID, ActionCategoryUpdated, "document_category", categoryID.String(),
+		"Kategori dokumen diubah namanya", map[string]any{
+			"category_id": categoryID.String(),
+			"name_before": before.Name,
+			"name_after":  name,
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit ubah kategori: %w", err)
+	}
+	return &updated, nil
+}
+
+// DeleteCategory menghapus kategori secara permanen (`DELETE
+// /documents/categories/:id`, `42-API.md` §4). Data rujukan tanpa versi dan
+// tanpa jejak audit yang bergantung padanya — berbeda dari dokumen yang
+// ber-arsip (ADR-0019). Kategori yang masih dipakai dokumen ditolak `409`
+// (relasi tanpa `ON DELETE`: database menolaknya; service memeriksa dulu
+// supaya pesannya menyebut sebabnya, bukan `500`).
+func (s *DocumentService) DeleteCategory(ctx context.Context, actor Actor, categoryID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("mulai transaksi hapus kategori: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var before model.DocumentCategory
+	if err := tx.QueryRow(ctx, `
+		SELECT id, organization_id, name, code, created_at
+		FROM document_categories WHERE id = $1 AND organization_id = $2`,
+		categoryID, actor.OrganizationID).Scan(
+		&before.ID, &before.OrganizationID, &before.Name, &before.Code, &before.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCategoryNotFound
+		}
+		return fmt.Errorf("baca kategori: %w", err)
+	}
+	var used int
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM documents WHERE category_id = $1`, categoryID).Scan(&used); err != nil {
+		return fmt.Errorf("hitung pemakaian kategori: %w", err)
+	}
+	if used > 0 {
+		return ErrCategoryInUse
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM document_categories WHERE id = $1`, categoryID); err != nil {
+		return fmt.Errorf("hapus kategori: %w", err)
+	}
+	if err := NewAuditService(tx).Log(ctx, actor.ID, ActionCategoryDeleted, "document_category", categoryID.String(),
+		"Kategori dokumen "+before.Name+" dihapus", map[string]any{
+			"category_id": categoryID.String(),
+			"name":        before.Name,
+			"code":        before.Code,
+		}); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit hapus kategori: %w", err)
+	}
+	return nil
 }
 
 // Update menerapkan perubahan parsial `PATCH /documents/:id` (`42-API.md` §4,

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
   patch: vi.fn(),
+  delete: vi.fn(),
 }));
 
 vi.mock("./http", () => ({ http: mocks }));
@@ -11,10 +12,13 @@ vi.mock("./http", () => ({ http: mocks }));
 const {
   archiveDocument,
   createDocument,
+  createDocumentCategory,
+  deleteDocumentCategory,
   downloadDocumentVersion,
   listDocumentVersions,
   listDocuments,
   updateDocument,
+  updateDocumentCategory,
   uploadDocumentVersion,
   validateDocumentForm,
   validateRevisionNote,
@@ -30,6 +34,7 @@ beforeEach(() => {
   mocks.get.mockReset();
   mocks.post.mockReset();
   mocks.patch.mockReset();
+  mocks.delete.mockReset();
 });
 
 describe("listDocuments", () => {
@@ -288,5 +293,36 @@ describe("pemeriksaan sisi klien", () => {
     expect(validateRevisionNote("x".repeat(2001))).toContain(
       "maksimal 2000 karakter",
     );
+  });
+});
+
+describe("kategori dokumen", () => {
+  it("membuat kategori ke POST /documents/categories", async () => {
+    const category = { id: "c9", name: "SOP", code: "SOP" };
+    mocks.post.mockResolvedValue({ data: { success: true, data: category } });
+
+    const result = await createDocumentCategory({ name: "SOP", code: "SOP" });
+
+    expect(mocks.post).toHaveBeenCalledWith("/documents/categories", {
+      name: "SOP",
+      code: "SOP",
+    });
+    expect(result).toEqual(category);
+  });
+
+  it("mengubah nama lewat PATCH dan menghapus lewat DELETE", async () => {
+    mocks.patch.mockResolvedValue({
+      data: { success: true, data: { id: "c9", name: "SOP Mutu", code: "SOP" } },
+    });
+    mocks.delete.mockResolvedValue({ data: { success: true, data: null } });
+
+    const updated = await updateDocumentCategory("c9", "SOP Mutu");
+    expect(mocks.patch).toHaveBeenCalledWith("/documents/categories/c9", {
+      name: "SOP Mutu",
+    });
+    expect(updated.name).toBe("SOP Mutu");
+
+    await deleteDocumentCategory("c9");
+    expect(mocks.delete).toHaveBeenCalledWith("/documents/categories/c9");
   });
 });

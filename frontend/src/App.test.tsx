@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { UserProfile } from "@/services/auth";
 import { useAuthStore } from "@/store/auth";
 import { renderWithProviders } from "@/test/render";
+import { navigation, subPages } from "@/config/navigation";
 
 import { App } from "./App";
 
@@ -106,27 +107,15 @@ describe("routing dan penjagaan sesi", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("menampilkan halaman modul pending dengan menyebut kontraknya, bukan data contoh", () => {
-    // Modul pending berubah dari waktu ke waktu; yang diuji di sini adalah
-    // **bentuk** halamannya, dan modul yang dipakai harus modul yang memang
-    // belum dibangun saat test ini dibaca (Approvals selesai pada T-070, jadi
-    // contohnya Reports).
-    useAuthStore.setState({
-      status: "authenticated",
-      profile: profileWith(["report:read"]),
-    });
-    renderApp("/reports?status=running");
-
-    expect(
-      screen.getByText(/Modul ini belum dibangun di antarmuka/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("docs/design/50-FSD.md §10.6, docs/design/42-API.md §10"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("status=running")).toBeInTheDocument();
-    expect(
-      screen.getByText("Belum ada data yang ditampilkan"),
-    ).toBeInTheDocument();
+  it("tidak lagi punya halaman pending: seluruh menu dan anaknya ready", () => {
+    // Bentuk halaman pending diuji saat masih ada contohnya (Approvals lalu
+    // Reports lalu Administration lalu Audit); sejak T-106 tidak ada lagi
+    // modul berstatus pending, dan test ini mengunci tonggak itu — bukan
+    // bentuk yang sudah tidak punya contoh.
+    const pending = [...navigation, ...subPages].filter(
+      (item) => item.status === "pending",
+    );
+    expect(pending).toEqual([]);
   });
 
   it("menjawab halaman tidak ditemukan untuk halaman yang izinnya tidak ada", () => {

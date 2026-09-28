@@ -43,6 +43,7 @@ func newTaskFixture(t *testing.T) *taskFixture {
 			repository.NewTaskRepository(testPool),
 			repository.NewProjectRepository(testPool),
 			repository.NewUserRepository(testPool),
+			repository.NewNotificationRepository(testPool),
 			discardLogger(),
 		),
 		documents: service.NewDocumentService(
@@ -765,5 +766,78 @@ func TestTaskListOutOfRangePageKeepsTotal(t *testing.T) {
 	}
 	if totalOther != 0 {
 		t.Errorf("total organisasi lain = %d, diharapkan 0 (cakupan bocor lewat kueri hitung)", totalOther)
+	}
+}
+
+// TestTaskCreateNotifiesAssignee menutup FR-NOTIF-01 untuk pembuatan task
+// (`50-FSD.md` §8.1 `TASK_ASSIGNED`): assignee menerima satu notifikasi di
+// transaksi yang sama; penugasan ke diri sendiri tidak berbunyi.
+func TestTaskCreateNotifiesAssignee(t *testing.T) {
+	fixture := newTaskFixture(t)
+	manager := fixture.createOrgAndUser("manager")
+	contributor := fixture.createUserInOrg(manager.OrgID, "contributor")
+	projectID := fixture.createProject(manager, "TASK-NOTIF")
+	fixture.mustAddMember(manager, projectID, contributor, "contributor")
+	ctx := context.Background()
+
+	task, err := fixture.tasks.Create(ctx, actorOf(manager), taskInput(projectID, contributor.ID, "Siapkan dokumen"))
+	if err != nil {
+		t.Fatalf("buat task: %v", err)
+	}
+	if got := countNotifications(t, contributor.ID, service.NotificationTaskAssigned); got != 1 {
+		t.Errorf("TASK_ASSIGNED untuk assignee = %d, diharapkan 1", got)
+	}
+	if got := countNotifications(t, manager.ID, service.NotificationTaskAssigned); got != 0 {
+		t.Errorf("TASK_ASSIGNED untuk pembuat = %d, diharapkan 0", got)
+	}
+
+	// Penugasan ke diri sendiri tidak menghasilkan notifikasi.
+	if _, err := fixture.tasks.Create(ctx, actorOf(manager), taskInput(projectID, manager.ID, "Kerja sendiri")); err != nil {
+		t.Fatalf("buat task untuk diri sendiri: %v", err)
+	}
+	if got := countNotifications(t, manager.ID, service.NotificationTaskAssigned); got != 0 {
+		t.Errorf("TASK_ASSIGNED untuk penugasan diri = %d, diharapkan 0", got)
+	}
+	_ = task
+}
+
+// TestTaskReassignNotifiesNewAssignee menutup FR-NOTIF-01 untuk penugasan
+// ulang: hanya penerima BARU yang diberitahu, dan hanya bila benar berubah.
+func TestTaskReassignNotifiesNewAssignee(t *testing.T) {
+	fixture := newTaskFixture(t)
+	manager := fixture.createOrgAndUser("manager")
+	first := fixture.createUserInOrg(manager.OrgID, "contributor")
+	second := fixture.createUserInOrg(manager.OrgID, "contributor")
+	projectID := fixture.createProject(manager, "TASK-REASSIGN")
+	fixture.mustAddMember(manager, projectID, first, "contributor")
+	fixture.mustAddMember(manager, projectID, second, "contributor")
+	ctx := context.Background()
+
+	task, err := fixture.tasks.Create(ctx, actorOf(manager), taskInput(projectID, first.ID, "Alihkan"))
+	if err != nil {
+		t.Fatalf("buat task: %v", err)
+	}
+	if got := countNotifications(t, first.ID, service.NotificationTaskAssigned); got != 1 {
+		t.Fatalf("TASK_ASSIGNED awal = %d, diharapkan 1", got)
+	}
+
+	if _, err := fixture.tasks.Update(ctx, actorOf(manager), task.ID,
+		service.UpdateTaskInput{AssigneeID: &second.ID}); err != nil {
+		t.Fatalf("tugaskan ulang: %v", err)
+	}
+	if got := countNotifications(t, second.ID, service.NotificationTaskAssigned); got != 1 {
+		t.Errorf("TASK_ASSIGNED untuk penerima baru = %d, diharapkan 1", got)
+	}
+	if got := countNotifications(t, first.ID, service.NotificationTaskAssigned); got != 1 {
+		t.Errorf("TASK_ASSIGNED untuk penerima lama = %d, diharapkan tetap 1", got)
+	}
+
+	// Nilai yang sama bukan perubahan: tidak ada notifikasi baru.
+	if _, err := fixture.tasks.Update(ctx, actorOf(manager), task.ID,
+		service.UpdateTaskInput{AssigneeID: &second.ID}); err != nil {
+		t.Fatalf("tugaskan ulang ke nilai sama: %v", err)
+	}
+	if got := countNotifications(t, second.ID, service.NotificationTaskAssigned); got != 1 {
+		t.Errorf("TASK_ASSIGNED setelah nilai sama = %d, diharapkan tetap 1", got)
 	}
 }

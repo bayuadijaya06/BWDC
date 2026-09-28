@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -299,4 +300,259 @@ func TestAdminRolesAndOrgs(t *testing.T) {
 			t.Fatalf("status %d, want 200 body=%s", w.Code, w.Body.String())
 		}
 	})
+}
+
+// TestAdminUsersEmptyRolesSerializeAsArray menutup cacat yang hanya terlihat
+// di peramban sungguhan, dua lapis: (1) user tanpa role dikirim dengan
+// `roles: null`, dan (2) seluruh field berkunci kapital (`ID`, `Username`, …)
+// karena struct-nya tanpa tag JSON — keduanya meruntuhkan klien
+// (`row.roles.join` meledak, tabel kosong). Sejak perbaikan, amplop memakai
+// kunci lowercase kontrak §11 dan array selalu non-nil di ketiga daftar
+// (users, roles, organizations).
+func TestAdminUsersEmptyRolesSerializeAsArray(t *testing.T) {
+	admin := createActor(t, "administrator")
+	engine := newEngine(t, 5)
+	_, adminLogin := logins(t, engine, admin.Username, admin.Password)
+
+	var rolelessID uuid.UUID
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO users (organization_id, username, email, password_hash)
+		VALUES ((SELECT organization_id FROM users WHERE id = $1), 'tanpa-role', 'tanpa-role@example.invalid', 'x')
+		RETURNING id`, admin.ID).Scan(&rolelessID); err != nil {
+		t.Fatalf("buat user tanpa role: %v", err)
+	}
+
+	w := doJSON(t, engine, http.MethodGet, "/api/v1/admin/users?search=tanpa-role", adminLogin.Data.Token, "")
+	requireStatus(t, w, http.StatusOK)
+	if contains(w.Body.String(), `"roles":null`) {
+		t.Errorf("roles null di respons: %s", w.Body.String())
+	}
+	if !contains(w.Body.String(), `"username":"tanpa-role"`) {
+		t.Errorf("kunci respons bukan lowercase kontrak §11: %s", w.Body.String())
+	}
+}
+func adminRoleIDs(t *testing.T, engine *gin.Engine, token string) map[string]string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/roles", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list roles: %d %s", w.Code, w.Body.String())
+	}
+	var parsed struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("parse roles: %v", err)
+	}
+	out := make(map[string]string, len(parsed.Data))
+	for _, r := range parsed.Data {
+		out[r.Name] = r.ID
+	}
+	return out
+}
+
+// TestAdminUserUpdateEndToEnd menutup `PATCH /admin/users/:id` (FR-AUTH-07):
+// nonaktifkan → sesi lama mati (`401` di `/auth/me`); aktifkan kembali;
+// ubah email; `{}` → 422; viewer → 403; UUID asing → 404.
+func TestAdminUserUpdateEndToEnd(t *testing.T) {
+	admin := createActor(t, "administrator")
+	target := createActor(t, "viewer")
+	viewer := createActor(t, "viewer")
+	engine := newEngine(t, 5)
+
+	_, adminLogin := logins(t, engine, admin.Username, admin.Password)
+	_, targetLogin := logins(t, engine, target.Username, target.Password)
+	_, viewerLogin := logins(t, engine, viewer.Username, viewer.Password)
+	base := "/api/v1/admin/users/" + target.ID.String()
+
+	// Jeda supaya `iat` token target jatuh sebelum titik pencabutan
+	// (`date_trunc('second', NOW())` — presisi satu detik, C-053).
+	time.Sleep(1200 * time.Millisecond)
+
+	w := doJSON(t, engine, http.MethodPatch, base, adminLogin.Data.Token, `{"is_active":false}`)
+	requireStatus(t, w, http.StatusOK)
+	var updated struct {
+		Success bool `json:"success"`
+		Data    struct {
+			IsActive bool `json:"is_active"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !updated.Success || updated.Data.IsActive {
+		t.Fatalf("is_active tidak false: %s", w.Body.String())
+	}
+
+	// Sesi lama mati: token target ditolak di endpoint terproteksi.
+	if w := doJSON(t, engine, http.MethodGet, "/api/v1/auth/me", targetLogin.Data.Token, ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("token sesi lama: status %d, diharapkan 401 (%s)", w.Code, w.Body.String())
+	}
+
+	w = doJSON(t, engine, http.MethodPatch, base, adminLogin.Data.Token, `{"is_active":true}`)
+	requireStatus(t, w, http.StatusOK)
+
+	w = doJSON(t, engine, http.MethodPatch, base, adminLogin.Data.Token, `{"email":"baru@example.invalid"}`)
+	requireStatus(t, w, http.StatusOK)
+	if !contains(w.Body.String(), "baru@example.invalid") {
+		t.Fatalf("email tidak berubah: %s", w.Body.String())
+	}
+
+	w = doJSON(t, engine, http.MethodPatch, base, adminLogin.Data.Token, `{}`)
+	requireStatus(t, w, http.StatusUnprocessableEntity)
+
+	w = doJSON(t, engine, http.MethodPatch, base, viewerLogin.Data.Token, `{"is_active":false}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("viewer: status %d, diharapkan 403 (%s)", w.Code, w.Body.String())
+	}
+
+	w = doJSON(t, engine, http.MethodPatch, "/api/v1/admin/users/"+uuid.NewString(), adminLogin.Data.Token, `{"is_active":false}`)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("user asing: status %d, diharapkan 404 (%s)", w.Code, w.Body.String())
+	}
+}
+
+// TestAdminUserRolesEndToEnd menutup `PUT /admin/users/:id/roles`
+// (FR-ROLE-04): put menggantikan, array kosong/asing → 422, cabut admin
+// terakhir → 409, viewer → 403.
+func TestAdminUserRolesEndToEnd(t *testing.T) {
+	admin := createActor(t, "administrator")
+	target := createActor(t, "viewer")
+	viewer := createActor(t, "viewer")
+	engine := newEngine(t, 5)
+
+	_, adminLogin := logins(t, engine, admin.Username, admin.Password)
+	_, viewerLogin := logins(t, engine, viewer.Username, viewer.Password)
+	roles := adminRoleIDs(t, engine, adminLogin.Data.Token)
+	base := "/api/v1/admin/users/" + target.ID.String() + "/roles"
+
+	w := doJSON(t, engine, http.MethodPut, base, adminLogin.Data.Token,
+		`{"role_ids":["`+roles["manager"]+`","`+roles["viewer"]+`"]}`)
+	requireStatus(t, w, http.StatusOK)
+	if !contains(w.Body.String(), "manager") {
+		t.Fatalf("role tidak terganti: %s", w.Body.String())
+	}
+
+	w = doJSON(t, engine, http.MethodPut, base, adminLogin.Data.Token, `{"role_ids":[]}`)
+	requireStatus(t, w, http.StatusUnprocessableEntity)
+
+	w = doJSON(t, engine, http.MethodPut, base, adminLogin.Data.Token, `{"role_ids":["`+uuid.NewString()+`"]}`)
+	requireStatus(t, w, http.StatusUnprocessableEntity)
+
+	// admin adalah satu-satunya administrator: pencabutannya 409.
+	adminBase := "/api/v1/admin/users/" + admin.ID.String() + "/roles"
+	w = doJSON(t, engine, http.MethodPut, adminBase, adminLogin.Data.Token, `{"role_ids":["`+roles["viewer"]+`"]}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("cabut admin terakhir: status %d, diharapkan 409 (%s)", w.Code, w.Body.String())
+	}
+
+	w = doJSON(t, engine, http.MethodPut, base, viewerLogin.Data.Token, `{"role_ids":["`+roles["viewer"]+`"]}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("viewer: status %d, diharapkan 403 (%s)", w.Code, w.Body.String())
+	}
+}
+
+// TestAdminResetPasswordEndToEnd menutup `POST
+// /admin/users/:id/reset-password` (FR-AUTH-08): pendek → 422; sah → 200,
+// password lama mati, sesi lama mati, tepat satu audit.
+func TestAdminResetPasswordEndToEnd(t *testing.T) {
+	admin := createActor(t, "administrator")
+	target := createActor(t, "viewer")
+	engine := newEngine(t, 5)
+
+	_, adminLogin := logins(t, engine, admin.Username, admin.Password)
+	_, targetLogin := logins(t, engine, target.Username, target.Password)
+	base := "/api/v1/admin/users/" + target.ID.String() + "/reset-password"
+
+	time.Sleep(1200 * time.Millisecond)
+
+	w := doJSON(t, engine, http.MethodPost, base, adminLogin.Data.Token, `{"new_password":"pendek"}`)
+	requireStatus(t, w, http.StatusUnprocessableEntity)
+
+	w = doJSON(t, engine, http.MethodPost, base, adminLogin.Data.Token, `{"new_password":"BaruKuat123"}`)
+	requireStatus(t, w, http.StatusOK)
+
+	if w, _ := logins(t, engine, target.Username, "BaruKuat123"); w.Code != http.StatusOK {
+		t.Fatalf("login password baru: status %d, diharapkan 200 (%s)", w.Code, w.Body.String())
+	}
+	if w, _ := logins(t, engine, target.Username, target.Password); w.Code != http.StatusUnauthorized {
+		t.Fatalf("login password lama: status %d, diharapkan 401 (%s)", w.Code, w.Body.String())
+	}
+	if w := doJSON(t, engine, http.MethodGet, "/api/v1/auth/me", targetLogin.Data.Token, ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("token sesi lama: status %d, diharapkan 401 (%s)", w.Code, w.Body.String())
+	}
+
+	var audits int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_logs WHERE actor_id = $1 AND action = 'PASSWORD_RESET'`, admin.ID,
+	).Scan(&audits); err != nil {
+		t.Fatalf("hitung audit PASSWORD_RESET: %v", err)
+	}
+	if audits != 1 {
+		t.Errorf("entri audit PASSWORD_RESET = %d, diharapkan 1", audits)
+	}
+}
+
+// TestAdminOrganizationsWriteEndToEnd menutup sisi tulis organisasi
+// (FR-ORG-03): buat → 201; code duplikat → 409; ubah nama → 200; kirim code →
+// 409; asing → 404; viewer → 403.
+func TestAdminOrganizationsWriteEndToEnd(t *testing.T) {
+	admin := createActor(t, "administrator")
+	viewer := createActor(t, "viewer")
+	engine := newEngine(t, 5)
+
+	_, adminLogin := logins(t, engine, admin.Username, admin.Password)
+	_, viewerLogin := logins(t, engine, viewer.Username, viewer.Password)
+
+	code := "UJI-" + uuid.NewString()[:6]
+	w := doJSON(t, engine, http.MethodPost, "/api/v1/admin/organizations", adminLogin.Data.Token,
+		`{"name":"Organisasi Uji","code":"`+code+`"}`)
+	requireStatus(t, w, http.StatusCreated)
+	var created struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ID   string `json:"id"`
+			Code string `json:"code"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !created.Success || created.Data.Code != code {
+		t.Fatalf("organisasi tidak terbentuk: %s", w.Body.String())
+	}
+
+	w = doJSON(t, engine, http.MethodPost, "/api/v1/admin/organizations", adminLogin.Data.Token,
+		`{"name":"Nama lain","code":"`+code+`"}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("code duplikat: status %d, diharapkan 409 (%s)", w.Code, w.Body.String())
+	}
+
+	orgBase := "/api/v1/admin/organizations/" + created.Data.ID
+	w = doJSON(t, engine, http.MethodPatch, orgBase, adminLogin.Data.Token, `{"name":"Organisasi Uji Baru"}`)
+	requireStatus(t, w, http.StatusOK)
+	if !contains(w.Body.String(), "Organisasi Uji Baru") {
+		t.Fatalf("nama tidak berubah: %s", w.Body.String())
+	}
+
+	w = doJSON(t, engine, http.MethodPatch, orgBase, adminLogin.Data.Token, `{"name":"X","code":"LAIN"}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("kirim code: status %d, diharapkan 409 (%s)", w.Code, w.Body.String())
+	}
+
+	w = doJSON(t, engine, http.MethodPatch, "/api/v1/admin/organizations/"+uuid.NewString(), adminLogin.Data.Token, `{"name":"Hantu"}`)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("organisasi asing: status %d, diharapkan 404 (%s)", w.Code, w.Body.String())
+	}
+
+	w = doJSON(t, engine, http.MethodPost, "/api/v1/admin/organizations", viewerLogin.Data.Token, `{"name":"X","code":"Y"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("viewer: status %d, diharapkan 403 (%s)", w.Code, w.Body.String())
+	}
 }

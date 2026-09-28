@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   fetchTask: vi.fn(),
   updateTask: vi.fn(),
   completeTask: vi.fn(),
+  listComments: vi.fn(),
+  createComment: vi.fn(),
+  updateComment: vi.fn(),
+  deleteComment: vi.fn(),
 }));
 
 vi.mock("@/services/tasks", async (importOriginal) => {
@@ -22,6 +26,17 @@ vi.mock("@/services/tasks", async (importOriginal) => {
     completeTask: mocks.completeTask,
     fetchTask: mocks.fetchTask,
     updateTask: mocks.updateTask,
+  };
+});
+
+vi.mock("@/services/comments", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/comments")>();
+  return {
+    ...actual,
+    listComments: mocks.listComments,
+    createComment: mocks.createComment,
+    updateComment: mocks.updateComment,
+    deleteComment: mocks.deleteComment,
   };
 });
 
@@ -71,6 +86,10 @@ function renderDetail(route = "/tasks/t1") {
 beforeEach(() => {
   for (const mock of Object.values(mocks)) mock.mockReset();
   mocks.fetchTask.mockResolvedValue(openTask);
+  mocks.listComments.mockResolvedValue({
+    items: [],
+    meta: { page: 1, limit: 100, total: 0, total_page: 0 },
+  });
   useAuthStore.setState({
     status: "authenticated",
     profile: profileWith([
@@ -247,9 +266,80 @@ describe("halaman detail Task", () => {
     renderDetail();
     await screen.findByRole("heading", { name: "Tinjau BRD" });
 
+    // Comments keluar dari daftar ini sejak T-107 (utasnya hidup di bawah);
+    // yang tersisa hanya Activity log.
     expect(screen.getByText("Activity log", { exact: false })).toBeInTheDocument();
     expect(screen.getByText(/audit:read/)).toBeInTheDocument();
-    expect(screen.getAllByText("Comments", { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/antarmuka utas komentar belum dibangun/)).toBeNull();
+  });
+
+  it("menampilkan utas komentar task dengan penanda balasan (T-107)", async () => {
+    const user = userEvent.setup();
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: profileWith(["task:read", "task:update", "comment:read", "comment:create"]),
+      error: null,
+      pending: false,
+    });
+    mocks.listComments.mockResolvedValue({
+      items: [
+        {
+          id: "c1",
+          entity_id: "t1",
+          entity_type: "task",
+          content: "Komentar induk task",
+          created_by_id: "u1",
+          created_by_username: "admin",
+          created_at: "2026-09-24T10:00:00+07:00",
+        },
+        {
+          id: "c2",
+          entity_id: "t1",
+          entity_type: "task",
+          content: "Balasan task",
+          created_by_id: "u2",
+          created_by_username: "contributor",
+          parent_id: "c1",
+          created_at: "2026-09-24T11:00:00+07:00",
+        },
+      ],
+      meta: { page: 1, limit: 100, total: 2, total_page: 1 },
+    });
+    mocks.createComment.mockImplementation(async (input: Record<string, unknown>) => ({
+      id: "c9",
+      entity_id: "t1",
+      entity_type: "task",
+      content: input.content,
+      created_by_id: "u1",
+      created_by_username: "admin",
+      parent_id: input.parent_id,
+      created_at: "2026-09-24T12:00:00+07:00",
+    }));
+    renderDetail();
+
+    await screen.findByRole("heading", { name: "Tinjau BRD" });
+    expect(await screen.findByText("Komentar induk task")).toBeInTheDocument();
+    expect(screen.getByText("· Membalas admin")).toBeInTheDocument();
+
+    // Balas dari baris komentar mengirim entity task + parent_id.
+    const row = screen.getByText("Komentar induk task").closest("li") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Balas" }));
+    await user.type(screen.getByLabelText("Tulis balasan"), "Setuju.");
+    await user.click(screen.getByRole("button", { name: "Kirim balasan" }));
+
+    await waitFor(() =>
+      expect(mocks.createComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entity_type: "task",
+          entity_id: "t1",
+          parent_id: "c1",
+        }),
+      ),
+    );
+    // Daftar diminta untuk entitas task, bukan dokumen.
+    expect(mocks.listComments).toHaveBeenCalledWith(
+      expect.objectContaining({ entity_type: "task", entity_id: "t1" }),
+    );
   });
 
   it("menampilkan tidak ditemukan untuk task di luar cakupan tanpa membedakan sebabnya", async () => {

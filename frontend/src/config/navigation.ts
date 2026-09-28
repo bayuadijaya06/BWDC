@@ -87,17 +87,17 @@ export const navigation: NavItem[] = [
     label: "Reports",
     path: "/reports",
     permissions: ["report:read"],
-    status: "pending",
+    status: "ready",
     reference: "docs/design/50-FSD.md §10.6, docs/design/42-API.md §10",
-    task: "belum ada task",
+    task: "T-104",
   },
   {
     label: "Administration",
     path: "/admin",
     permissions: ["user:read", "role:read", "settings:read"],
-    status: "pending",
+    status: "ready",
     reference: "docs/design/50-FSD.md §10, docs/design/42-API.md §11",
-    task: "belum ada task",
+    task: "T-105",
   },
 ];
 
@@ -118,9 +118,9 @@ export const subPages: SubPage[] = [
     path: "/reports/audit",
     parent: "/reports",
     permissions: ["audit:read"],
-    status: "pending",
+    status: "ready",
     reference: "docs/design/42-API.md §9, docs/design/44-SECURITY.md §6",
-    task: "belum ada task",
+    task: "T-106",
   },
 ];
 

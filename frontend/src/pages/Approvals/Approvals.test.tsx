@@ -196,6 +196,40 @@ describe("halaman Approvals — daftar", () => {
     expect(screen.getByRole("button", { name: "Muat ulang" })).toBeInTheDocument();
   });
 
+  it("tab Semua Pending untuk Admin/Manager memakai status=running tanpa scope", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ApprovalsPage />, { route: "/approvals" });
+    await screen.findByRole("link", { name: "BRD" });
+
+    // Dokumen yang baru di-submit menunggu penanggung jawab step-nya: antrean
+    // Pending (assigned_to_me) tidak memuatnya, tab inilah yang memuatnya.
+    await user.click(screen.getByRole("link", { name: "Semua Pending" }));
+    await waitFor(() => expect(lastQuery()).toMatchObject({ status: "running" }));
+    expect(lastQuery()).not.toHaveProperty("scope", "assigned_to_me");
+    expect(
+      screen.getByRole("link", { name: "Semua Pending" }),
+    ).toHaveAttribute("aria-current", "page");
+  });
+
+  it("tab Semua Pending disembunyikan dari Contributor dan URL-nya jatuh ke Pending", async () => {
+    useAuthStore.setState({
+      status: "authenticated",
+      profile: profileWith(["workflow_instance:read"]),
+      error: null,
+      pending: false,
+    });
+    // Profil uji memakai roles administrator; ganti ke contributor.
+    useAuthStore.setState((state) => ({
+      profile: state.profile ? { ...state.profile, roles: ["contributor"] } : state.profile,
+    }));
+    renderWithProviders(<ApprovalsPage />, { route: "/approvals?tab=all-pending" });
+    await screen.findByRole("link", { name: "BRD" });
+
+    expect(screen.queryByRole("link", { name: "Semua Pending" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Pending" })).toHaveAttribute("aria-current", "page");
+    expect(lastQuery()).toMatchObject({ status: "running", scope: "assigned_to_me" });
+  });
+
   it("lolos pemeriksaan axe", async () => {
     const { container } = renderWithProviders(<ApprovalsPage />, { route: "/approvals" });
     await screen.findByRole("link", { name: "BRD" });

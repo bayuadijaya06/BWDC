@@ -164,6 +164,7 @@ func run() error {
 		repository.NewTaskRepository(pool),
 		repository.NewProjectRepository(pool),
 		users,
+		repository.NewNotificationRepository(pool),
 		logger,
 	)
 
@@ -173,11 +174,12 @@ func run() error {
 		repository.NewCommentRepository(pool),
 		repository.NewProjectRepository(pool),
 		users,
+		repository.NewNotificationRepository(pool),
 		logger,
 	)
 
 	// --- Administration > Users (`42-API.md` §11, ADR-0022) ---
-	userService := service.NewUserService(pool, users, logger)
+	userService := service.NewUserService(pool, users, revocations, logger)
 
 	permissionChecker := service.NewPermissionChecker(users)
 

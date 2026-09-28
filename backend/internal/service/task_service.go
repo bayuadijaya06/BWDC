@@ -130,6 +130,7 @@ type TaskService struct {
 	tasks    *repository.TaskRepository
 	projects *repository.ProjectRepository
 	users    *repository.UserRepository
+	notify   *repository.NotificationRepository
 	logger   *slog.Logger
 }
 
@@ -139,9 +140,10 @@ func NewTaskService(
 	tasks *repository.TaskRepository,
 	projects *repository.ProjectRepository,
 	users *repository.UserRepository,
+	notify *repository.NotificationRepository,
 	logger *slog.Logger,
 ) *TaskService {
-	return &TaskService{pool: pool, tasks: tasks, projects: projects, users: users, logger: logger}
+	return &TaskService{pool: pool, tasks: tasks, projects: projects, users: users, notify: notify, logger: logger}
 }
 
 // Scope menyusun cakupan data task aktor dari role **sistem**-nya.
@@ -255,6 +257,17 @@ func (s *TaskService) Create(ctx context.Context, actor Actor, input CreateTaskI
 			"due_date":    dueDate.Format(time.RFC3339),
 		}); err != nil {
 		return nil, err
+	}
+
+	// FR-NOTIF-01 (`50-FSD.md` §8.1 `TASK_ASSIGNED`): assignee diberitahu di
+	// transaksi yang sama. Penugasan ke diri sendiri tidak berbunyi — aktor
+	// sudah tahu tindakannya sendiri.
+	if input.AssigneeID != actor.ID {
+		if err := s.notify.WithTx(tx).Insert(ctx, input.AssigneeID, NotificationTaskAssigned,
+			"Task baru untuk Anda", "Task "+task.Title+" ditugaskan kepada Anda",
+			task.ID, "task"); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -401,6 +414,15 @@ func (s *TaskService) Update(ctx context.Context, actor Actor, taskID uuid.UUID,
 				"assignee_from": formatOptionalUUID(current.AssigneeID),
 			}); err != nil {
 			return nil, err
+		}
+		// FR-NOTIF-01: penerima baru diberitahu di transaksi yang sama;
+		// penugasan ulang ke diri sendiri tidak berbunyi.
+		if *input.AssigneeID != actor.ID {
+			if err := s.notify.WithTx(tx).Insert(ctx, *input.AssigneeID, NotificationTaskAssigned,
+				"Task ditugaskan kepada Anda", "Task "+current.Title+" ditugaskan kepada Anda",
+				taskID, "task"); err != nil {
+				return nil, err
+			}
 		}
 	}
 

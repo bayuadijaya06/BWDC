@@ -177,6 +177,15 @@ func Setup(r *gin.Engine, deps RouterDeps) {
 		documents.GET("/categories",
 			middleware.RequirePermission(deps.Permission, "document_category", "read"),
 			deps.Document.ListCategories)
+		documents.POST("/categories",
+			middleware.RequirePermission(deps.Permission, "document_category", "manage"),
+			deps.Document.CreateCategory)
+		documents.PATCH("/categories/:id",
+			middleware.RequirePermission(deps.Permission, "document_category", "manage"),
+			deps.Document.UpdateCategory)
+		documents.DELETE("/categories/:id",
+			middleware.RequirePermission(deps.Permission, "document_category", "manage"),
+			deps.Document.DeleteCategory)
 	}
 
 	// --- Tasks (`42-API.md` §6) ---
@@ -304,8 +313,10 @@ func Setup(r *gin.Engine, deps RouterDeps) {
 
 	// --- Administration (`42-API.md` §11) ---
 	//
-	// Izin: user:read/create/update, role:read, organization:read (Administrator saja, 44-SECURITY §3.1.2).
-	// Endpoint unlock sudah hidup (ADR-0022); sisanya T-083.
+	// Izin: user:read/create/update, user_role:manage, role:read,
+	// organization:read/create/update (Administrator saja, 44-SECURITY §3.1.2).
+	// Endpoint unlock sudah hidup (ADR-0022, T-041); baca users/roles/orgs
+	// hidup (T-083); tulis users/roles/orgs hidup (T-102).
 	if deps.User != nil {
 		admin := api.Group("/admin", deps.AuthMiddleware)
 		admin.GET("/users",
@@ -314,12 +325,27 @@ func Setup(r *gin.Engine, deps RouterDeps) {
 		admin.POST("/users",
 			middleware.RequirePermission(deps.Permission, "user", "create"),
 			deps.User.CreateUser)
+		admin.PATCH("/users/:id",
+			middleware.RequirePermission(deps.Permission, "user", "update"),
+			deps.User.UpdateUser)
+		admin.PUT("/users/:id/roles",
+			middleware.RequirePermission(deps.Permission, "user_role", "manage"),
+			deps.User.SetRoles)
+		admin.POST("/users/:id/reset-password",
+			middleware.RequirePermission(deps.Permission, "user", "update"),
+			deps.User.ResetPassword)
 		admin.GET("/roles",
 			middleware.RequirePermission(deps.Permission, "role", "read"),
 			deps.User.ListRoles)
 		admin.GET("/organizations",
 			middleware.RequirePermission(deps.Permission, "organization", "read"),
 			deps.User.ListOrganizations)
+		admin.POST("/organizations",
+			middleware.RequirePermission(deps.Permission, "organization", "create"),
+			deps.User.CreateOrganization)
+		admin.PATCH("/organizations/:id",
+			middleware.RequirePermission(deps.Permission, "organization", "update"),
+			deps.User.UpdateOrganization)
 		admin.POST("/users/:id/unlock",
 			middleware.RequirePermission(deps.Permission, "user", "update"),
 			deps.User.Unlock)

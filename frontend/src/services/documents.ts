@@ -411,3 +411,38 @@ export async function listDocumentCategories(): Promise<DocumentCategory[]> {
   const response = await http.get<ApiSuccess<DocumentCategory[]>>("/documents/categories");
   return response.data.data;
 }
+
+export interface CreateDocumentCategoryInput {
+  name: string;
+  code: string;
+}
+
+/** Membuat kategori (`POST /documents/categories`, `42-API.md` §4). */
+export async function createDocumentCategory(
+  input: CreateDocumentCategoryInput,
+): Promise<DocumentCategory> {
+  const response = await http.post<ApiSuccess<DocumentCategory>>(
+    "/documents/categories",
+    input,
+  );
+  return response.data.data;
+}
+
+/** Mengubah nama kategori (`PATCH /documents/categories/:id`, §4). */
+export async function updateDocumentCategory(
+  id: string,
+  name: string,
+): Promise<DocumentCategory> {
+  const response = await http.patch<ApiSuccess<DocumentCategory>>(
+    `/documents/categories/${encodeURIComponent(id)}`,
+    { name },
+  );
+  return response.data.data;
+}
+
+/** Menghapus kategori (`DELETE /documents/categories/:id`, §4). */
+export async function deleteDocumentCategory(id: string): Promise<void> {
+  await http.delete<ApiSuccess<null>>(
+    `/documents/categories/${encodeURIComponent(id)}`,
+  );
+}

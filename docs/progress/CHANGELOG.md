@@ -6,6 +6,321 @@
 
 ---
 
+## 2026-09-25 (sesi P-107)
+
+`T-110` DONE (notifikasi `TASK_ASSIGNED` + `COMMENT_REPLIED` di transaksi pemicu) dan `T-111` DONE (shortcut tambah dokumen/tugas di tab ProjectDetail). Backend **316 test** (+3), frontend **396 test / 39 berkas** (+3).
+
+### Added
+
+- `docs/progress/prompts/P-107-2026-09-25-notifikasi-task-balasan.md` — log sesi (P-107)
+
+### Changed
+
+- `backend/internal/repository/notification_repository.go` — `WithTx` + `Insert` (P-107)
+- `backend/internal/service/notification_service.go` — konstanta dua tipe baru (P-107)
+- `backend/internal/service/task_service.go` — `TASK_ASSIGNED` saat buat + tugaskan ulang (P-107)
+- `backend/internal/service/comment_service.go` — `COMMENT_REPLIED` ke penulis induk (P-107)
+- `backend/cmd/server/main.go` — wiring repo notifikasi (P-107)
+- `backend/internal/handler/main_test.go` — wiring yang sama (P-107)
+- `backend/internal/service/task_service_test.go` — fixture + 2 test penerima (P-107)
+- `backend/internal/service/comment_service_test.go` — fixture + 1 test balasan (P-107)
+- `frontend/src/pages/Documents/CreateDocumentDialog.tsx` — prop `fixedProject` (P-107)
+- `frontend/src/pages/Tasks/CreateTaskDialog.tsx` — prop `fixedProject` (P-107)
+- `frontend/src/pages/Projects/ProjectDetail.tsx` — tombol shortcut + dialog + refetch (P-107)
+- `frontend/src/pages/Projects/ProjectDetail.test.tsx` — mock kategori + 3 test (P-107)
+- `docs/design/50-FSD.md` — §8.1 baris + aturan pengiriman (P-107)
+- `docs/design/42-API.md` — §8 tabel pengiriman server-side (P-107)
+- `docs/progress/TRACEABILITY.md` — FR-NOTIF-01 + UI-SHORTCUT-PROJECT (P-107)
+- `docs/progress/TASKS.md` — T-110..T-113 dibuat; T-110 + T-111 DONE (P-107)
+- `docs/progress/STATE.md` — header P-107 + hitungan test (P-107)
+
+---
+
+## 2026-09-25 (sesi P-106)
+
+`T-107` DONE: utas komentar di TaskDetail (kabel `CommentThread`, hapus notice). Frontend **393 test / 39 berkas**. Tanpa backend.
+
+### Added
+
+- `docs/progress/prompts/P-106-2026-09-25-utas-taskdetail.md` — log sesi (P-106)
+
+### Changed
+
+- `frontend/src/pages/Tasks/TaskDetail.tsx` — kabel thread, Comments keluar pending (P-106)
+- `frontend/src/pages/Tasks/TaskDetail.test.tsx` — mock komentar + 2 test (P-106)
+- `docs/progress/TASKS.md` — `T-107` DONE (P-106)
+- `docs/progress/TRACEABILITY.md` — FR-CMT-03 bukti P-106 (P-106)
+
+---
+
+## 2026-09-25 (sesi P-105)
+
+`T-109` DONE: tab Semua Pending di Approvals (laporan: dokumen submit tak muncul). FSD §5.4 memang menuntutnya. Frontend **393 test / 39 berkas** (+2). Tanpa backend.
+
+### Added
+
+- `docs/progress/prompts/P-105-2026-09-25-tab-semua-pending.md` — log sesi (P-105)
+
+### Changed
+
+- `frontend/src/pages/Approvals/index.tsx` — tab + gate + empty state (P-105)
+- `frontend/src/pages/Approvals/Approvals.test.tsx` — 2 test tab/gate (P-105)
+- `docs/progress/TASKS.md` — `T-109` DONE (P-105)
+- `docs/progress/TRACEABILITY.md` — UI-APPROVALS bukti P-105 (P-105)
+
+---
+
+## 2026-09-25 (sesi P-104)
+
+Sapuan backlog: T-107 (utas komentar di TaskDetail) + T-108 (activity per dokumen) dibuat di TODO. Tanpa perubahan kode.
+
+### Added
+
+- `docs/progress/prompts/P-104-2026-09-25-sapuan-backlog-t107-t108.md` — log sesi (P-104)
+
+### Changed
+
+- `docs/progress/TASKS.md` — T-107 + T-108 di TODO (P-104)
+
+---
+
+## 2026-09-25 (sesi P-103)
+
+Investigasi galat admin: UI sehat, `:8081` basi (5 rute tulis 404). Tanpa perubahan kode; restart menunggu izin.
+
+### Added
+
+- `docs/progress/prompts/P-103-2026-09-25-investigasi-admin-error.md` — log sesi (P-103)
+
+---
+
+## 2026-09-25 (sesi P-103)
+
+Investigasi + perbaikan galat admin: rebuild dan restart backend dev `:8081` (izin eksplisit). Tanpa perubahan kode.
+
+### Changed
+
+- `backend/bin/bwdcs` — dibangun ulang dari kode kini (P-103, tak di-commit: artefak build)
+
+---
+
+## 2026-09-25 (sesi P-102)
+
+Rapikan papan: `T-084`/`085`/`086`/`091`/`088` pindah TODO → DONE bertanggal. Kolom TODO tinggal T-046.
+
+### Added
+
+- `docs/progress/prompts/P-102-2026-09-25-rapikan-papan-todo.md` — log sesi (P-102)
+
+### Changed
+
+- `docs/progress/TASKS.md` — 5 baris pindah TODO → DONE (P-102)
+
+---
+
+## 2026-09-25 (sesi P-101)
+
+Sapuan ringan T-046: §0 selaras, 6 pemeriksa hijau, papan tetap kosong. Tanpa perubahan kode.
+
+### Added
+
+- `docs/progress/prompts/P-101-2026-09-25-sapuan-ringan-t046.md` — log sesi (P-101)
+
+---
+
+## 2026-09-25 (sesi P-100)
+
+Halaman Audit (T-106 DONE): reader + sub-nav + evidence OK. Papan TODO kosong. Frontend 390/39.
+
+### Added
+
+- `docs/progress/prompts/P-100-2026-09-25-halaman-audit-t106.md` — log sesi (P-100)
+- `frontend/src/pages/Audit/index.tsx` + `Audit.test.tsx` — reader + 4 test (P-100)
+
+### Changed
+
+- `frontend/src/pages/Reports/index.tsx` — sub-nav Audit (P-100)
+- `frontend/src/config/navigation.ts` — `subPages` Audit ready (P-100)
+- `frontend/src/App.tsx` — route `/reports/audit` (P-100)
+- `frontend/src/App.test.tsx` — contoh pending → tonggak tanpa-pending (P-100)
+- `docs/design/51-UX.md` — baris Audit final (P-100)
+- `scripts/responsive-evidence.mjs` — entri audit (P-100)
+- `docs/progress/TASKS.md` — `T-106` IN PROGRESS → DONE (P-100)
+- `docs/progress/TRACEABILITY.md` — FR-AUDIT-04 UI (P-100)
+
+---
+
+## 2026-09-25 (sesi P-099)
+
+Halaman Administration lengkap 5 tab (T-105 DONE): Orgs + Categories + Settings-jujur + evidence OK. Frontend 384/38.
+
+### Changed
+
+- `frontend/src/services/documents.ts` — CRUD kategori (P-099)
+- `frontend/src/services/documents.test.ts` — 2 test kategori (P-099)
+- `frontend/src/services/admin.ts` — CRUD organisasi (P-099)
+- `frontend/src/services/admin.test.ts` — 1 test organisasi (P-099)
+- `frontend/src/queries/documents.ts` — hooks kategori (P-099)
+- `frontend/src/queries/admin.ts` — hooks organisasi (P-099)
+- `frontend/src/pages/Administration/index.tsx` — 3 tab baru (P-099)
+- `frontend/src/pages/Administration/Administration.test.tsx` — 5 test tab baru (P-099)
+- `docs/progress/TASKS.md` — `T-105` IN PROGRESS → DONE (P-099)
+- `docs/progress/TRACEABILITY.md` — FR-ORG-03 UI (P-099)
+
+### Added
+
+- `docs/progress/prompts/P-099-2026-09-25-halaman-administration-2.md` — log sesi (P-099)
+
+---
+
+## 2026-09-25 (sesi P-098)
+
+Halaman Administration Users + Roles (T-105 bagian 1/2, tetap IN PROGRESS) + perbaikan amplop admin (tag JSON + non-nil). Frontend 376/38, backend 313, evidence OK.
+
+### Added
+
+- `docs/progress/prompts/P-098-2026-09-25-halaman-administration-1.md` — log sesi (P-098)
+- `frontend/src/services/admin.test.ts` — 4 test lapisan data (P-098)
+- `frontend/src/pages/Administration/index.tsx` + `Administration.test.tsx` — shell + 2 tab + 7 test (P-098)
+
+### Changed
+
+- `frontend/src/services/admin.ts` — create/update/setRoles/reset (P-098)
+- `frontend/src/queries/admin.ts` — hooks + invalidasi (P-098)
+- `frontend/src/config/navigation.ts` — Administration ready (P-098)
+- `frontend/src/App.tsx` + `App.test.tsx` — route `/admin`; contoh pending → Audit (P-098)
+- `docs/design/51-UX.md` — baris Administration (P-098)
+- `scripts/responsive-evidence.mjs` — entri administration (P-098)
+- `backend/internal/service/user_service.go` — tag JSON `UserListItem` (P-098)
+- `backend/internal/repository/user_repository.go` — `Roles()` non-nil (P-098)
+- `backend/internal/handler/user_handler_test.go` — test regresi amplop (P-098)
+- `docs/progress/TASKS.md` — `T-105` IN PROGRESS (P-098)
+- `docs/progress/TRACEABILITY.md` — FR-ROLE-04, FR-AUTH-07/08 UI (P-098)
+- `docs/progress/STATE.md` — hitungan suite 312 → 313 + header P-098
+
+---
+
+## 2026-09-25 (sesi P-097)
+
+Halaman Reports lengkap 3/3 tab (T-104 DONE): TasksTab + evidence ulang OK. Frontend 365/36.
+
+### Changed
+
+- `frontend/src/pages/Reports/index.tsx` — TasksTab + tab ketiga (P-097)
+- `frontend/src/pages/Reports/Reports.test.tsx` — 2 test tab Tasks (P-097)
+- `docs/design/51-UX.md` — baris Reports final (P-097)
+- `docs/progress/TASKS.md` — `T-104` IN PROGRESS → DONE (P-097)
+
+---
+
+## 2026-09-25 (sesi P-096)
+
+Halaman Reports 2/3 tab (T-104 bagian 1/2, tetap IN PROGRESS): export + shell + Projects/Documents + navigasi + evidence OK (1 cacat tap-target diperbaiki). Frontend 363/36.
+
+### Added
+
+- `docs/progress/prompts/P-096-2026-09-25-halaman-reports-1.md` — log sesi (P-096)
+- `frontend/src/services/reports.ts` + `reports.test.ts` — export CSV (P-096)
+- `frontend/src/pages/Reports/index.tsx` + `Reports.test.tsx` — shell + 2 tab (P-096)
+
+### Changed
+
+- `frontend/src/config/navigation.ts` — Reports ready (P-096)
+- `frontend/src/App.tsx` — route `/reports` (P-096)
+- `frontend/src/App.test.tsx` — contoh pending → Administration (P-096)
+- `docs/design/51-UX.md` — baris Reports (P-096)
+- `scripts/responsive-evidence.mjs` — entri reports (P-096)
+
+---
+
+## 2026-09-25 (sesi P-095)
+
+`T-103` DONE: categories CRUD hidup (kontrak §4 + 3 endpoint + 3 aksi audit). Backend 312, 62 route/12 document, 6 pemeriksa hijau.
+
+### Changed
+
+- `docs/design/42-API.md` — §4 sub-bab categories (`GET` didokumentasikan + 3 endpoint baru) (P-095)
+- `backend/internal/repository/document_repository.go` — FindCategory/CountDocumentsByCategory (P-095)
+- `backend/internal/service/document_service.go` — Create/Update/DeleteCategory + 3 aksi audit + 3 error domain (P-095)
+- `backend/internal/service/document_service_test.go` — 2 test kategori (P-095)
+- `backend/internal/handler/document_handler.go` — 3 handler + `categoryIDParam` (P-095)
+- `backend/internal/handler/document_handler_test.go` — 2 test HTTP kategori (P-095)
+- `backend/internal/handler/router.go` — 3 route categories (P-095)
+- `README.md` + `AGENTS.md` — 62 route, 12 document, 55/62 anotasi (P-095)
+- `docs/progress/TASKS.md` — `T-103` IN PROGRESS → DONE (P-095)
+- `docs/progress/STATE.md` — hitungan suite 308 → 312 + header P-095
+
+### Added
+
+- `docs/progress/prompts/P-095-2026-09-25-categories-crud-t103.md` — log sesi (P-095)
+
+---
+
+## 2026-09-25 (sesi P-094)
+
+`T-102` DONE: 5 endpoint admin tulis hidup (FR-ROLE-04, FR-AUTH-07/08, FR-ORG-03). Q-027 dicatat. Backend 308, `readme-facts` 59 route/10 admin, 6 pemeriksa hijau.
+
+### Changed
+
+- `backend/internal/service/audit_service.go` — 5 konstanta aksi admin (P-094)
+- `backend/internal/service/user_service.go` — UpdateUser/SetRoles/ResetPassword/CreateOrganization/UpdateOrganization + revocations (P-094)
+- `backend/internal/service/user_service_test.go` — 5 test admin writes (P-094)
+- `backend/internal/handler/user_handler.go` — 5 handler + `orgIDParam` (P-094)
+- `backend/internal/handler/user_handler_test.go` — 4 test HTTP admin writes (P-094)
+- `backend/internal/handler/router.go` — 5 route admin + komentar (P-094)
+- `backend/cmd/server/main.go` + 2 test wiring — konstruktors + revocations (P-094)
+- `docs/design/42-API.md` — §11 status T-102 (P-094)
+- `README.md` — 54 → 59 route, admin 5 → 10 (P-094)
+- `docs/progress/TASKS.md` — `T-102` TODO → DONE (P-094)
+- `docs/progress/TRACEABILITY.md` — FR-ROLE-04, FR-AUTH-07/08, FR-ORG-03 → DONE (P-094)
+- `docs/progress/OPEN-QUESTIONS.md` — Q-027 baru (P-094)
+- `docs/progress/STATE.md` — hitungan suite 299 → 308 + header P-094
+
+### Added
+
+- `docs/progress/prompts/P-094-2026-09-25-admin-writes-t102.md` — log sesi (P-094)
+
+---
+
+## 2026-09-25 (sesi P-093)
+
+Antrean Reports + Administration didaftarkan (keputusan pemilik: antrean penuh): `T-102` admin writes → `T-103` categories CRUD → `T-104` halaman Reports → `T-105` halaman Administration → `T-106` halaman Audit. Tanpa kode.
+
+### Added
+
+- `docs/progress/prompts/P-093-2026-09-25-antrean-reports-administration.md` — log sesi (P-093)
+
+### Changed
+
+- `docs/progress/TASKS.md` — `T-102`..`T-106` TODO baru (P-093)
+
+---
+
+## 2026-09-25 (sesi P-092)
+
+T-014 DONE: Docker daemon dinyalakan (`Server Version: 24.0.2`), `docker compose config` exit 0. T-017 dipindah ke tabel DONE. NFR-PORT-01 tetap PARTIAL.
+
+### Added
+
+- `docs/progress/prompts/P-092-2026-09-25-docker-daemon-t014.md` — log sesi (P-092)
+
+### Changed
+
+- `docs/progress/TASKS.md` — `T-014` TODO → DONE; `T-017` pindah ke tabel DONE (P-092)
+- `docs/progress/TRACEABILITY.md` — NFR-PORT-01 bukti daemon (P-092)
+
+---
+
+## 2026-09-25 (sesi P-091)
+
+Commit working tree P-076–P-090 atas izin eksplisit pemilik: `f730bab` (116 files, +7531/-703), tree bersih. Push tidak dikerjakan.
+
+### Added
+
+- `docs/progress/prompts/P-091-2026-09-25-commit-p076-p090.md` — log sesi (P-091)
+
+---
+
 ## 2026-09-25 (sesi P-090)
 
 Q-025/Q-026/Q-008 dijawab pemilik (Opsi A semua) dan Q-008 diimplementasikan: `.doc/.docx/.ppt/.pptx` hidup (`T-101` DONE). Kontrak (`44-SECURITY.md` §4.2 + `42-API.md` §4 + `50-FSD.md` §4.2) → `DetectUploadMimeType` + jendela 8 KB → test unit/service/HTTP/frontend → backend 299, frontend 353/34, 6 pemeriksa hijau.

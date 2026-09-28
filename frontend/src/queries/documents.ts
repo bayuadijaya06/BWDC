@@ -8,12 +8,16 @@ import {
 import {
   archiveDocument,
   createDocument,
+  createDocumentCategory,
+  deleteDocumentCategory,
   fetchDocument,
   listDocumentCategories,
   listDocumentVersions,
   listDocuments,
   updateDocument,
+  updateDocumentCategory,
   uploadDocumentVersion,
+  type CreateDocumentCategoryInput,
   type CreateDocumentInput,
   type DocumentListQuery,
   type UpdateDocumentInput,
@@ -130,5 +134,46 @@ export function useDocumentCategories() {
   return useQuery({
     queryKey: [...documentKeys.all, "categories"],
     queryFn: () => listDocumentCategories(),
+  });
+}
+
+/**
+ * Mutasi kategori. Daftar dokumen ikut dibatalkan karena nama kategori tampil
+ * di kolomnya (`category_name`): rename yang tidak menyegarkan daftar akan
+ * menampilkan nama lama.
+ */
+function useInvalidateDocumentCategories() {
+  const queryClient = useQueryClient();
+  return () => {
+    void queryClient.invalidateQueries({
+      queryKey: [...documentKeys.all, "categories"],
+    });
+    void queryClient.invalidateQueries({ queryKey: documentKeys.lists() });
+  };
+}
+
+export function useCreateDocumentCategory() {
+  const invalidate = useInvalidateDocumentCategories();
+  return useMutation({
+    mutationFn: (input: CreateDocumentCategoryInput) =>
+      createDocumentCategory(input),
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function useUpdateDocumentCategory() {
+  const invalidate = useInvalidateDocumentCategories();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      updateDocumentCategory(id, name),
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function useDeleteDocumentCategory() {
+  const invalidate = useInvalidateDocumentCategories();
+  return useMutation({
+    mutationFn: (id: string) => deleteDocumentCategory(id),
+    onSuccess: () => invalidate(),
   });
 }

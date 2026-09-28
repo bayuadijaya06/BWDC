@@ -737,3 +737,141 @@ func (h *DocumentHandler) ListCategories(c *gin.Context) {
 	}
 	response.OK(c, items)
 }
+
+// CreateCategory melayani `POST /documents/categories` (`42-API.md` §4,
+// `document_category:manage`).
+func (h *DocumentHandler) CreateCategory(c *gin.Context) {
+	actor, ok := actorFrom(c)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+		Code string `json:"code"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Validation(c, []response.FieldError{{Field: "body", Error: "harus JSON objek yang sah"}})
+		return
+	}
+	var fields []response.FieldError
+	if strings.TrimSpace(req.Name) == "" {
+		fields = append(fields, response.FieldError{Field: "name", Error: "wajib diisi"})
+	} else if len([]rune(strings.TrimSpace(req.Name))) > 100 {
+		fields = append(fields, response.FieldError{Field: "name", Error: "maksimal 100 karakter"})
+	}
+	if strings.TrimSpace(req.Code) == "" {
+		fields = append(fields, response.FieldError{Field: "code", Error: "wajib diisi"})
+	} else if len([]rune(strings.TrimSpace(req.Code))) > 50 {
+		fields = append(fields, response.FieldError{Field: "code", Error: "maksimal 50 karakter"})
+	}
+	if len(fields) > 0 {
+		response.Validation(c, fields)
+		return
+	}
+
+	category, err := h.documents.CreateCategory(c.Request.Context(), actor, req.Name, req.Code)
+	if err != nil {
+		if errors.Is(err, service.ErrCategoryCodeExists) {
+			response.Fail(c, http.StatusConflict, response.CodeConflict, "kode kategori sudah dipakai")
+			return
+		}
+		h.logger.Error("buat kategori gagal", "error", err.Error())
+		response.Internal(c)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"success": true, "data": gin.H{
+		"id": category.ID.String(), "name": category.Name, "code": category.Code,
+	}})
+}
+
+// UpdateCategory melayani `PATCH /documents/categories/:id` (`42-API.md` §4,
+// `document_category:manage`). Hanya `name`: kiriman `code` → `409`.
+func (h *DocumentHandler) UpdateCategory(c *gin.Context) {
+	actor, ok := actorFrom(c)
+	if !ok {
+		return
+	}
+	categoryID, ok := categoryIDParam(c)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Name *string `json:"name"`
+		Code *string `json:"code"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Validation(c, []response.FieldError{{Field: "body", Error: "harus JSON objek yang sah"}})
+		return
+	}
+	if req.Code != nil {
+		response.Fail(c, http.StatusConflict, response.CodeConflict, "code kategori tidak dapat diubah")
+		return
+	}
+	if req.Name == nil {
+		response.Validation(c, []response.FieldError{{Field: "body", Error: "field name wajib diisi"}})
+		return
+	}
+	if strings.TrimSpace(*req.Name) == "" {
+		response.Validation(c, []response.FieldError{{Field: "name", Error: "tidak boleh kosong"}})
+		return
+	}
+	if len([]rune(strings.TrimSpace(*req.Name))) > 100 {
+		response.Validation(c, []response.FieldError{{Field: "name", Error: "maksimal 100 karakter"}})
+		return
+	}
+
+	category, err := h.documents.UpdateCategory(c.Request.Context(), actor, categoryID, *req.Name)
+	if err != nil {
+		if errors.Is(err, service.ErrCategoryNotFound) {
+			response.Fail(c, http.StatusNotFound, response.CodeNotFound, "kategori tidak ditemukan")
+			return
+		}
+		h.logger.Error("ubah kategori gagal", "category_id", categoryID.String(), "error", err.Error())
+		response.Internal(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"id": category.ID.String(), "name": category.Name, "code": category.Code,
+	}})
+}
+
+// DeleteCategory melayani `DELETE /documents/categories/:id` (`42-API.md` §4,
+// `document_category:manage`). Bentuk respons mengikuti `DELETE /comments/:id`:
+// `200` dengan `data` null.
+func (h *DocumentHandler) DeleteCategory(c *gin.Context) {
+	actor, ok := actorFrom(c)
+	if !ok {
+		return
+	}
+	categoryID, ok := categoryIDParam(c)
+	if !ok {
+		return
+	}
+
+	if err := h.documents.DeleteCategory(c.Request.Context(), actor, categoryID); err != nil {
+		switch {
+		case errors.Is(err, service.ErrCategoryNotFound):
+			response.Fail(c, http.StatusNotFound, response.CodeNotFound, "kategori tidak ditemukan")
+		case errors.Is(err, service.ErrCategoryInUse):
+			response.Fail(c, http.StatusConflict, response.CodeConflict, "kategori masih dipakai dokumen")
+		default:
+			h.logger.Error("hapus kategori gagal", "category_id", categoryID.String(), "error", err.Error())
+			response.Internal(c)
+		}
+		return
+	}
+	response.OK(c, nil)
+}
+
+// categoryIDParam membaca `:id` kategori dan memetakan UUID tidak sah ke
+// `422 VALIDATION_ERROR` dengan nama field-nya (`42-API.md` §12, temuan C-045).
+func categoryIDParam(c *gin.Context) (uuid.UUID, bool) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Validation(c, []response.FieldError{{Field: "id", Error: "harus UUID yang sah"}})
+		return uuid.Nil, false
+	}
+	return id, true
+}

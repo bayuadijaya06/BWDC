@@ -14,6 +14,19 @@ type NotificationService struct {
 	notifications *repository.NotificationRepository
 }
 
+// Tipe notifikasi yang ditulis pemicu di luar modul workflow
+// (`50-FSD.md` §8.1; pemicu workflow memakai konstantanya sendiri di
+// `workflow_service.go`). Nilainya adalah kosakata kolom `notifications.type`.
+const (
+	// NotificationTaskAssigned → assignee (`FR-NOTIF-01`): task dibuat atau
+	// ditugaskan ulang. Entitasnya task, supaya bell menavigasi ke `/tasks/:id`.
+	NotificationTaskAssigned = "TASK_ASSIGNED"
+	// NotificationCommentReplied → penulis komentar induk: sebuah balasan
+	// ditulis pada komentarnya. Entitasnya entitas yang dikomentari (task /
+	// dokumen / …), supaya bell menavigasi ke halaman tempat utasnya tampil.
+	NotificationCommentReplied = "COMMENT_REPLIED"
+)
+
 func NewNotificationService(notifications *repository.NotificationRepository) *NotificationService {
 	return &NotificationService{notifications: notifications}
 }

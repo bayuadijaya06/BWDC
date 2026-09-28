@@ -26,6 +26,14 @@ const (
 	ActionLogoutAll       = "LOGOUT_ALL"
 	ActionPasswordChanged = "PASSWORD_CHANGED"
 	ActionUserUnlocked    = "USER_UNLOCKED"
+	// Aksi administrasi `42-API.md` §11 (T-102). Kolom `action` tidak punya
+	// CHECK tertutup (VARCHAR(100)), tetapi nama baru tetap didaftarkan di
+	// sini supaya tidak ada string aksi yang hanya hidup di satu pemanggil.
+	ActionUserUpdated         = "USER_UPDATED"
+	ActionPasswordReset       = "PASSWORD_RESET"
+	ActionUserRolesChanged    = "USER_ROLES_CHANGED"
+	ActionOrganizationCreated = "ORGANIZATION_CREATED"
+	ActionOrganizationUpdated = "ORGANIZATION_UPDATED"
 )
 
 // AuditService menulis entri `audit_logs` (`41-DATABASE.md` §2.5).

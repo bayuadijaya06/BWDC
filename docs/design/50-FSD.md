@@ -367,6 +367,9 @@ Ketiga aksi itu **bukan** tiga nilai pada satu endpoint ubah-status: Complete pu
 | DOCUMENT_REJECTED | Reject action | Document owner |
 | TASK_OVERDUE | Due date passed | Assignee, Project manager |
 | COMMENT_MENTION | @mention in comment | Mentioned user |
+| COMMENT_REPLIED | Reply created on a comment (P-107, menutup laporan "balasan tak berbunyi") | Parent comment author |
+
+**Aturan pengiriman (P-107):** baris notifikasi ditulis di **transaksi yang sama** dengan perubahan pemicunya (pola ADR-0011) — rollback tidak meninggalkan notifikasi hantu. Tindakan terhadap **diri sendiri tidak berbunyi** (membuat task untuk diri sendiri, membalas komentar sendiri): aktor sudah tahu tindakannya sendiri. `TASK_OVERDUE` membutuhkan job harian dan `COMMENT_MENTION` membutuhkan pengenalan mention — keduanya backlog, bukan janji sesi ini.
 
 ### 8.2 Notification Center
 

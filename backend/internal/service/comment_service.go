@@ -99,6 +99,7 @@ type CommentService struct {
 	comments *repository.CommentRepository
 	projects *repository.ProjectRepository
 	users    *repository.UserRepository
+	notify   *repository.NotificationRepository
 	logger   *slog.Logger
 }
 
@@ -108,9 +109,10 @@ func NewCommentService(
 	comments *repository.CommentRepository,
 	projects *repository.ProjectRepository,
 	users *repository.UserRepository,
+	notify *repository.NotificationRepository,
 	logger *slog.Logger,
 ) *CommentService {
-	return &CommentService{pool: pool, comments: comments, projects: projects, users: users, logger: logger}
+	return &CommentService{pool: pool, comments: comments, projects: projects, users: users, notify: notify, logger: logger}
 }
 
 // Scope menyusun cakupan baca komentar aktor.
@@ -195,8 +197,12 @@ func (s *CommentService) Create(ctx context.Context, actor Actor, input CreateCo
 	// Balasan wajib menunjuk komentar yang ada **pada entitas yang sama**
 	// (ADR-0032). Induk pada entitas lain — atau yang tidak ada — dijawab sama,
 	// supaya UUID komentar tidak dapat dipakai memetakan entitas lain.
+	// Baris induknya disimpan: penulisnya menerima `COMMENT_REPLIED`.
+	var parent *model.Comment
 	if input.ParentID != nil {
-		if _, err := s.comments.FindOnEntity(ctx, *input.ParentID, entityType, input.EntityID); err != nil {
+		var err error
+		parent, err = s.comments.FindOnEntity(ctx, *input.ParentID, entityType, input.EntityID)
+		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
 				return nil, ErrCommentParentInvalid
 			}
@@ -234,6 +240,17 @@ func (s *CommentService) Create(ctx context.Context, actor Actor, input CreateCo
 	if err := NewAuditService(tx).Log(ctx, actor.ID, ActionCommentCreated, EntityComment, comment.ID.String(),
 		"Komentar ditambahkan pada "+entityType, metadata); err != nil {
 		return nil, err
+	}
+
+	// `50-FSD.md` §8.1 `COMMENT_REPLIED`: penulis komentar induk diberitahu
+	// di transaksi yang sama, dengan entitas yang dikomentari sebagai tujuan
+	// navigasi bell. Balasan atas komentar sendiri tidak berbunyi.
+	if parent != nil && parent.CreatedByID != actor.ID {
+		if err := s.notify.WithTx(tx).Insert(ctx, parent.CreatedByID, NotificationCommentReplied,
+			"Ada balasan atas komentar Anda", "Komentar Anda pada "+entityType+" mendapat balasan",
+			input.EntityID, entityType); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

@@ -31,6 +31,11 @@ import {
   type ProjectMember,
 } from "@/services/projects";
 import { useAuthStore } from "@/store/auth";
+// Import lintas-halaman (T-111, preseden T-107): dialog buat dipakai ulang
+// sebagai shortcut tab, bukan diduplikasi. Alasannya tertulis di sini supaya
+// ketergantungan ini disengaja, bukan kebetulan.
+import { CreateDocumentDialog } from "@/pages/Documents/CreateDocumentDialog";
+import { CreateTaskDialog } from "@/pages/Tasks/CreateTaskDialog";
 import { documentStatus, projectStatus, taskStatus } from "@/types/status";
 import { EMPTY_DATE, EMPTY_VALUE, formatTimestamp } from "@/utils/format";
 import { OverdueFlag } from "@/components/common/StatusBadge";
@@ -103,6 +108,11 @@ export function ProjectDetailPage() {
   const currentUser = useAuthStore((s) => s.profile);
   const canManageMembers = currentUser?.permissions.includes("project_member:manage") ?? false;
   const canUpdate = currentUser?.permissions.includes("project:update") ?? false;
+  const canCreateDocument = useAuthStore((s) => s.has("document:create"));
+  const canCreateTask = useAuthStore((s) => s.has("task:create"));
+
+  const [showDocumentDialog, setShowDocumentDialog] = useState(false);
+  const [showTaskDialog, setShowTaskDialog] = useState(false);
 
   const updateProject = useUpdateProject(id);
   const departments = useDepartments(canUpdate);
@@ -635,7 +645,17 @@ export function ProjectDetailPage() {
       ) : null}
 
       {tab === "documents" ? (
-        <Panel title="Dokumen" note="GET /documents?project_id= - dalam cakupan">
+        <Panel
+          title="Dokumen"
+          note="GET /documents?project_id= - dalam cakupan"
+          actions={
+            canCreateDocument ? (
+              <Button variant="primary" onClick={() => setShowDocumentDialog(true)}>
+                Tambah dokumen
+              </Button>
+            ) : null
+          }
+        >
           <DataTable<DocumentRecord>
             caption="Dokumen pada project ini"
             columns={documentColumns}
@@ -664,7 +684,17 @@ export function ProjectDetailPage() {
       ) : null}
 
       {tab === "tasks" ? (
-        <Panel title="Tugas" note="GET /tasks?project_id= - dalam cakupan">
+        <Panel
+          title="Tugas"
+          note="GET /tasks?project_id= - dalam cakupan"
+          actions={
+            canCreateTask ? (
+              <Button variant="primary" onClick={() => setShowTaskDialog(true)}>
+                Tambah tugas
+              </Button>
+            ) : null
+          }
+        >
           <DataTable<TaskRecord>
             caption="Tugas pada project ini"
             columns={taskColumns}
@@ -872,6 +902,28 @@ export function ProjectDetailPage() {
             ) : null}
           </div>
         </Dialog>
+      ) : null}
+
+      {showDocumentDialog ? (
+        <CreateDocumentDialog
+          fixedProject={{ id: project.id, label: `${project.code} · ${project.name}` }}
+          onClose={() => setShowDocumentDialog(false)}
+          onCreated={() => {
+            setShowDocumentDialog(false);
+            void documentsQuery.refetch();
+          }}
+        />
+      ) : null}
+
+      {showTaskDialog ? (
+        <CreateTaskDialog
+          fixedProject={{ id: project.id, label: `${project.code} · ${project.name}` }}
+          onClose={() => setShowTaskDialog(false)}
+          onCreated={() => {
+            setShowTaskDialog(false);
+            void tasksQuery.refetch();
+          }}
+        />
       ) : null}
     </div>
   );

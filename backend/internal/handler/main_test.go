@@ -108,7 +108,7 @@ func newEngineParts(t *testing.T, maxLoginAttempts int) engineParts {
 	attempts := repository.NewLoginAttemptRepository(testPool)
 	authService := service.NewAuthService(testPool, users, revocations, attempts, tokens,
 		testLoginPolicy(maxLoginAttempts), discardLogger())
-	userService := service.NewUserService(testPool, users, discardLogger())
+	userService := service.NewUserService(testPool, users, revocations, discardLogger())
 	projectService := service.NewProjectService(testPool, repository.NewProjectRepository(testPool), users, discardLogger())
 	documentService := service.NewDocumentService(testPool,
 		repository.NewDocumentRepository(testPool),
@@ -117,11 +117,11 @@ func newEngineParts(t *testing.T, maxLoginAttempts int) engineParts {
 	taskService := service.NewTaskService(testPool,
 		repository.NewTaskRepository(testPool),
 		repository.NewProjectRepository(testPool),
-		users, discardLogger())
+		users, repository.NewNotificationRepository(testPool), discardLogger())
 	commentService := service.NewCommentService(testPool,
 		repository.NewCommentRepository(testPool),
 		repository.NewProjectRepository(testPool),
-		users, discardLogger())
+		users, repository.NewNotificationRepository(testPool), discardLogger())
 
 	permissionChecker := service.NewPermissionChecker(users)
 

@@ -15,6 +15,9 @@ import { TasksPage } from "@/pages/Tasks";
 import { TaskDetailPage } from "@/pages/Tasks/TaskDetail";
 import { ApprovalDetailPage } from "@/pages/Approvals/Detail";
 import { ApprovalsPage } from "@/pages/Approvals";
+import { AdministrationPage } from "@/pages/Administration";
+import { AuditPage } from "@/pages/Audit";
+import { ReportsPage } from "@/pages/Reports";
 import { useAuthStore } from "@/store/auth";
 import { useThemeStore } from "@/store/theme";
 
@@ -91,6 +94,9 @@ export function App() {
   const documents = navigation.find((item) => item.path === "/documents");
   const tasks = navigation.find((item) => item.path === "/tasks");
   const approvals = navigation.find((item) => item.path === "/approvals");
+  const reports = navigation.find((item) => item.path === "/reports");
+  const audit = subPages.find((item) => item.path === "/reports/audit");
+  const administration = navigation.find((item) => item.path === "/admin");
 
   return (
     <Routes>
@@ -173,6 +179,36 @@ export function App() {
             element={
               <GuardedRoute item={approvals}>
                 <ApprovalDetailPage />
+              </GuardedRoute>
+            }
+          />
+        ) : null}
+        {reports ? (
+          <Route
+            path="/reports"
+            element={
+              <GuardedRoute item={reports}>
+                <ReportsPage />
+              </GuardedRoute>
+            }
+          />
+        ) : null}
+        {audit ? (
+          <Route
+            path="/reports/audit"
+            element={
+              <GuardedRoute item={audit}>
+                <AuditPage />
+              </GuardedRoute>
+            }
+          />
+        ) : null}
+        {administration ? (
+          <Route
+            path="/admin"
+            element={
+              <GuardedRoute item={administration}>
+                <AdministrationPage />
               </GuardedRoute>
             }
           />

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"bwdcs/backend/internal/model"
 )
@@ -16,6 +17,34 @@ type NotificationRepository struct {
 
 func NewNotificationRepository(db DBTX) *NotificationRepository {
 	return &NotificationRepository{db: db}
+}
+
+// WithTx mengembalikan repository yang terikat pada satu transaksi, sehingga
+// service dapat menulis notifikasi di transaksi yang sama dengan perubahan
+// yang memicunya (pola ADR-0011 — tanpa baris hantu bila rollback).
+func (r *NotificationRepository) WithTx(tx pgx.Tx) *NotificationRepository {
+	return &NotificationRepository{db: tx}
+}
+
+// Insert menyisipkan satu notifikasi untuk seorang user di dalam transaksi
+// pemanggil. Dipakai pemicu di luar modul workflow (`TASK_ASSIGNED`,
+// `COMMENT_REPLIED` — `50-FSD.md` §8.1); pemicu workflow memakai
+// `WorkflowRepository.InsertNotification` yang sudah ada.
+func (r *NotificationRepository) Insert(
+	ctx context.Context,
+	userID uuid.UUID,
+	notificationType, title, message string,
+	entityID uuid.UUID,
+	entityType string,
+) error {
+	if _, err := r.db.Exec(ctx, `
+		INSERT INTO notifications (user_id, type, title, message, entity_id, entity_type)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		userID, notificationType, title, message, entityID, entityType,
+	); err != nil {
+		return fmt.Errorf("simpan notifikasi: %w", err)
+	}
+	return nil
 }
 
 // List mengembalikan notifikasi milik user, terbaru dulu, dengan filter is_read opsional.

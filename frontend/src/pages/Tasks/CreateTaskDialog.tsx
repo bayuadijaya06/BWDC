@@ -33,23 +33,31 @@ import { useAuthStore } from "@/store/auth";
  * 3. **Related Document dibatasi dokumen project yang sama.** Server membalas
  *    `422` untuk dokumen di project lain, jadi pilihannya tidak menawarkan
  *    dokumen yang tidak akan diterima.
+ * 4. **`fixedProject` (T-111): shortcut dari tab Tugas di `ProjectDetail`** —
+ *    project dikunci (read-only). Anggota dan dokumen terkait tetap dibaca
+ *    dari project itu; validasi dan izin server tidak berubah.
  */
 export function CreateTaskDialog({
   onClose,
   onCreated,
+  fixedProject,
 }: {
   onClose: () => void;
   onCreated: (taskId: string) => void;
+  fixedProject?: { id: string; label: string };
 }) {
   const canReadProjects = useAuthStore((state) => state.has("project:read"));
   const canReadDocuments = useAuthStore((state) =>
     state.has("document:read"),
   );
 
-  const projects = useProjectList({ limit: 100 }, { enabled: canReadProjects });
+  const projects = useProjectList(
+    { limit: 100 },
+    { enabled: canReadProjects && fixedProject === undefined },
+  );
   const createTask = useCreateTask();
 
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(fixedProject?.id ?? "");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
@@ -150,41 +158,50 @@ export function CreateTaskDialog({
           <ErrorMessage error={serverError} />
         ) : null}
 
-        <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="project-task"
-            className="text-13 font-medium text-text-soft"
-          >
-            Project
-          </label>
-          <select
-            id="project-task"
-            data-autofocus
-            value={projectId}
-            onChange={(event) => {
-              // Keanggotaan dan dokumen berbeda per project, jadi kedua pilihan
-              // yang bergantung padanya direset alih-alih dibiarkan basi.
-              setProjectId(event.target.value);
-              setAssigneeId("");
-              setDocumentId("");
-            }}
-            aria-invalid={errors.project_id ? true : undefined}
-            className={[
-              "tap-target rounded-control border bg-surface-raised px-2 text-14 text-text",
-              errors.project_id ? "border-danger" : "border-line-strong",
-            ].join(" ")}
-          >
-            <option value="">
-              {projects.isPending ? "Memuat daftar project…" : "Pilih project"}
-            </option>
-            {(projects.data?.items ?? [])
-              .filter((project) => project.status === "active")
-              .map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.code} · {project.name}
-                </option>
-              ))}
-          </select>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="project-task"
+              className="text-13 font-medium text-text-soft"
+            >
+              Project
+            </label>
+            {fixedProject !== undefined ? (
+              <input
+                id="project-task"
+                readOnly
+                value={fixedProject.label}
+                className="tap-target min-w-0 rounded-control border border-line-strong bg-surface-raised px-2 text-14 text-text-muted"
+              />
+            ) : (
+            <select
+              id="project-task"
+              data-autofocus
+              value={projectId}
+              onChange={(event) => {
+                // Keanggotaan dan dokumen berbeda per project, jadi kedua pilihan
+                // yang bergantung padanya direset alih-alih dibiarkan basi.
+                setProjectId(event.target.value);
+                setAssigneeId("");
+                setDocumentId("");
+              }}
+              aria-invalid={errors.project_id ? true : undefined}
+              className={[
+                "tap-target rounded-control border bg-surface-raised px-2 text-14 text-text",
+                errors.project_id ? "border-danger" : "border-line-strong",
+              ].join(" ")}
+            >
+              <option value="">
+                {projects.isPending ? "Memuat daftar project…" : "Pilih project"}
+              </option>
+              {(projects.data?.items ?? [])
+                .filter((project) => project.status === "active")
+                .map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.code} · {project.name}
+                  </option>
+                ))}
+            </select>
+            )}
           {errors.project_id ? (
             <p className="text-12 text-danger">{errors.project_id}</p>
           ) : (

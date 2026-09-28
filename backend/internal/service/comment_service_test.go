@@ -38,6 +38,7 @@ func newCommentFixture(t *testing.T) *commentFixture {
 			repository.NewCommentRepository(testPool),
 			repository.NewProjectRepository(testPool),
 			repository.NewUserRepository(testPool),
+			repository.NewNotificationRepository(testPool),
 			discardLogger(),
 		),
 	}
@@ -713,3 +714,60 @@ func TestCommentDeleteParentCascadesReplies(t *testing.T) {
 
 // ptrString mengembalikan pointer ke string, dipakai untuk field opsional input.
 func ptrString(value string) *string { return &value }
+
+// TestCommentReplyNotifiesParentAuthor menutup `50-FSD.md` §8.1
+// `COMMENT_REPLIED`: penulis komentar induk diberitahu saat balasannya
+// ditulis — di transaksi yang sama, dengan entitas yang dikomentari sebagai
+// tujuan navigasi. Balasan atas komentar sendiri dan komentar tingkat atas
+// tidak berbunyi.
+func TestCommentReplyNotifiesParentAuthor(t *testing.T) {
+	fixture := newCommentFixture(t)
+	manager := fixture.createOrgAndUser("manager")
+	contributor := fixture.createUserInOrg(manager.OrgID, "contributor")
+	projectID := fixture.createProject(manager, "CMT-NOTIF")
+	fixture.mustAddMember(manager, projectID, contributor, "contributor")
+	ctx := context.Background()
+
+	parent, err := fixture.comments.Create(ctx, actorOf(manager),
+		commentInput(model.CommentEntityProject, projectID, "komentar induk"))
+	if err != nil {
+		t.Fatalf("buat komentar induk: %v", err)
+	}
+	if got := countNotifications(t, manager.ID, service.NotificationCommentReplied); got != 0 {
+		t.Fatalf("COMMENT_REPLIED untuk komentar tingkat atas = %d, diharapkan 0", got)
+	}
+
+	replyInput := commentInput(model.CommentEntityProject, projectID, "balasan")
+	replyInput.ParentID = &parent.ID
+	if _, err := fixture.comments.Create(ctx, actorOf(contributor), replyInput); err != nil {
+		t.Fatalf("buat balasan: %v", err)
+	}
+	if got := countNotifications(t, manager.ID, service.NotificationCommentReplied); got != 1 {
+		t.Errorf("COMMENT_REPLIED untuk penulis induk = %d, diharapkan 1", got)
+	}
+	if got := countNotifications(t, contributor.ID, service.NotificationCommentReplied); got != 0 {
+		t.Errorf("COMMENT_REPLIED untuk pembalas = %d, diharapkan 0", got)
+	}
+
+	// Tujuan navigasinya entitas yang dikomentari, bukan komentarnya.
+	var entityType, entityID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT entity_type, entity_id::text FROM notifications
+		 WHERE user_id = $1 AND type = $2`,
+		manager.ID, service.NotificationCommentReplied).Scan(&entityType, &entityID); err != nil {
+		t.Fatalf("baca baris notifikasi: %v", err)
+	}
+	if entityType != model.CommentEntityProject || entityID != projectID.String() {
+		t.Errorf("tujuan = %s/%s, diharapkan %s/%s", entityType, entityID, model.CommentEntityProject, projectID)
+	}
+
+	// Balasan atas komentar sendiri tidak berbunyi.
+	selfInput := commentInput(model.CommentEntityProject, projectID, "balas diri")
+	selfInput.ParentID = &parent.ID
+	if _, err := fixture.comments.Create(ctx, actorOf(manager), selfInput); err != nil {
+		t.Fatalf("buat balasan diri: %v", err)
+	}
+	if got := countNotifications(t, manager.ID, service.NotificationCommentReplied); got != 1 {
+		t.Errorf("COMMENT_REPLIED setelah balas diri = %d, diharapkan tetap 1", got)
+	}
+}
